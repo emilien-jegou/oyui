@@ -290,13 +290,10 @@ fn glob_parts(pat: &[&str], s: &[&str]) -> bool {
             }
             false
         }
-        (Some(p), Some(seg)) => {
-            if segment_match(p, seg) {
+        (Some(p), Some(seg))
+            if segment_match(p, seg) => {
                 glob_parts(&pat[1..], &s[1..])
-            } else {
-                false
             }
-        }
         _ => false,
     }
 }

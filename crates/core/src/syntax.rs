@@ -1,4 +1,3 @@
-use ratatui::style::Color as TuiColor;
 use std::sync::Arc;
 use syntect::highlighting::{Theme, ThemeSet};
 use syntect::parsing::SyntaxSet;
@@ -6,6 +5,12 @@ use syntect::parsing::SyntaxSet;
 pub struct SyntaxEngine {
     pub syntax_set: Arc<SyntaxSet>,
     pub theme: Arc<Theme>,
+}
+
+impl Default for SyntaxEngine {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SyntaxEngine {

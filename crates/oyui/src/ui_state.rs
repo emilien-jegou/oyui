@@ -19,7 +19,7 @@ impl TreeUiState {
     }
 
     pub fn is_folded(&self, path: &PathBuf) -> bool {
-        self.nodes.get(path).map_or(false, |s| s.is_folded)
+        self.nodes.get(path).is_some_and(|s| s.is_folded)
     }
 
     pub fn toggle_folded(&mut self, path: &PathBuf) {
