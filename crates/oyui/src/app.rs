@@ -1,7 +1,7 @@
 use crate::ui_state::TreeUiState;
 use crate::view::{build_flat_list, TreeRow};
 use core_lib::diff_cache::DiffCache;
-use core_lib::tree::{FileTree, StagingState, TreeNode};
+use core_lib::tree::{self, FileTree, StagingState, TreeNode};
 use core_lib::worker::{AsyncWorkerEvent, WorkerRequest};
 use crossbeam_channel::{Receiver, Sender};
 use ratatui::widgets::ListState;
@@ -71,6 +71,43 @@ impl App {
         }
     }
 
+    pub fn get_diff_summary(&self) -> (usize, usize, usize) {
+        let (mut a, mut d, mut m) = (0, 0, 0);
+        self.count_recursive(&self.tree.nodes, &mut a, &mut d, &mut m);
+        (a, d, m)
+    }
+
+    fn count_recursive(
+        &self,
+        nodes: &[tree::TreeNode],
+        a: &mut usize,
+        d: &mut usize,
+        m: &mut usize,
+    ) {
+        for node in nodes {
+            match node {
+                tree::TreeNode::File(f) => {
+                    if f.left_path.is_none() {
+                        *a += 1;
+                    } else if f.right_path.is_none() {
+                        *d += 1;
+                    } else {
+                        *m += 1;
+                    }
+                }
+                tree::TreeNode::Directory(dir) => {
+                    self.count_recursive(&dir.children, a, d, m)
+                }
+            }
+        }
+    }
+
+    pub fn invert_selection(&mut self) {
+        for node in &mut self.tree.nodes {
+            node.invert_state_recursive();
+        }
+    }
+
     pub fn confirm_and_write_merge(&mut self) -> Result<ExitAction, Box<dyn Error>> {
         let has_staged_changes = self.is_anything_staged(&self.tree.nodes);
 
@@ -78,6 +115,10 @@ impl App {
             return Ok(ExitAction::QuitWithReason(
                 "No changes staged. Aborting merge.".into(),
             ));
+        }
+
+        for node in &mut self.tree.nodes {
+            node.invert_state_recursive();
         }
 
         self.apply_tree_changes(&self.tree.nodes.clone())?;
@@ -213,9 +254,15 @@ impl App {
         false
     }
 
-    /// Handle a completed command string like "add ./src" or "u ./**/*.tsx"
     pub fn execute_command(&mut self, cmd: &str) {
         let cmd = cmd.trim();
+
+        // Check for "invert" command first
+        if cmd == "invert" || cmd == "i" {
+            self.invert_selection();
+            return;
+        }
+
         let (verb, pattern) =
             if let Some(rest) = cmd.strip_prefix("add ").or(cmd.strip_prefix("a ")) {
                 (StagingState::Staged, rest)
@@ -225,7 +272,7 @@ impl App {
                 return;
             };
 
-        // Collect matching paths first to avoid borrow issues
+        // Collect matching paths...
         let rows = self.flat_rows();
         let matching: Vec<PathBuf> = rows
             .iter()
@@ -290,10 +337,7 @@ fn glob_parts(pat: &[&str], s: &[&str]) -> bool {
             }
             false
         }
-        (Some(p), Some(seg))
-            if segment_match(p, seg) => {
-                glob_parts(&pat[1..], &s[1..])
-            }
+        (Some(p), Some(seg)) if segment_match(p, seg) => glob_parts(&pat[1..], &s[1..]),
         _ => false,
     }
 }
