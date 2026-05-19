@@ -148,7 +148,7 @@ fn render_tree_row(row: &TreeRow) -> ListItem<'_> {
 }
 
 fn get_file_icon(name: &str) -> (&'static str, Color) {
-    let ext = name.split('.').last().unwrap_or("");
+    let ext = name.split('.').next_back().unwrap_or("");
     match ext {
         "tsx" | "jsx" => ("", Color::Rgb(80, 200, 255)),
         "ts" | "js" => ("", Color::Rgb(240, 220, 80)),

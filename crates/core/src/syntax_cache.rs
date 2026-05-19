@@ -26,7 +26,7 @@ impl LazySyntaxCache {
 
     /// Highlights a specific line using the nearest preceding checkpoint.
     pub fn highlight_line(&mut self, line_idx: usize) -> Vec<syntect::highlighting::Style> {
-        let checkpoint_idx = line_idx / self.stride;
+        let _checkpoint_idx = line_idx / self.stride;
         // In a full implementation, you would retrieve state from self.checkpoints
         // and iterate forward from (checkpoint_idx * stride) to line_idx.
         vec![] // Placeholder
