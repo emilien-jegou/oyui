@@ -1,9 +1,9 @@
-use std::path::PathBuf;
-use core_lib::diff_cache::{DiffCache, DiffStats};
-use core_lib::tree::{FileTree, TreeNode, StagingState};
 use crate::ui_state::TreeUiState;
+use core_lib::diff_cache::{DiffCache, DiffStats};
+use core_lib::tree::{FileTree, StagingState, TreeNode};
+use std::path::PathBuf;
 
-/// A flat, render-ready row. 
+/// A flat, render-ready row.
 /// Created fresh each frame from the tree structure and current UI state.
 #[derive(Debug, Clone)]
 pub struct TreeRow {
@@ -13,7 +13,7 @@ pub struct TreeRow {
     pub is_dir: bool,
     pub is_folded: bool,
     pub is_last: bool,
-    /// A list of booleans representing whether an ancestor at that depth 
+    /// A list of booleans representing whether an ancestor at that depth
     /// has more siblings, used to draw the vertical "│" lines.
     pub parent_continuations: Vec<bool>,
     pub staging_state: StagingState,
@@ -23,15 +23,12 @@ pub struct TreeRow {
 }
 
 /// Entry point to convert the recursive Tree into a flat list for the TUI widgets.
-pub fn build_flat_list(
-    tree: &FileTree,
-    ui_state: &TreeUiState,
-    cache: &DiffCache,
-) -> Vec<TreeRow> {
+pub fn build_flat_list(tree: &FileTree, ui_state: &TreeUiState, cache: &DiffCache) -> Vec<TreeRow> {
     let mut rows = Vec::new();
 
     // First, filter out the nodes that have no modifications or descendants with modifications
-    let visible_nodes: Vec<&TreeNode> = tree.nodes
+    let visible_nodes: Vec<&TreeNode> = tree
+        .nodes
         .iter()
         .filter(|node| should_show_node(node, cache))
         .collect();
@@ -42,6 +39,19 @@ pub fn build_flat_list(
         flatten_recursive(node, 0, is_last, &Vec::new(), ui_state, cache, &mut rows);
     }
     rows
+}
+
+use ratatui::style::{Color, Modifier, Style};
+
+pub fn get_status_style(status: &str) -> Style {
+    match status {
+        "A" => Style::default()
+            .fg(Color::Green)
+            .add_modifier(Modifier::BOLD),
+        "M" => Style::default().fg(Color::Yellow),
+        "D" => Style::default().fg(Color::Red),
+        _ => Style::default().fg(Color::Gray),
+    }
 }
 
 /// The core recursion logic for flattening the tree into a list.
@@ -100,12 +110,13 @@ fn flatten_recursive(
 
             if !folded {
                 // Determine which children are actually visible
-                let visible_children: Vec<&TreeNode> = dir.children
+                let visible_children: Vec<&TreeNode> = dir
+                    .children
                     .iter()
                     .filter(|child| should_show_node(child, cache))
                     .collect();
 
-                // To draw vertical lines for descendants, we need to know if 
+                // To draw vertical lines for descendants, we need to know if
                 // the current folder level has a sibling further down.
                 let mut child_continuations = parent_continuations.to_vec();
                 child_continuations.push(!is_last);
@@ -146,7 +157,9 @@ fn should_show_node(node: &TreeNode, cache: &DiffCache) -> bool {
         }
         TreeNode::Directory(d) => {
             // Directories are visible if ANY of their children are visible
-            d.children.iter().any(|child| should_show_node(child, cache))
+            d.children
+                .iter()
+                .any(|child| should_show_node(child, cache))
         }
     }
 }

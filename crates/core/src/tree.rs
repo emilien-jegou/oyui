@@ -82,7 +82,12 @@ impl FileTree {
                         continue;
                     }
 
-                    tree.insert_file(rel_path_buf.clone(), left_path.clone(), right_path.clone());
+                    tree.insert_file(
+                        rel_path_buf.clone(),
+                        // TODO: This may need to be NONE since we can't see added sign.
+                        Some(left_path.clone()),
+                        Some(right_path.clone()),
+                    );
                     files_to_stat.push((rel_path_buf, left_path, right_path));
                 }
             }
@@ -96,10 +101,13 @@ impl FileTree {
                     let right_path = right_dir.join(rel_path);
                     if !right_path.exists() {
                         let rel_path_buf = rel_path.to_path_buf();
+                        // TODO: Last option could be set to None to show deleted sign but it breaks
+                        // preview... yet preview is bugged on deletion anyway :(
+                        //tree.insert_file(rel_path_buf.clone(), Some(left_path.clone()), None);
                         tree.insert_file(
                             rel_path_buf.clone(),
-                            left_path.clone(),
-                            right_path.clone(),
+                            Some(left_path.clone()),
+                            Some(right_path.clone()),
                         );
                         files_to_stat.push((rel_path_buf, left_path, right_path));
                     }
@@ -111,7 +119,13 @@ impl FileTree {
     }
 
     /// Recursively build the intermediate folders and insert the file.
-    pub fn insert_file(&mut self, rel_path: PathBuf, left_path: PathBuf, right_path: PathBuf) {
+    ///
+    pub fn insert_file(
+        &mut self,
+        rel_path: PathBuf,
+        left_path: Option<PathBuf>,
+        right_path: Option<PathBuf>,
+    ) {
         let components: Vec<_> = rel_path
             .iter()
             .map(|c| c.to_string_lossy().into_owned())
@@ -128,10 +142,10 @@ impl FileTree {
                 current_nodes.push(TreeNode::File(TreeNodeFile {
                     name,
                     path: current_path.clone(),
-                    left_path: Some(left_path.clone()),
-                    right_path: Some(right_path.clone()),
+                    left_path: left_path.clone(), // Use the passed Options
+                    right_path: right_path.clone(),
                     state: StagingState::Unstaged,
-                }));
+                }))
             } else {
                 let pos = current_nodes.iter().position(|n| match n {
                     TreeNode::Directory(d) => d.name == name,
@@ -158,12 +172,28 @@ impl FileTree {
     }
 }
 
-// ... Keep existing impl TreeNode methods (path, set_state_recursive, compute_staging_state) ...
 impl TreeNode {
     pub fn path(&self) -> &PathBuf {
         match self {
             TreeNode::File(f) => &f.path,
             TreeNode::Directory(d) => &d.path,
+        }
+    }
+
+    pub fn invert_state_recursive(&mut self) {
+        match self {
+            TreeNode::File(f) => {
+                f.state = match f.state {
+                    StagingState::Staged => StagingState::Unstaged,
+                    StagingState::Unstaged => StagingState::Staged,
+                    StagingState::PartiallyStaged => StagingState::PartiallyStaged,
+                };
+            }
+            TreeNode::Directory(d) => {
+                for child in &mut d.children {
+                    child.invert_state_recursive();
+                }
+            }
         }
     }
 

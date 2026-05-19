@@ -1,5 +1,6 @@
 use crate::app::{App, CommandMode, ViewMode};
 use crate::view::TreeRow;
+use core_lib::lazy;
 use core_lib::tree::StagingState;
 use ratatui::style::Stylize;
 use ratatui::widgets::{Borders, Clear};
@@ -25,6 +26,15 @@ const CLR_ADD_BG: Color = Color::Rgb(30, 45, 30); // Green tint
 const CLR_DEL_BG: Color = Color::Rgb(45, 30, 30); // Red tint
 const CLR_ADD_FG: Color = Color::Rgb(150, 255, 150);
 const CLR_DEL_FG: Color = Color::Rgb(255, 150, 150);
+
+fn get_status_color(status: char) -> Color {
+    match status {
+        'A' => Color::Green,
+        'M' => Color::Yellow,
+        'D' => Color::Red,
+        _ => Color::Gray,
+    }
+}
 
 fn get_line_style(is_add: bool, is_del: bool) -> Style {
     if is_add {
@@ -66,16 +76,62 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 
 fn draw_tree_view(frame: &mut Frame, app: &App) {
     let area = frame.area();
-    let [body, hint_area, cmd_area] = Layout::vertical([
-        Constraint::Min(0),
-        Constraint::Length(1),
-        Constraint::Length(1),
+    let [header, body, hint_area, cmd_area] = Layout::vertical([
+        Constraint::Length(1), // Header
+        Constraint::Min(0),    // Tree
+        Constraint::Length(1), // Hint
+        Constraint::Length(1), // Command
     ])
     .areas(area);
 
+    draw_header(frame, header, app); // Helper defined below
     draw_tree_body(frame, app, body);
     draw_hint_bar(frame, hint_area, &app.command_mode);
     draw_command_bar(frame, cmd_area, &app.command_mode);
+}
+
+fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
+    let (a, d, m) = app.get_diff_summary();
+    let (tot_ins, tot_del) = app.cache.stats.values().fold((0, 0), |acc, s| {
+        if let lazy::Lazy::Ready(s) = s {
+            (acc.0 + s.insertions, acc.1 + s.deletions)
+        } else {
+            acc
+        }
+    });
+
+    // Path segment
+    let path = app
+        .base_path
+        .as_ref()
+        .map(|p| p.to_string_lossy())
+        .unwrap_or_else(|| ".".into());
+
+    let left_spans = vec![
+        Span::styled(
+            format!(" {} ", path),
+            Style::default().bg(Color::Rgb(40, 40, 50)).fg(CLR_FG),
+        ),
+        Span::raw("  "),
+        Span::styled(format!("{}A ", a), Style::default().fg(CLR_ADD_FG)),
+        Span::styled(format!("{}D ", d), Style::default().fg(CLR_DEL_FG)),
+        Span::styled(format!("{}M ", m), Style::default().fg(Color::Yellow)),
+    ];
+
+    let right_spans = vec![
+        Span::styled(format!("+{} ", tot_ins), Style::default().fg(CLR_ADD_FG)),
+        Span::styled(format!("-{} ", tot_del), Style::default().fg(CLR_DEL_FG)),
+    ];
+
+    let chunks = Layout::horizontal([Constraint::Min(0), Constraint::Length(20)]).split(area);
+
+    frame.render_widget(Paragraph::new(Line::from(left_spans)).bg(CLR_BG), chunks[0]);
+    frame.render_widget(
+        Paragraph::new(Line::from(right_spans))
+            .alignment(ratatui::layout::Alignment::Right)
+            .bg(CLR_BG),
+        chunks[1],
+    );
 }
 
 fn draw_tree_body(frame: &mut Frame, app: &App, area: Rect) {
@@ -95,21 +151,21 @@ fn draw_tree_body(frame: &mut Frame, app: &App, area: Rect) {
 fn render_tree_row(row: &TreeRow) -> ListItem<'_> {
     let mut spans = Vec::new();
 
-    // 1. Draw connecting lines
+    // 1. Connector lines
     for &has_sibling in &row.parent_continuations {
-        if has_sibling {
-            spans.push(Span::styled("│  ", Style::default().fg(CLR_DIM)));
-        } else {
-            spans.push(Span::raw("   "));
-        }
+        spans.push(Span::styled(
+            if has_sibling { "│  " } else { "   " },
+            Style::default().fg(CLR_DIM),
+        ));
     }
-
-    let connector = if row.is_last {
-        "└── "
-    } else {
-        "├── "
-    };
-    spans.push(Span::styled(connector, Style::default().fg(CLR_DIM)));
+    spans.push(Span::styled(
+        if row.is_last {
+            "└── "
+        } else {
+            "├── "
+        },
+        Style::default().fg(CLR_DIM),
+    ));
 
     // 2. Staging Indicator
     let (stage_sym, stage_color) = match row.staging_state {
@@ -120,14 +176,28 @@ fn render_tree_row(row: &TreeRow) -> ListItem<'_> {
     spans.push(Span::styled(stage_sym, Style::default().fg(stage_color)));
     spans.push(Span::raw(" "));
 
-    // 3. Icons and Name
+    // 3. Status Hint (Only for files)
+    if !row.is_dir {
+        let status_hint = if row.left_path.is_none() {
+            Span::styled("A ", Style::default().fg(CLR_ADD_FG)) // ADDED
+        } else if row.right_path.is_none() {
+            Span::styled("D ", Style::default().fg(CLR_DEL_FG)) // DELETED
+        } else {
+            Span::raw("") // MODIFIED (implied)
+        };
+        spans.push(status_hint);
+    } else {
+        spans.push(Span::raw("")); // Alignment for directories
+    }
+
+    // 4. Icons and Name
     if row.is_dir {
         let arrow = if row.is_folded { "▸ " } else { "▾ " };
         spans.push(Span::styled(arrow, Style::default().fg(CLR_FG)));
         spans.push(Span::styled(" ", Style::default().fg(CLR_DIR)));
         spans.push(Span::styled(
             row.name.as_str(),
-            Style::default().fg(CLR_DIR).add_modifier(Modifier::BOLD),
+            Style::default().fg(CLR_DIR).bold(),
         ));
     } else {
         let icon = get_file_icon(&row.name);
@@ -136,11 +206,16 @@ fn render_tree_row(row: &TreeRow) -> ListItem<'_> {
         spans.push(Span::styled(row.name.as_str(), Style::default().fg(CLR_FG)));
     }
 
-    // 4. Stats
+    // 5. Line Stats
     if let Some(s) = &row.stats {
+        spans.push(Span::raw("  "));
         spans.push(Span::styled(
-            format!("  +{} -{}", s.insertions, s.deletions),
-            Style::default().fg(CLR_DIM),
+            format!("+{} ", s.insertions),
+            Style::default().fg(CLR_ADD_FG),
+        ));
+        spans.push(Span::styled(
+            format!("-{} ", s.deletions),
+            Style::default().fg(CLR_DEL_FG),
         ));
     }
 

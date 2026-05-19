@@ -79,6 +79,9 @@ fn handle_normal_input(app: &mut App, key: KeyEvent) -> ExitAction {
         // Stage / unstage
         KeyCode::Char(' ') => app.toggle_stage_selected(),
 
+        // Add this line to invert selection
+        KeyCode::Char('i') => app.invert_selection(),
+
         // Enter command mode
         KeyCode::Char(':') => {
             app.command_mode = CommandMode::Active(String::new());

@@ -50,47 +50,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.output_path = opts.output.clone();
 
     // ── Build tree based on mode ─────────────────────────────────────────────
-    if opts.diff {
-        if is_dir_empty(&opts.left) || is_dir_empty(&opts.right) {
-            eprintln!("One of the target directories is empty. Aborting split.");
-            std::process::exit(2);
-        }
+    if is_dir_empty(&opts.left) || is_dir_empty(&opts.right) {
+        eprintln!("One of the target directories is empty. Aborting split.");
+        std::process::exit(2);
+    }
 
-        let (tree, files_to_stat) = FileTree::build_from_dir_diff(&opts.left, &opts.right);
+    let (tree, files_to_stat) = FileTree::build_from_dir_diff(&opts.left, &opts.right);
 
-        if tree.nodes.is_empty() {
-            eprintln!("No modifications found between directories. Nothing to split.");
-            std::process::exit(2);
-        }
+    if tree.nodes.is_empty() {
+        eprintln!("No modifications found between directories. Nothing to split.");
+        std::process::exit(2);
+    }
 
-        app.tree = tree;
+    app.tree = tree;
 
-        // Queue background diff stats for all discovered files
-        for (rel_path, left, right) in files_to_stat {
-            let _ = req_tx.send(core_lib::worker::WorkerRequest::ComputeStats {
-                node_path: rel_path,
-                left_path: left,
-                right_path: right,
-            });
-        }
-    } else {
-        // SINGLE FILE MODE: Just insert the pair provided via CLI
-        let file_name = opts
-            .right
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| opts.right.to_string_lossy().to_string());
-
-        let display_path = PathBuf::from(&file_name);
-
-        app.tree
-            .insert_file(display_path.clone(), opts.left.clone(), opts.right.clone());
-
-        // Immediate stats request
+    // Queue background diff stats for all discovered files
+    for (rel_path, left, right) in files_to_stat {
         let _ = req_tx.send(core_lib::worker::WorkerRequest::ComputeStats {
-            node_path: display_path,
-            left_path: opts.left.clone(),
-            right_path: opts.right.clone(),
+            node_path: rel_path,
+            left_path: left,
+            right_path: right,
         });
     }
 
