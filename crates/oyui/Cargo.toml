@@ -1,0 +1,14 @@
+[package]
+name = "oyui"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+core_lib = { path = "../core" }
+crossbeam-channel = { workspace = true }
+tokio = { workspace = true }
+ratatui = { workspace = true }
+crossterm = { workspace = true }
+syntect = { workspace = true }
+clap = { version = "4.0", features = ["derive"] }

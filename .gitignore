@@ -1,0 +1,24 @@
+*
+!.envrc
+!.gitignore
+!Cargo.lock
+!Cargo.toml
+!README.md
+!shell.nix
+
+!crates/
+
+!crates/core/
+!crates/core/src/
+!crates/core/src/**/*
+
+!crates/oyui/
+!crates/oyui/src/
+!crates/oyui/src/**/*
+
+!docs/
+!docs/**/*
+
+# To fix:
+#!flake.nix
+#!flake.lock
