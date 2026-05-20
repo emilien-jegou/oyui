@@ -5,3 +5,4 @@ pub mod tree;
 pub mod worker;
 pub mod syntax;
 pub mod syntax_cache;
+pub mod cache_map;

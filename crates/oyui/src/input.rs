@@ -1,27 +1,20 @@
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::error::Error;
 
-use crate::app::{App, CommandMode, ExitAction, ViewMode};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crate::app::{commands, App, CommandMode, ExitAction};
+use crate::view::{ViewAction, ViewKind};
+use core_lib::worker::WorkerRequest;
 
-/// Returns true if the app should quit
 pub fn handle_key(app: &mut App, key: KeyEvent) -> Result<ExitAction, Box<dyn Error>> {
     match &app.command_mode {
         CommandMode::Active(_) => Ok(handle_command_input(app, key)),
-        CommandMode::Normal => Ok(handle_normal_input(app, key)),
         CommandMode::ConfirmMerge => {
             match key.code {
                 KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     return Ok(ExitAction::QuitWithAbort)
                 }
-                KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    let exit_action = app.confirm_and_write_merge()?;
-                    if exit_action != ExitAction::KeepRunning {
-                        return Ok(exit_action);
-                    }
-                    return Ok(ExitAction::QuitAndMerge);
-                }
                 KeyCode::Enter => {
-                    let _ = app.confirm_and_write_merge();
+                    let _ = app.confirm_merge();
                     return Ok(ExitAction::QuitAndMerge);
                 }
                 KeyCode::Char('q') | KeyCode::Esc => {
@@ -34,62 +27,63 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Result<ExitAction, Box<dyn Er
             };
             Ok(ExitAction::KeepRunning)
         }
+        CommandMode::Normal => {
+            let action = app.view.handle_input(key, &app.tree, &app.cache);
+            Ok(handle_view_action(app, action))
+        }
     }
 }
 
-fn handle_normal_input(app: &mut App, key: KeyEvent) -> ExitAction {
-    match key.code {
-        // Quit
-        KeyCode::Char('q') => return ExitAction::QuitWithAbort,
-        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            return ExitAction::QuitWithAbort;
-        }
-
-        // Navigation
-        KeyCode::Char('j') | KeyCode::Down => app.move_down(),
-        KeyCode::Char('k') | KeyCode::Up => app.move_up(),
-
-        // Expand/collapse directory
-        KeyCode::Char('l') | KeyCode::Right => {
-            if let Some(row) = app.selected_row() {
-                if row.is_dir {
-                    app.set_folded(false);
-                } else {
-                    app.open_file_view();
-                }
-            }
-        }
-        KeyCode::Char('h') | KeyCode::Left => {
-            if let Some(row) = app.selected_row() {
-                if row.is_dir {
-                    app.set_folded(true);
-                }
-            }
-        }
-
-        KeyCode::Enter => {
-            app.command_mode = CommandMode::ConfirmMerge;
-        }
-        KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            app.command_mode = CommandMode::ConfirmMerge;
-        }
-
-        KeyCode::Esc => app.command_mode = CommandMode::Normal,
-
-        // Stage / unstage
-        KeyCode::Char(' ') => app.toggle_stage_selected(),
-
-        // Add this line to invert selection
-        KeyCode::Char('i') => app.invert_selection(),
-
-        // Enter command mode
-        KeyCode::Char(':') => {
+fn handle_view_action(app: &mut App, action: ViewAction) -> ExitAction {
+    match action {
+        ViewAction::None => ExitAction::KeepRunning,
+        ViewAction::QuitWithAbort => ExitAction::QuitWithAbort,
+        ViewAction::OpenCommandMode => {
             app.command_mode = CommandMode::Active(String::new());
+            ExitAction::KeepRunning
         }
+        ViewAction::ConfirmMerge => {
+            app.command_mode = CommandMode::ConfirmMerge;
+            ExitAction::KeepRunning
+        }
+        ViewAction::ToggleStageSelected => {
+            if let Some(row) = app.view.tree_view.selected_row(&app.tree, &app.cache) {
+                let new_state = row.staging_state.toggle();
+                commands::set_state_for_path(&mut app.tree, &row.path, new_state);
+            }
+            ExitAction::KeepRunning
+        }
+        ViewAction::InvertSelection => {
+            for node in &mut app.tree.nodes {
+                node.invert_state_recursive();
+            }
+            ExitAction::KeepRunning
+        }
+        ViewAction::OpenFileView {
+            path,
+            left_path,
+            right_path,
+        } => {
+            app.view.current = ViewKind::File;
+            app.view.file_view.current_path = Some(path.clone());
 
-        _ => {}
+            if let (Some(left), Some(right)) = (left_path, right_path) {
+                if matches!(app.cache.diffs.get(&path), core_lib::lazy::Lazy::Unstarted) {
+                    app.cache.diffs.mark_started(path.clone());
+                    let _ = app.worker_tx.send(WorkerRequest::ComputeFullDiff {
+                        node_path: path.clone(),
+                        left_path: left,
+                        right_path: right,
+                    });
+                }
+            }
+            ExitAction::KeepRunning
+        }
+        ViewAction::CloseFileView => {
+            app.view.current = ViewKind::Tree;
+            ExitAction::KeepRunning
+        }
     }
-    ExitAction::KeepRunning
 }
 
 fn handle_command_input(app: &mut App, key: KeyEvent) -> ExitAction {
@@ -116,29 +110,6 @@ fn handle_command_input(app: &mut App, key: KeyEvent) -> ExitAction {
         KeyCode::Char(c) => {
             if let CommandMode::Active(ref mut buf) = app.command_mode {
                 buf.push(c);
-            }
-        }
-        _ => {}
-    }
-    ExitAction::KeepRunning
-}
-
-/// Handle ESC in file view — return to tree
-pub fn handle_file_view_key(app: &mut App, key: KeyEvent) -> ExitAction {
-    match key.code {
-        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            return ExitAction::QuitWithAbort;
-        }
-        KeyCode::Char('q') => return ExitAction::QuitWithAbort,
-        KeyCode::Esc | KeyCode::Char('h') => app.view_mode = ViewMode::Tree,
-        KeyCode::Char('j') | KeyCode::Down => {
-            let i = app.file_scroll_state.selected().unwrap_or(0);
-            app.file_scroll_state.select(Some(i + 1));
-        }
-        KeyCode::Char('k') | KeyCode::Up => {
-            let i = app.file_scroll_state.selected().unwrap_or(0);
-            if i > 0 {
-                app.file_scroll_state.select(Some(i - 1));
             }
         }
         _ => {}

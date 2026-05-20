@@ -55,13 +55,11 @@ impl FileTree {
 
     pub fn is_empty(&self) -> bool {
         self.nodes.iter().all(|node| match node {
-            TreeNode::File(_) => false, // If there's a node, it survived the filter
+            TreeNode::File(_) => false,
             TreeNode::Directory(d) => d.children.is_empty(),
         })
     }
 
-    /// Walk two directories and construct a comparative tree.
-    /// Returns the populated FileTree and a flat list of items to compute stats for.
     pub fn build_from_dir_diff(
         left_dir: &Path,
         right_dir: &Path,
@@ -77,17 +75,24 @@ impl FileTree {
                     let left_path = left_dir.join(rel_path);
                     let rel_path_buf = rel_path.to_path_buf();
 
-                    // SKIP if files are identical
-                    if left_path.exists() && files_are_identical(&left_path, &right_path) {
-                        continue;
+                    if left_path.exists() {
+                        if files_are_identical(&left_path, &right_path) {
+                            continue;
+                        }
+                        tree.insert_file(
+                            rel_path_buf.clone(),
+                            Some(left_path.clone()),
+                            Some(right_path.clone()),
+                        );
+                    } else {
+                        // Added file: Pass None for left_path
+                        tree.insert_file(
+                            rel_path_buf.clone(),
+                            None,
+                            Some(right_path.clone()),
+                        );
                     }
-
-                    tree.insert_file(
-                        rel_path_buf.clone(),
-                        // TODO: This may need to be NONE since we can't see added sign.
-                        Some(left_path.clone()),
-                        Some(right_path.clone()),
-                    );
+                    
                     files_to_stat.push((rel_path_buf, left_path, right_path));
                 }
             }
@@ -101,13 +106,11 @@ impl FileTree {
                     let right_path = right_dir.join(rel_path);
                     if !right_path.exists() {
                         let rel_path_buf = rel_path.to_path_buf();
-                        // TODO: Last option could be set to None to show deleted sign but it breaks
-                        // preview... yet preview is bugged on deletion anyway :(
-                        //tree.insert_file(rel_path_buf.clone(), Some(left_path.clone()), None);
+                        // Deleted file: Pass None for right_path
                         tree.insert_file(
                             rel_path_buf.clone(),
                             Some(left_path.clone()),
-                            Some(right_path.clone()),
+                            None,
                         );
                         files_to_stat.push((rel_path_buf, left_path, right_path));
                     }
@@ -118,8 +121,6 @@ impl FileTree {
         (tree, files_to_stat)
     }
 
-    /// Recursively build the intermediate folders and insert the file.
-    ///
     pub fn insert_file(
         &mut self,
         rel_path: PathBuf,
@@ -142,7 +143,7 @@ impl FileTree {
                 current_nodes.push(TreeNode::File(TreeNodeFile {
                     name,
                     path: current_path.clone(),
-                    left_path: left_path.clone(), // Use the passed Options
+                    left_path: left_path.clone(),
                     right_path: right_path.clone(),
                     state: StagingState::Unstaged,
                 }))
@@ -239,7 +240,6 @@ impl TreeNode {
     }
 }
 
-/// Quick check to see if two files are bit-for-bit identical without computing a full diff.
 fn files_are_identical(path_a: &Path, path_b: &Path) -> bool {
     let meta_a = match fs::metadata(path_a) {
         Ok(m) => m,
@@ -250,12 +250,10 @@ fn files_are_identical(path_a: &Path, path_b: &Path) -> bool {
         Err(_) => return false,
     };
 
-    // If sizes differ, they cannot be identical
     if meta_a.len() != meta_b.len() {
         return false;
     }
 
-    // Byte-by-byte comparison for files of the same size
     let f1 = match fs::File::open(path_a) {
         Ok(f) => f,
         Err(_) => return false,
@@ -275,7 +273,7 @@ fn files_are_identical(path_a: &Path, path_b: &Path) -> bool {
                     return false;
                 }
             }
-            (None, None) => return true, // Reached end of both files
+            (None, None) => return true,
             _ => return false,
         }
     }

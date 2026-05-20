@@ -14,8 +14,13 @@ A merge tool editor for jujutsu and git.
 ```
 - Themed diff
 ![Redesign screenshot](./docs/screen1.png)
-- Notably missing: in-file hunk split (**WIP**)
 
+
+### Known limitations
+
+- In-file hunk split (to get back partial file)
+- Conflict diff
+- Three-way split
 
 ## Installation via flakes
 
