@@ -46,9 +46,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut app = App::new(req_tx.clone(), ev_rx);
 
-    // Store base/output for merge scenarios
     app.base_path = opts.base.clone();
-    app.output_path = opts.output.clone();
 
     // ── Build tree based on mode ─────────────────────────────────────────────
     if is_dir_empty(&opts.left) || is_dir_empty(&opts.right) {

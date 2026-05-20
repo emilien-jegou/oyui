@@ -26,7 +26,6 @@ pub struct App {
     pub left_path: Option<PathBuf>,
     pub right_path: Option<PathBuf>,
     pub base_path: Option<PathBuf>,
-    pub output_path: Option<PathBuf>,
 }
 
 impl App {
@@ -43,7 +42,6 @@ impl App {
             left_path: None,
             right_path: None,
             base_path: None,
-            output_path: None,
         }
     }
 
