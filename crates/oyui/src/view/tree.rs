@@ -84,14 +84,26 @@ impl TreeViewData {
 
         match (key.code, is_ctrl) {
             (KeyCode::Char('c'), true) => action = ViewAction::QuitWithAbort,
-            (KeyCode::Char('j'), true) => self.selected_index = (self.selected_index + 5).min(max_idx),
-            (KeyCode::Char('k'), true) => self.selected_index = self.selected_index.saturating_sub(5),
-            (KeyCode::Char('d'), true) => self.selected_index = (self.selected_index + 20).min(max_idx),
-            (KeyCode::Char('u'), true) => self.selected_index = self.selected_index.saturating_sub(20),
+            (KeyCode::Char('j'), true) => {
+                self.selected_index = (self.selected_index + 5).min(max_idx)
+            }
+            (KeyCode::Char('k'), true) => {
+                self.selected_index = self.selected_index.saturating_sub(5)
+            }
+            (KeyCode::Char('d'), true) => {
+                self.selected_index = (self.selected_index + 20).min(max_idx)
+            }
+            (KeyCode::Char('u'), true) => {
+                self.selected_index = self.selected_index.saturating_sub(20)
+            }
 
             (KeyCode::Char('q'), false) => action = ViewAction::QuitWithAbort,
-            (KeyCode::Char('j'), false) | (KeyCode::Down, _) => self.selected_index = (self.selected_index + 1).min(max_idx),
-            (KeyCode::Char('k'), false) | (KeyCode::Up, _) => self.selected_index = self.selected_index.saturating_sub(1),
+            (KeyCode::Char('j'), false) | (KeyCode::Down, _) => {
+                self.selected_index = (self.selected_index + 1).min(max_idx)
+            }
+            (KeyCode::Char('k'), false) | (KeyCode::Up, _) => {
+                self.selected_index = self.selected_index.saturating_sub(1)
+            }
 
             (KeyCode::Char('G'), false) => self.selected_index = max_idx,
             (KeyCode::Char('g'), false) => {
@@ -150,7 +162,8 @@ impl TreeViewData {
         base_path: Option<&PathBuf>,
         diff_summary: (usize, usize, usize),
     ) {
-        let [header, body] = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(area);
+        let [header, body] =
+            Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(area);
         self.draw_header(frame, header, cache, base_path, diff_summary);
         self.draw_tree_body(frame, body, tree, cache);
     }
@@ -177,7 +190,10 @@ impl TreeViewData {
             .unwrap_or_else(|| ".".into());
 
         let left_spans = vec![
-            Span::styled(format!(" {} ", path), Style::default().bg(Color::Rgb(40, 40, 50)).fg(CLR_FG)),
+            Span::styled(
+                format!(" {} ", path),
+                Style::default().bg(Color::Rgb(40, 40, 50)).fg(CLR_FG),
+            ),
             Span::raw("  "),
             Span::styled(format!("{}A ", a), Style::default().fg(CLR_ADD_FG)),
             Span::styled(format!("{}D ", d), Style::default().fg(CLR_DEL_FG)),
@@ -191,7 +207,12 @@ impl TreeViewData {
 
         let chunks = Layout::horizontal([Constraint::Min(0), Constraint::Length(20)]).split(area);
         frame.render_widget(Paragraph::new(Line::from(left_spans)).bg(CLR_BG), chunks[0]);
-        frame.render_widget(Paragraph::new(Line::from(right_spans)).alignment(ratatui::layout::Alignment::Right).bg(CLR_BG), chunks[1]);
+        frame.render_widget(
+            Paragraph::new(Line::from(right_spans))
+                .alignment(ratatui::layout::Alignment::Right)
+                .bg(CLR_BG),
+            chunks[1],
+        );
     }
 
     fn draw_tree_body(
@@ -211,6 +232,28 @@ impl TreeViewData {
             .highlight_style(Style::default().bg(CLR_CURSOR_BG));
 
         frame.render_stateful_widget(list, area, &mut list_state);
+    }
+}
+
+fn get_diff_color(value: usize, is_addition: bool) -> Color {
+    // Normalize to 0.0 - 1.0
+    let t = (value as f64 / 100.0).min(1.0);
+
+    // Square root curve: steep at the beginning, flattens out later.
+    let factor = t.sqrt();
+
+    // We use a base value (min color) and a range (how much to add).
+    let min_val = 120;
+    let range = 125.0;
+
+    if is_addition {
+        // Start: Rgb(60, 120, 60) -> End: Rgb(60, 255, 60)
+        let g = (min_val as f64 + (range * factor)) as u8;
+        Color::Rgb(60, g, 60)
+    } else {
+        // Start: Rgb(120, 60, 60) -> End: Rgb(255, 60, 60)
+        let r = (min_val as f64 + (range * factor)) as u8;
+        Color::Rgb(r, 60, 60)
     }
 }
 
@@ -265,13 +308,25 @@ fn flatten_recursive(
             });
 
             if !folded {
-                let visible_children: Vec<&TreeNode> = dir.children.iter().filter(|child| should_show_node(child, cache)).collect();
+                let visible_children: Vec<&TreeNode> = dir
+                    .children
+                    .iter()
+                    .filter(|child| should_show_node(child, cache))
+                    .collect();
                 let mut child_continuations = parent_continuations.to_vec();
                 child_continuations.push(!is_last);
                 let child_count = visible_children.len();
                 for (i, child) in visible_children.into_iter().enumerate() {
                     let child_is_last = i == child_count - 1;
-                    flatten_recursive(child, depth + 1, child_is_last, &child_continuations, ui_state, cache, rows);
+                    flatten_recursive(
+                        child,
+                        depth + 1,
+                        child_is_last,
+                        &child_continuations,
+                        ui_state,
+                        cache,
+                        rows,
+                    );
                 }
             }
         }
@@ -288,18 +343,46 @@ fn should_show_node(node: &TreeNode, cache: &DiffCache) -> bool {
                 true
             }
         }
-        TreeNode::Directory(d) => d.children.iter().any(|child| should_show_node(child, cache)),
+        TreeNode::Directory(d) => d
+            .children
+            .iter()
+            .any(|child| should_show_node(child, cache)),
     }
 }
 
 fn render_tree_row(row: &TreeRow) -> ListItem<'_> {
     let mut spans = Vec::new();
 
-    for &has_sibling in &row.parent_continuations {
-        spans.push(Span::styled(if has_sibling { "│  " } else { "   " }, Style::default().fg(CLR_DIM)));
-    }
-    spans.push(Span::styled(if row.is_last { "└── " } else { "├── " }, Style::default().fg(CLR_DIM)));
+    // 1. Determine the base color for the entire row based on status
+    let base_fg = if !row.is_dir {
+        if row.left_path.is_none() {
+            CLR_ADD_FG
+        } else if row.right_path.is_none() {
+            CLR_DEL_FG
+        } else {
+            CLR_FG
+        }
+    } else {
+        CLR_FG
+    };
 
+    // 2. Tree structure spans (keep these structural)
+    for &has_sibling in &row.parent_continuations {
+        spans.push(Span::styled(
+            if has_sibling { "│  " } else { "   " },
+            Style::default().fg(CLR_DIM),
+        ));
+    }
+    spans.push(Span::styled(
+        if row.is_last {
+            "└── "
+        } else {
+            "├── "
+        },
+        Style::default().fg(CLR_DIM),
+    ));
+
+    // 3. Staging symbols
     let (stage_sym, stage_color) = match row.staging_state {
         StagingState::Staged => ("●", CLR_STAGED),
         StagingState::Unstaged => ("○", CLR_UNSTAGED),
@@ -308,31 +391,45 @@ fn render_tree_row(row: &TreeRow) -> ListItem<'_> {
     spans.push(Span::styled(stage_sym, Style::default().fg(stage_color)));
     spans.push(Span::raw(" "));
 
-    if !row.is_dir {
-        let status_hint = if row.left_path.is_none() { Span::styled("A ", Style::default().fg(CLR_ADD_FG)) } 
-        else if row.right_path.is_none() { Span::styled("D ", Style::default().fg(CLR_DEL_FG)) } 
-        else { Span::raw("") };
-        spans.push(status_hint);
-    } else {
-        spans.push(Span::raw(""));
-    }
-
+    // 4. File/Dir Name and Icon
     if row.is_dir {
         let arrow = if row.is_folded { "▸ " } else { "▾ " };
         spans.push(Span::styled(arrow, Style::default().fg(CLR_FG)));
         spans.push(Span::styled(" ", Style::default().fg(CLR_DIR)));
-        spans.push(Span::styled(row.name.as_str(), Style::default().fg(CLR_DIR).bold()));
+        spans.push(Span::styled(
+            row.name.as_str(),
+            Style::default().fg(CLR_DIR).bold(),
+        ));
     } else {
         let icon = get_file_icon(&row.name);
-        spans.push(Span::styled(icon.0, Style::default().fg(icon.1)));
+        // Using base_fg for the icon and filename to color the whole row
+        spans.push(Span::styled(icon.0, Style::default().fg(base_fg)));
         spans.push(Span::raw(" "));
-        spans.push(Span::styled(row.name.as_str(), Style::default().fg(CLR_FG)));
+        spans.push(Span::styled(
+            row.name.as_str(),
+            Style::default().fg(base_fg),
+        ));
     }
 
+    // 5. Dynamic Stats
     if let Some(s) = &row.stats {
-        spans.push(Span::raw("  "));
-        spans.push(Span::styled(format!("+{} ", s.insertions), Style::default().fg(CLR_ADD_FG)));
-        spans.push(Span::styled(format!("-{} ", s.deletions), Style::default().fg(CLR_DEL_FG)));
+        if s.insertions > 0 || s.deletions > 0 {
+            spans.push(Span::raw("  "));
+        }
+
+        if s.insertions > 0 {
+            spans.push(Span::styled(
+                format!("+{} ", s.insertions),
+                Style::default().fg(get_diff_color(s.insertions, true)),
+            ));
+        }
+
+        if s.deletions > 0 {
+            spans.push(Span::styled(
+                format!("-{} ", s.deletions),
+                Style::default().fg(get_diff_color(s.deletions, false)),
+            ));
+        }
     }
 
     ListItem::new(Line::from(spans))
