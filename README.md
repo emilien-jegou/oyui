@@ -6,13 +6,13 @@
 
 ## Why Another merge editor?
 
-While Jujutsu is a powerful VCS, I found the built-in diff-editing experience (via `scm-record`) to be limited. It lacked syntax highlighting, offered a stark, monochromatic UI, and made it difficult to visualize the impact of changes across full files. Although some more polished solution like `lightjj` exist, we were missing a true terminal based merge editor.
+While Jujutsu is a powerful VCS, I found the built-in diff-editing experience (via `scm-record`) to be limited. It lacked syntax highlighting, was mostly monochromatic, and made it difficult to visualize the impact of changes across full files. Although some more polished solution like `lightjj` exist (web based), we were missing a modern TUI merge editor.
 
 I built **Oyui** to bridge this gap, focusing on a friction-free experience with:
-*   **Visual Clarity:** A beautiful, balanced, and color-coded tree-view that is easy on the eyes.
-*   **Keyboard-First:** Simple keybinds following vim tradition, but without vim mode ;)
-*   **Simplicity:** Intuitive to use with nice helpers
-*   **Efficient Workflow:** Perform bulk actions (like staging by folder) instantly via the command palette.
+*   **Intuitive:** One view, natural navigation, simple UX.
+*   **Visual Clarity:** Balanced, and color-coded tree-view that is easy on the eyes.
+*   **Keyboard-First:** Simple keybinds, hjkl (following vim tradition) or arrow key.
+*   **Efficient Workflow:** Perform bulk actions (like staging by folder) instantly via the command palette. see feature section.
 
 ## Features
 
