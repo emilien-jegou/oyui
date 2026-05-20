@@ -14,14 +14,14 @@ pub const CLR_CURSOR_BG: Color = Color::Rgb(30, 30, 42);
 pub const CLR_FG: Color = Color::Rgb(200, 200, 210);
 pub const CLR_DIM: Color = Color::Rgb(70, 70, 85);
 pub const CLR_STAGED: Color = Color::Rgb(130, 210, 150);
-pub const CLR_UNSTAGED: Color = Color::Rgb(210, 100, 100);
+pub const CLR_UNSTAGED: Color = Color::Rgb(110, 110, 110);
 pub const CLR_PARTIAL: Color = Color::Rgb(210, 170, 80);
-pub const CLR_DIR: Color = Color::Rgb(110, 150, 220);
+pub const CLR_DIR: Color = Color::Rgb(100, 140, 210);
 pub const CLR_CMD: Color = Color::Rgb(180, 140, 255);
 pub const CLR_ADD_BG: Color = Color::Rgb(30, 45, 30);
 pub const CLR_DEL_BG: Color = Color::Rgb(45, 30, 30);
-pub const CLR_ADD_FG: Color = Color::Rgb(150, 255, 150);
-pub const CLR_DEL_FG: Color = Color::Rgb(255, 150, 150);
+pub const CLR_ADD_FG: Color = Color::Rgb(130, 255, 130);
+pub const CLR_DEL_FG: Color = Color::Rgb(255, 130, 130);
 
 #[derive(Default, PartialEq, Eq)]
 pub enum ViewKind {
