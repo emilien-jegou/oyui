@@ -1,6 +1,5 @@
 use std::ops::Range;
 use std::sync::Arc;
-use syntect::highlighting::Style as SyntectStyle;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Hunk {
@@ -13,6 +12,5 @@ pub struct FileDiff {
     pub old_text: Arc<str>,
     pub new_text: Arc<str>,
     pub hunks: Vec<Hunk>,
-    pub highlighted_new: Vec<Vec<(SyntectStyle, String)>>,
     pub line_selections: Vec<bool>,
 }

@@ -7,6 +7,7 @@ use tokio::fs;
 use crate::diff::{FileDiff, Hunk};
 use crate::diff_cache::DiffStats;
 use crate::syntax::SyntaxEngine;
+use syntect::highlighting::Style as SyntectStyle;
 
 #[derive(Debug, Clone)]
 pub enum WorkerRequest {
@@ -20,12 +21,18 @@ pub enum WorkerRequest {
         left_path: PathBuf,
         right_path: PathBuf,
     },
+    ComputeSyntax {
+        node_path: PathBuf,
+        text: Arc<str>,
+        right_path: PathBuf,
+    },
     Shutdown,
 }
 
 pub enum AsyncWorkerEvent {
     DiffStatsReady(PathBuf, DiffStats),
-    FullDiffReady(PathBuf, FileDiff),
+    FullDiffReady(PathBuf, FileDiff, PathBuf),
+    SyntaxReady(PathBuf, Vec<Vec<(SyntectStyle, String)>>),
 }
 
 pub fn spawn_worker(
@@ -82,7 +89,23 @@ pub fn spawn_worker(
                         });
                     }
 
-                    // --- Syntax Highlighting Block ---
+                    let file_diff = FileDiff {
+                        old_text: Arc::from(left_text),
+                        new_text: Arc::from(right_text),
+                        hunks,
+                        line_selections: Default::default(),
+                    };
+
+                    let _ = ev_tx.send(AsyncWorkerEvent::FullDiffReady(
+                        node_path, file_diff, right_path,
+                    ));
+                }
+
+                WorkerRequest::ComputeSyntax {
+                    node_path,
+                    text,
+                    right_path,
+                } => {
                     let syntax_set = &syntax_engine.syntax_set;
                     let theme = &syntax_engine.theme;
                     let syntax = syntax_set
@@ -95,27 +118,19 @@ pub fn spawn_worker(
                         .unwrap_or_else(|| syntax_set.find_syntax_plain_text());
 
                     let mut highlighter = syntect::easy::HighlightLines::new(syntax, theme);
-                    let highlighted: Vec<Vec<_>> = right_text
+                    let highlighted: Vec<Vec<_>> = text
                         .lines()
                         .map(|line| {
                             highlighter
                                 .highlight_line(line, syntax_set)
                                 .unwrap_or_default()
                                 .into_iter()
-                                .map(|(style, text)| (style, text.to_string()))
+                                .map(|(style, token)| (style, token.to_string()))
                                 .collect()
                         })
                         .collect();
 
-                    let file_diff = FileDiff {
-                        old_text: Arc::from(left_text),
-                        new_text: Arc::from(right_text),
-                        hunks,
-                        highlighted_new: highlighted,
-                        line_selections: Default::default(),
-                    };
-
-                    let _ = ev_tx.send(AsyncWorkerEvent::FullDiffReady(node_path, file_diff));
+                    let _ = ev_tx.send(AsyncWorkerEvent::SyntaxReady(node_path, highlighted));
                 }
 
                 WorkerRequest::Shutdown => {

@@ -1,7 +1,7 @@
 use clap::Parser;
 use core_lib::syntax::SyntaxEngine;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 use std::{io, sync::Arc};
 
@@ -18,14 +18,15 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 pub mod app;
 pub mod cli;
 pub mod draw;
+pub mod glob;
 pub mod input;
 pub mod ui_state;
 pub mod view;
 
-use crate::app::{App, ExitAction, ViewMode};
+use crate::app::{App, ExitAction};
 use crate::cli::Opts;
 use crate::draw::draw;
-use crate::input::{handle_file_view_key, handle_key};
+use crate::input::handle_key;
 
 fn is_dir_empty(path: &Path) -> bool {
     fs::read_dir(path)
@@ -88,11 +89,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         if event::poll(Duration::from_millis(16))? {
             if let Event::Key(key) = event::read()? {
-                let exit_action = match &app.view_mode {
-                    ViewMode::Tree => handle_key(&mut app, key)
-                        .unwrap_or_else(|e| ExitAction::QuitWithReason(format!("Error: {e}"))),
-                    ViewMode::FileView(_) => handle_file_view_key(&mut app, key),
-                };
+                // The `input::handle_key` function now centrally routes input
+                // based on the App's command state and the View's current active sub-view.
+                let exit_action = handle_key(&mut app, key)
+                    .unwrap_or_else(|e| ExitAction::QuitWithReason(format!("Error: {e}")));
 
                 match exit_action {
                     ExitAction::QuitAndMerge => {
@@ -101,15 +101,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     ExitAction::QuitWithReason(reason) => {
                         eprintln!("{}", reason);
                         aborted = true;
+                        break;
                     }
                     ExitAction::QuitWithAbort => {
                         eprintln!("User Abort");
                         aborted = true;
                         break;
                     }
-                    _ => {}
+                    ExitAction::KeepRunning => {}
                 }
             }
+        }
+
+        // If an inner system flagged a quit command (e.g., a successful merge write)
+        if app.should_quit {
+            break;
         }
     }
 
