@@ -17,3 +17,4 @@ project. Feature requests are still done via github issues.
 - Manage conflict in diff highlight and behavior
 - Three-way split
 - In split edition e.g. 'd' for deleting a change in file view without leaving the tool
+- merge long directory chain e.g. 'packages/ui/src' could be all on one line
