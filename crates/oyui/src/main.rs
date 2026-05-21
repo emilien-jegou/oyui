@@ -1,13 +1,13 @@
 use clap::Parser;
-use core_lib::syntax::SyntaxEngine;
 use std::fs;
+use std::io;
 use std::path::Path;
 use std::time::Duration;
-use std::{io, sync::Arc};
 
-use core_lib::tree::FileTree;
-use core_lib::worker::spawn_worker;
-use crossbeam_channel::unbounded;
+use crate::syntax::SyntaxEngine;
+use crate::tree::FileTree;
+use crate::worker::context::AppWorkerContext;
+use crate::worker::{tasks, Tasker};
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event},
     execute,
@@ -17,11 +17,17 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 
 pub mod app;
 pub mod cli;
+pub mod commons;
+pub mod diff;
+pub mod diff_cache;
 pub mod draw;
 pub mod glob;
 pub mod input;
+pub mod syntax;
+pub mod tree;
 pub mod ui_state;
 pub mod view;
+pub mod worker;
 
 use crate::app::{App, ExitAction};
 use crate::cli::Opts;
@@ -38,13 +44,15 @@ fn is_dir_empty(path: &Path) -> bool {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let opts = Opts::parse();
 
-    let engine = Arc::new(SyntaxEngine::new());
+    let worker = Tasker::spawn(
+        AppWorkerContext::builder()
+            .syntax_engine(SyntaxEngine::new())
+            .config(opts.clone())
+            .build(),
+    );
 
-    let (req_tx, req_rx) = unbounded();
-    let (ev_tx, ev_rx) = unbounded();
-    let worker_handle = spawn_worker(req_rx, ev_tx, engine);
-
-    let mut app = App::new(req_tx.clone(), ev_rx);
+    // 2. Pass the cloned worker wrapper into your App
+    let mut app = App::new(worker);
 
     app.base_path = opts.base.clone();
 
@@ -65,7 +73,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Queue background diff stats for all discovered files
     for (rel_path, left, right) in files_to_stat {
-        let _ = req_tx.send(core_lib::worker::WorkerRequest::ComputeStats {
+        let _ = app.worker.send(tasks::stats::StatsReq {
             node_path: rel_path,
             left_path: left,
             right_path: right,
@@ -82,7 +90,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ── Event loop ───────────────────────────────────────────────────────────
     let mut aborted = false;
     loop {
-        app.tick();
+        app.tick().await;
         terminal.draw(|f| draw(f, &mut app))?;
 
         if event::poll(Duration::from_millis(16))? {
@@ -126,10 +134,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     terminal.show_cursor()?;
 
-    let _ = app
-        .worker_tx
-        .send(core_lib::worker::WorkerRequest::Shutdown);
-    let _ = worker_handle.await;
+    let _ = app.shutdown().await;
 
     if aborted {
         std::process::exit(1);

@@ -1,29 +1,25 @@
-use core_lib::diff_cache::DiffCache;
-use core_lib::worker::{AsyncWorkerEvent, WorkerRequest};
-use crossbeam_channel::{Receiver, Sender};
+use crate::diff_cache::DiffCache;
+use crate::worker::{tasks, Tasker, WorkerEvent};
 
-pub fn process_events(
-    rx: &Receiver<AsyncWorkerEvent>,
-    tx: &Sender<WorkerRequest>,
-    cache: &mut DiffCache,
-) {
-    while let Ok(event) = rx.try_recv() {
+pub async fn process_events(worker: &mut Tasker, cache: &mut DiffCache) {
+    if let Some(event) = worker.recv().await {
         match event {
-            AsyncWorkerEvent::DiffStatsReady(path, stats) => {
-                cache.stats.set(path, stats);
+            WorkerEvent::Stats(res) => {
+                cache.stats.set(res.node_path, res.stats);
             }
-            AsyncWorkerEvent::FullDiffReady(path, diff, right_path) => {
-                let text = diff.new_text.clone();
-                cache.diffs.set(path.clone(), diff);
-                cache.syntax.mark_started(path.clone());
-                let _ = tx.send(WorkerRequest::ComputeSyntax {
-                    node_path: path,
+            WorkerEvent::FullDiff(res) => {
+                let text = res.file_diff.new_text.clone();
+                cache.diffs.set(res.node_path.clone(), res.file_diff);
+                cache.syntax.mark_started(res.node_path.clone());
+
+                let _ = worker.send(tasks::syntax::SyntaxReq {
+                    node_path: res.node_path,
                     text,
-                    right_path,
+                    right_path: res.right_path,
                 });
             }
-            AsyncWorkerEvent::SyntaxReady(path, syntax) => {
-                cache.syntax.set(path, syntax);
+            WorkerEvent::Syntax(res) => {
+                cache.syntax.set(res.node_path, res.highlighted);
             }
         }
     }

@@ -1,7 +1,7 @@
+use crate::diff_cache::DiffCache;
+use crate::commons::lazy;
 use crate::ui_state::TreeUiState;
-use core_lib::diff_cache::{DiffCache, DiffStats};
-use core_lib::lazy;
-use core_lib::tree::{FileTree, StagingState, TreeNode};
+use crate::{diff::DiffStats, tree::{FileTree, StagingState, TreeNode}};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     layout::{Constraint, Layout, Rect},

@@ -1,4 +1,4 @@
-use crate::lazy::Lazy;
+use crate::commons::lazy::Lazy;
 use std::collections::HashMap;
 use std::path::PathBuf;
 

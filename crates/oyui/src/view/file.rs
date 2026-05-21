@@ -1,4 +1,4 @@
-use core_lib::diff_cache::DiffCache;
+use crate::diff_cache::DiffCache;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     Frame, layout::{Constraint, Layout, Rect}, style::{Color, Style, Stylize}, text::{Line, Span}, widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState}

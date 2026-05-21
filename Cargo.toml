@@ -1,25 +1,12 @@
 [workspace]
 resolver = "2"
-members = ["crates/core", "crates/oyui"]
+members = ["crates/oyui", "crates/oyui-tasker"]
 
 [workspace.dependencies]
-# Standard TUI stack
 ratatui = { version = "0.30", default-features = false, features = ["crossterm"] }
 crossterm = "0.29"
-
-# Diff and Syntax
 imara-diff = "0.2"
 syntect = "5.2"
 two-face = "0.4"
-rustc-hash = "1.1"
-diffy = "0.5.0"
-
-# Directory walking
 walkdir = "2.4"
-
-# Glob matching for the command panel
-globset = "0.4"
-
-# Async & threading
 tokio = { version = "1.37", features = ["full"] }
-crossbeam-channel = "0.5"

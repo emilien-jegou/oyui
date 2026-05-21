@@ -2,6 +2,7 @@ use std::sync::Arc;
 use syntect::highlighting::{Theme, ThemeSet};
 use syntect::parsing::SyntaxSet;
 
+#[derive(Clone)]
 pub struct SyntaxEngine {
     pub syntax_set: Arc<SyntaxSet>,
     pub theme: Arc<Theme>,

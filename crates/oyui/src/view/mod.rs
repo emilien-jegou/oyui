@@ -1,8 +1,8 @@
 pub mod file;
 pub mod tree;
 
-use core_lib::diff_cache::DiffCache;
-use core_lib::tree::FileTree;
+use crate::diff_cache::DiffCache;
+use crate::tree::FileTree;
 use crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
 use ratatui::style::Color;

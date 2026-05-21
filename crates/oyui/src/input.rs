@@ -3,7 +3,7 @@ use std::error::Error;
 
 use crate::app::{commands, App, CommandMode, ExitAction};
 use crate::view::{ViewAction, ViewKind};
-use core_lib::worker::WorkerRequest;
+use crate::worker::tasks;
 
 pub fn handle_key(app: &mut App, key: KeyEvent) -> Result<ExitAction, Box<dyn Error>> {
     match &app.command_mode {
@@ -68,9 +68,14 @@ fn handle_view_action(app: &mut App, action: ViewAction) -> ExitAction {
             app.view.file_view.current_path = Some(path.clone());
 
             if let (Some(left), Some(right)) = (left_path, right_path) {
-                if matches!(app.cache.diffs.get(&path), core_lib::lazy::Lazy::Unstarted) {
+                if matches!(
+                    app.cache.diffs.get(&path),
+                    crate::commons::lazy::Lazy::Unstarted
+                ) {
                     app.cache.diffs.mark_started(path.clone());
-                    let _ = app.worker_tx.send(WorkerRequest::ComputeFullDiff {
+
+                    // Sending the newly refactored Worker Request
+                    let _ = app.worker.send(tasks::full_diff::FullDiffReq {
                         node_path: path.clone(),
                         left_path: left,
                         right_path: right,

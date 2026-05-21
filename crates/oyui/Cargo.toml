@@ -5,10 +5,13 @@ edition = "2021"
 publish = false
 
 [dependencies]
-core_lib = { path = "../core" }
-crossbeam-channel = { workspace = true }
 tokio = { workspace = true }
 ratatui = { workspace = true }
 crossterm = { workspace = true }
 syntect = { workspace = true }
+walkdir = { workspace = true }
+two-face = { workspace = true }
+imara-diff = { version = "0.2" }
 clap = { version = "4.0", features = ["derive"] }
+typed-builder = { version = "0.23.2" }
+oyui-tasker = { path = "../oyui-tasker" }

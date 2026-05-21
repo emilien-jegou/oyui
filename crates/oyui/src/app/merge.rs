@@ -1,5 +1,5 @@
 use crate::app::events::ExitAction;
-use core_lib::tree::{FileTree, StagingState, TreeNode};
+use crate::tree::{FileTree, StagingState, TreeNode};
 use std::error::Error;
 
 pub fn confirm_and_write(
