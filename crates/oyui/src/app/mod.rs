@@ -46,14 +46,17 @@ impl App {
         worker::process_events(&mut self.worker, &mut self.cache).await;
     }
 
+    #[tracing::instrument(skip_all)]
     pub async fn shutdown(&mut self) {
         let _ = self.worker.shutdown().await;
     }
 
+    #[tracing::instrument(skip_all, fields(cmd = cmd))]
     pub fn execute_command(&mut self, cmd: &str) {
         commands::execute(cmd, &mut self.tree, &self.view.tree_view, &self.cache);
     }
 
+    #[tracing::instrument(skip_all)]
     pub fn confirm_merge(&mut self) -> Result<ExitAction, Box<dyn std::error::Error>> {
         merge::confirm_and_write(&mut self.tree, &mut self.should_quit)
     }

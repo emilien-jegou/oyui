@@ -30,6 +30,7 @@ pub enum ViewKind {
     File,
 }
 
+#[derive(Debug)]
 pub enum ViewAction {
     None,
     QuitWithAbort,
@@ -57,6 +58,7 @@ impl View {
         Self::default()
     }
 
+    #[tracing::instrument(skip_all)]
     pub fn handle_input(
         &mut self,
         key: KeyEvent,
@@ -69,6 +71,7 @@ impl View {
         }
     }
 
+    #[tracing::instrument(skip_all)]
     pub fn draw(
         &mut self,
         frame: &mut Frame,

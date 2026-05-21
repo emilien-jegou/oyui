@@ -125,7 +125,7 @@ If you have a UI thread reading events, and multiple other background threads se
 
 ```rust
 // Extracts lightweight Sender and Receiver handles
-let (sender, receiver) = worker.split();
+let (sender, receiver, _handle) = worker.into_split();
 
 // `sender` and `receiver` can be safely cloned and moved across threads.
 let sender_clone = sender.clone();
@@ -133,5 +133,3 @@ std::thread::spawn(move || {
     sender_clone.send(StatsReq { path: "/usr".into() }).unwrap();
 });
 ```
-
-*If you need to permanently move the sender and receiver without keeping the `worker` object around, you can use `.into_split()`.*

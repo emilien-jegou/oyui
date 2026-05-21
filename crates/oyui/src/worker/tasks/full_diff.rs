@@ -15,6 +15,7 @@ pub struct FullDiffReq {
     pub right_path: PathBuf,
 }
 
+#[derive(Debug)]
 pub struct FullDiffRes {
     pub node_path: PathBuf,
     pub file_diff: FileDiff,
@@ -26,7 +27,10 @@ impl WorkerTask for FullDiff {
     type Response = FullDiffRes;
     type Context = ();
 
+    #[tracing::instrument(skip_all, fields(node_path = %req.node_path.display()))]
     async fn handle(req: Self::Request, _ctx: Self::Context) -> Self::Response {
+        tracing::debug!("Computing full diff");
+
         let (left_res, right_res) = tokio::join!(
             fs::read_to_string(&req.left_path),
             fs::read_to_string(&req.right_path)
@@ -52,6 +56,7 @@ impl WorkerTask for FullDiff {
             line_selections: Default::default(),
         };
 
+        tracing::trace!("Full diff computation finished");
         FullDiffRes {
             node_path: req.node_path,
             file_diff,

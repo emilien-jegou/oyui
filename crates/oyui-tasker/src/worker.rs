@@ -12,7 +12,7 @@ impl<C> ExtractsFrom<C> for () {
 
 pub trait WorkerTask {
     type Request: Send + Clone + std::fmt::Debug + 'static;
-    type Response: Send + 'static;
+    type Response: Send + std::fmt::Debug + 'static;
     type Context: Send + 'static;
 
     fn handle(

@@ -52,10 +52,8 @@ pub fn derive_tasker_context(input: TokenStream) -> TokenStream {
     let field_types_2 = fields.iter().map(|f| &f.ty);
 
     let expanded = quote! {
-        // "This local Struct knows how to extract itself from ANY context C..."
         impl<__C> ::oyui_tasker::worker::ExtractsFrom<__C> for #name
         where
-            // "...as long as all of its fields also know how to extract themselves from C"
             #( #field_types: ::oyui_tasker::worker::ExtractsFrom<__C> ),*
         {
             fn extract(ctx: &__C) -> Self {

@@ -2,6 +2,7 @@ use crate::app::events::ExitAction;
 use crate::tree::{FileTree, StagingState, TreeNode};
 use std::error::Error;
 
+#[tracing::instrument(skip_all)]
 pub fn confirm_and_write(
     tree: &mut FileTree,
     should_quit: &mut bool,

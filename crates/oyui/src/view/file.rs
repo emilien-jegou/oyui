@@ -19,6 +19,7 @@ pub struct FileViewData {
 }
 
 impl FileViewData {
+    #[tracing::instrument(skip_all)]
     pub fn handle_input(&mut self, key: KeyEvent) -> ViewAction {
         let mut clear_pending = true;
         let is_ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
@@ -83,6 +84,7 @@ impl FileViewData {
         ViewAction::None
     }
 
+    #[tracing::instrument(skip_all)]
     pub fn draw(&mut self, frame: &mut Frame, area: Rect, cache: &DiffCache) {
         let Some(path) = &self.current_path else {
             return;
@@ -224,7 +226,6 @@ impl FileViewData {
     }
 }
 
-// Builds the Row with the line number on the left, keeping distinct background colors
 fn render_line<'a>(
     content: &'a str,
     idx: usize,
