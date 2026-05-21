@@ -5,11 +5,10 @@ pub mod worker;
 
 pub use events::{CommandMode, ExitAction};
 
+use crate::diff_cache::DiffCache;
+use crate::tree::{FileTree, TreeNode};
 use crate::view::View;
-use core_lib::diff_cache::DiffCache;
-use core_lib::tree::{FileTree, TreeNode};
-use core_lib::worker::{AsyncWorkerEvent, WorkerRequest};
-use crossbeam_channel::{Receiver, Sender};
+use crate::worker::Tasker;
 use std::path::PathBuf;
 
 pub struct App {
@@ -20,8 +19,7 @@ pub struct App {
     pub command_mode: CommandMode,
     pub should_quit: bool,
 
-    pub worker_tx: Sender<WorkerRequest>,
-    pub worker_rx: Receiver<AsyncWorkerEvent>,
+    pub worker: Tasker,
 
     pub left_path: Option<PathBuf>,
     pub right_path: Option<PathBuf>,
@@ -29,15 +27,14 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(worker_tx: Sender<WorkerRequest>, worker_rx: Receiver<AsyncWorkerEvent>) -> Self {
+    pub fn new(worker: Tasker) -> Self {
         Self {
             tree: FileTree::new(),
             cache: DiffCache::default(),
             view: View::new(),
             command_mode: CommandMode::Normal,
             should_quit: false,
-            worker_tx,
-            worker_rx,
+            worker,
 
             left_path: None,
             right_path: None,
@@ -45,8 +42,12 @@ impl App {
         }
     }
 
-    pub fn tick(&mut self) {
-        worker::process_events(&self.worker_rx, &self.worker_tx, &mut self.cache);
+    pub async fn tick(&mut self) {
+        worker::process_events(&mut self.worker, &mut self.cache).await;
+    }
+
+    pub async fn shutdown(&mut self) {
+        let _ = self.worker.shutdown().await;
     }
 
     pub fn execute_command(&mut self, cmd: &str) {

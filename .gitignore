@@ -8,13 +8,11 @@
 
 !crates/
 
-!crates/core/
-!crates/core/src/
-!crates/core/src/**/*
+!crates/oyui-tasker/
+!crates/oyui-tasker/**/*
 
 !crates/oyui/
-!crates/oyui/src/
-!crates/oyui/src/**/*
+!crates/oyui/**/*
 
 !docs/
 !docs/**/*

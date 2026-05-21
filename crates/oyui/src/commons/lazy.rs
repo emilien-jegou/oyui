@@ -8,7 +8,7 @@ pub enum Lazy<T> {
 }
 
 impl<T> Lazy<T> {
-    /// Helper to transition a ready/stale state into `Stale` (invalidated), 
+    /// Helper to transition a ready/stale state into `Stale` (invalidated),
     /// or keep it as `Unstarted` if it never had a value.
     pub fn invalidate(&mut self) {
         let prev = std::mem::replace(self, Lazy::Unstarted);

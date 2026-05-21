@@ -1,7 +1,7 @@
 use crate::glob::glob_match;
 use crate::view::tree::TreeViewData;
-use core_lib::diff_cache::DiffCache;
-use core_lib::tree::{FileTree, StagingState, TreeNode};
+use crate::diff_cache::DiffCache;
+use crate::tree::{FileTree, StagingState, TreeNode};
 use std::path::PathBuf;
 
 pub fn execute(cmd: &str, tree: &mut FileTree, tree_view: &TreeViewData, cache: &DiffCache) {
