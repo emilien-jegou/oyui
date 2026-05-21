@@ -60,14 +60,20 @@ impl FileTree {
         })
     }
 
+    #[tracing::instrument(skip_all)]
     pub fn build_from_dir_diff(
         left_dir: &Path,
         right_dir: &Path,
     ) -> (Self, Vec<(PathBuf, PathBuf, PathBuf)>) {
         let mut tree = Self::new();
         let mut files_to_stat = Vec::new();
+        
+        let mut added_count = 0;
+        let mut modified_count = 0;
+        let mut deleted_count = 0;
 
         // 1. Walk right_dir (Modified and Added files)
+        tracing::debug!("Walking right directory to discover modified/added files");
         for entry in WalkDir::new(right_dir).into_iter().filter_map(|e| e.ok()) {
             if entry.file_type().is_file() {
                 let right_path = entry.path().to_path_buf();
@@ -79,6 +85,8 @@ impl FileTree {
                         if files_are_identical(&left_path, &right_path) {
                             continue;
                         }
+                        modified_count += 1;
+                        tracing::trace!(path = %rel_path_buf.display(), "Discovered modified file");
                         tree.insert_file(
                             rel_path_buf.clone(),
                             Some(left_path.clone()),
@@ -86,6 +94,8 @@ impl FileTree {
                         );
                     } else {
                         // Added file: Pass None for left_path
+                        added_count += 1;
+                        tracing::trace!(path = %rel_path_buf.display(), "Discovered added file");
                         tree.insert_file(
                             rel_path_buf.clone(),
                             None,
@@ -99,6 +109,7 @@ impl FileTree {
         }
 
         // 2. Walk left_dir (Deleted files missing in right_dir)
+        tracing::debug!("Walking left directory to discover deleted files");
         for entry in WalkDir::new(left_dir).into_iter().filter_map(|e| e.ok()) {
             if entry.file_type().is_file() {
                 let left_path = entry.path().to_path_buf();
@@ -107,6 +118,8 @@ impl FileTree {
                     if !right_path.exists() {
                         let rel_path_buf = rel_path.to_path_buf();
                         // Deleted file: Pass None for right_path
+                        deleted_count += 1;
+                        tracing::trace!(path = %rel_path_buf.display(), "Discovered deleted file");
                         tree.insert_file(
                             rel_path_buf.clone(),
                             Some(left_path.clone()),
@@ -117,6 +130,13 @@ impl FileTree {
                 }
             }
         }
+
+        tracing::info!(
+            added = added_count,
+            modified = modified_count,
+            deleted = deleted_count,
+            "Finished building file tree"
+        );
 
         (tree, files_to_stat)
     }
@@ -240,6 +260,7 @@ impl TreeNode {
     }
 }
 
+#[tracing::instrument(level = "trace", skip_all)]
 fn files_are_identical(path_a: &Path, path_b: &Path) -> bool {
     let meta_a = match fs::metadata(path_a) {
         Ok(m) => m,

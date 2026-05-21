@@ -70,6 +70,7 @@ impl TreeViewData {
             .nth(self.selected_index)
     }
 
+    #[tracing::instrument(skip_all)]
     pub fn handle_input(
         &mut self,
         key: KeyEvent,
@@ -153,6 +154,7 @@ impl TreeViewData {
         action
     }
 
+    #[tracing::instrument(skip_all)]
     pub fn draw(
         &mut self,
         frame: &mut Frame,

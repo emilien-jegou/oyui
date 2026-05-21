@@ -5,13 +5,20 @@ edition = "2021"
 publish = false
 
 [dependencies]
+oyui-tasker = { path = "../oyui-tasker" }
+rayon = { workspace = true }
 tokio = { workspace = true }
 ratatui = { workspace = true }
 crossterm = { workspace = true }
 syntect = { workspace = true }
 walkdir = { workspace = true }
 two-face = { workspace = true }
-imara-diff = { version = "0.2" }
-clap = { version = "4.0", features = ["derive"] }
-typed-builder = { version = "0.23.2" }
-oyui-tasker = { path = "../oyui-tasker" }
+tracing = { workspace = true }
+tracing-error = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing-appender = { workspace = true }
+imara-diff = { workspace = true }
+clap = { workspace = true }
+typed-builder = { workspace = true }
+eyre = { workspace = true }
+tracing-flame = { workspace = true }

@@ -4,6 +4,7 @@ use crate::diff_cache::DiffCache;
 use crate::tree::{FileTree, StagingState, TreeNode};
 use std::path::PathBuf;
 
+#[tracing::instrument(skip_all, fields(cmd = cmd))]
 pub fn execute(cmd: &str, tree: &mut FileTree, tree_view: &TreeViewData, cache: &DiffCache) {
     let cmd = cmd.trim();
 
@@ -34,6 +35,7 @@ pub fn execute(cmd: &str, tree: &mut FileTree, tree_view: &TreeViewData, cache: 
     }
 }
 
+#[tracing::instrument(skip_all)]
 pub fn set_state_for_path(tree: &mut FileTree, path: &PathBuf, new_state: StagingState) {
     for node in &mut tree.nodes {
         if apply_state_recursive(node, path, new_state) {

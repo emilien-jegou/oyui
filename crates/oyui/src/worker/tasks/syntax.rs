@@ -14,6 +14,7 @@ pub struct SyntaxReq {
     pub right_path: PathBuf,
 }
 
+#[derive(Debug)]
 pub struct SyntaxRes {
     pub node_path: PathBuf,
     pub highlighted: Vec<Vec<(SyntectStyle, String)>>,
@@ -29,7 +30,10 @@ impl WorkerTask for Syntax {
     type Response = SyntaxRes;
     type Context = SyntaxContext;
 
+    #[tracing::instrument(skip_all, fields(node_path = %req.node_path.display()))]
     async fn handle(req: Self::Request, ctx: Self::Context) -> Self::Response {
+        tracing::debug!("Computing syntax highlighting");
+
         let syntax_set = &ctx.engine.syntax_set;
         let theme = &ctx.engine.theme;
         let syntax = syntax_set
@@ -55,6 +59,7 @@ impl WorkerTask for Syntax {
             })
             .collect();
 
+        tracing::trace!("Syntax highlighting finished");
         SyntaxRes {
             node_path: req.node_path,
             highlighted,

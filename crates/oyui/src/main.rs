@@ -44,6 +44,18 @@ fn is_dir_empty(path: &Path) -> bool {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let opts = Opts::parse();
 
+    let trace_guard = commons::tracing::Tracer::builder()
+        .flamegraph_enable(opts.flamegraph_enable)
+        .flamegraph_save_file(opts.flamegraph_save_file.clone())
+        .log_enable(opts.log_enable)
+        .log_save_path(opts.log_save_path.clone())
+        .log_console(opts.log_console)
+        .build()
+        .setup()?;
+
+    tracing::info!("Starting oyui...");
+    tracing::debug!(?opts, "Parsed CLI options");
+
     let worker = Tasker::spawn(
         AppWorkerContext::builder()
             .syntax_engine(SyntaxEngine::new())
@@ -53,41 +65,43 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 2. Pass the cloned worker wrapper into your App
     let mut app = App::new(worker);
-
     app.base_path = opts.base.clone();
 
     // ── Build tree based on mode ─────────────────────────────────────────────
     if is_dir_empty(&opts.left) || is_dir_empty(&opts.right) {
-        eprintln!("One of the target directories is empty. Aborting split.");
+        tracing::error!("One of the target directories is empty. Aborting split.");
+        drop(trace_guard);
         std::process::exit(2);
     }
 
+    tracing::info!(left = %opts.left.display(), right = %opts.right.display(), "Building file tree...");
     let (tree, files_to_stat) = FileTree::build_from_dir_diff(&opts.left, &opts.right);
 
     if tree.nodes.is_empty() {
-        eprintln!("No modifications found between directories. Nothing to split.");
+        tracing::error!("No modifications found between directories. Nothing to split.");
+        drop(trace_guard);
         std::process::exit(2);
     }
 
     app.tree = tree;
 
-    // Queue background diff stats for all discovered files
-    for (rel_path, left, right) in files_to_stat {
-        let _ = app.worker.send(tasks::stats::StatsReq {
-            node_path: rel_path,
-            left_path: left,
-            right_path: right,
-        });
-    }
+    tracing::info!(
+        count = files_to_stat.len(),
+        "Queueing background diff stats"
+    );
 
-    // ── Terminal setup ───────────────────────────────────────────────────────
+    let _ = app.worker.send(tasks::stats::StatsReq {
+        files: files_to_stat,
+    });
+
+    tracing::debug!("Initializing terminal");
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // ── Event loop ───────────────────────────────────────────────────────────
+    tracing::info!("Entering main event loop");
     let mut aborted = false;
     loop {
         app.tick().await;
@@ -95,6 +109,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         if event::poll(Duration::from_millis(16))? {
             if let Event::Key(key) = event::read()? {
+                tracing::trace!(?key, "Key event received");
+
                 // The `input::handle_key` function now centrally routes input
                 // based on the App's command state and the View's current active sub-view.
                 let exit_action = handle_key(&mut app, key)
@@ -102,15 +118,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 match exit_action {
                     ExitAction::QuitAndMerge => {
+                        tracing::info!("Exiting event loop: QuitAndMerge");
                         break;
                     }
                     ExitAction::QuitWithReason(reason) => {
-                        eprintln!("{}", reason);
+                        tracing::error!(%reason, "Exiting event loop: QuitWithReason");
                         aborted = true;
                         break;
                     }
                     ExitAction::QuitWithAbort => {
-                        eprintln!("User Abort");
+                        tracing::warn!("Exiting event loop: User Abort");
                         aborted = true;
                         break;
                     }
@@ -121,11 +138,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // If an inner system flagged a quit command (e.g., a successful merge write)
         if app.should_quit {
+            tracing::info!("app.should_quit flag raised. Exiting event loop.");
             break;
         }
     }
 
     // ── Cleanup ──────────────────────────────────────────────────────────────
+    tracing::debug!("Restoring terminal state");
     disable_raw_mode()?;
     execute!(
         terminal.backend_mut(),
@@ -134,11 +153,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     terminal.show_cursor()?;
 
+    tracing::info!("Shutting down background worker...");
     let _ = app.shutdown().await;
 
     if aborted {
+        tracing::warn!("Application aborted.");
+        drop(trace_guard);
         std::process::exit(1);
     }
 
+    tracing::info!("oyui shutting down cleanly.");
     Ok(())
 }
