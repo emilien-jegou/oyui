@@ -67,7 +67,7 @@ impl FileTree {
     ) -> (Self, Vec<(PathBuf, PathBuf, PathBuf)>) {
         let mut tree = Self::new();
         let mut files_to_stat = Vec::new();
-        
+
         let mut added_count = 0;
         let mut modified_count = 0;
         let mut deleted_count = 0;
@@ -96,13 +96,9 @@ impl FileTree {
                         // Added file: Pass None for left_path
                         added_count += 1;
                         tracing::trace!(path = %rel_path_buf.display(), "Discovered added file");
-                        tree.insert_file(
-                            rel_path_buf.clone(),
-                            None,
-                            Some(right_path.clone()),
-                        );
+                        tree.insert_file(rel_path_buf.clone(), None, Some(right_path.clone()));
                     }
-                    
+
                     files_to_stat.push((rel_path_buf, left_path, right_path));
                 }
             }
@@ -120,11 +116,7 @@ impl FileTree {
                         // Deleted file: Pass None for right_path
                         deleted_count += 1;
                         tracing::trace!(path = %rel_path_buf.display(), "Discovered deleted file");
-                        tree.insert_file(
-                            rel_path_buf.clone(),
-                            Some(left_path.clone()),
-                            None,
-                        );
+                        tree.insert_file(rel_path_buf.clone(), Some(left_path.clone()), None);
                         files_to_stat.push((rel_path_buf, left_path, right_path));
                     }
                 }
