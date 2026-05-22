@@ -58,7 +58,8 @@ impl App {
 
     #[tracing::instrument(skip_all)]
     pub fn confirm_merge(&mut self) -> Result<ExitAction, Box<dyn std::error::Error>> {
-        merge::confirm_and_write(&mut self.tree, &mut self.should_quit)
+        let right_dir = self.right_path.clone().ok_or("Right path not set")?;
+        merge::confirm_and_write(&mut self.tree, &mut self.should_quit, &right_dir)
     }
 
     pub fn get_diff_summary(&self) -> (usize, usize, usize) {

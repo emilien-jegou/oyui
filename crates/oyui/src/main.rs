@@ -1,7 +1,5 @@
 use clap::Parser;
-use std::fs;
 use std::io;
-use std::path::Path;
 use std::time::Duration;
 
 use crate::syntax::SyntaxEngine;
@@ -34,12 +32,6 @@ use crate::cli::Opts;
 use crate::draw::draw;
 use crate::input::handle_key;
 
-fn is_dir_empty(path: &Path) -> bool {
-    fs::read_dir(path)
-        .map(|mut d| d.next().is_none())
-        .unwrap_or(true)
-}
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let opts = Opts::parse();
@@ -66,13 +58,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 2. Pass the cloned worker wrapper into your App
     let mut app = App::new(worker);
     app.base_path = opts.base.clone();
-
-    // ── Build tree based on mode ─────────────────────────────────────────────
-    if is_dir_empty(&opts.left) || is_dir_empty(&opts.right) {
-        tracing::error!("One of the target directories is empty. Aborting split.");
-        drop(trace_guard);
-        std::process::exit(2);
-    }
+    app.left_path = Some(opts.left.clone());
+    app.right_path = Some(opts.right.clone());
 
     tracing::info!(left = %opts.left.display(), right = %opts.right.display(), "Building file tree...");
     let (tree, files_to_stat) = FileTree::build_from_dir_diff(&opts.left, &opts.right);
