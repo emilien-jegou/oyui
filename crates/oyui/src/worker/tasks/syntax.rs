@@ -11,7 +11,7 @@ pub struct Syntax;
 pub struct SyntaxReq {
     pub node_path: PathBuf,
     pub text: Arc<str>,
-    pub right_path: PathBuf,
+    pub right_path: Option<PathBuf>,
 }
 
 #[derive(Debug)]
@@ -39,7 +39,8 @@ impl WorkerTask for Syntax {
         let syntax = syntax_set
             .find_syntax_by_extension(
                 req.right_path
-                    .extension()
+                    .as_ref()
+                    .and_then(|p| p.extension())
                     .and_then(|s| s.to_str())
                     .unwrap_or(""),
             )

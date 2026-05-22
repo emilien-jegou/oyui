@@ -5,5 +5,4 @@ Bug should still be reported in github issues.
 
 ## List
 
-- New/deleted file can’t be shown in file view
-- There’s some strange issue with line position in the file view.
+- There’s some strange issue with line position in the file view. (to retest)
