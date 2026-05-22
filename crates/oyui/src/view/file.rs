@@ -1,7 +1,11 @@
 use crate::diff_cache::DiffCache;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
-    Frame, layout::{Constraint, Layout, Rect}, style::{Color, Style, Stylize}, text::{Line, Span}, widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState}
+    layout::{Constraint, Layout, Rect},
+    style::{Color, Style, Stylize},
+    text::{Line, Span},
+    widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState},
+    Frame,
 };
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -139,12 +143,7 @@ impl FileViewData {
         let mut visual_row_idx = 0;
 
         for hunk in &diff.hunks {
-            let hunk_new_start = hunk
-                .after_lines
-                .clone()
-                .into_iter()
-                .next()
-                .unwrap_or(current_new);
+            let hunk_new_start = hunk.after_lines.start;
 
             // Print unchanged lines up to the hunk
             while current_new < hunk_new_start && current_new < new_lines.len() {

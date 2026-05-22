@@ -75,21 +75,19 @@ fn handle_view_action(app: &mut App, action: ViewAction) -> ExitAction {
             app.view.current = ViewKind::File;
             app.view.file_view.current_path = Some(path.clone());
 
-            if let (Some(left), Some(right)) = (left_path, right_path) {
-                if matches!(
-                    app.cache.diffs.get(&path),
-                    crate::commons::lazy::Lazy::Unstarted
-                ) {
-                    tracing::debug!(path = %path.display(), "Queueing full diff calculation");
-                    app.cache.diffs.mark_started(path.clone());
+            if matches!(
+                app.cache.diffs.get(&path),
+                crate::commons::lazy::Lazy::Unstarted
+            ) {
+                tracing::debug!(path = %path.display(), "Queueing full diff calculation");
+                app.cache.diffs.mark_started(path.clone());
 
-                    // Sending the newly refactored Worker Request
-                    let _ = app.worker.send(tasks::full_diff::FullDiffReq {
-                        node_path: path.clone(),
-                        left_path: left,
-                        right_path: right,
-                    });
-                }
+                // Sending the newly refactored Worker Request
+                let _ = app.worker.send(tasks::full_diff::FullDiffReq {
+                    node_path: path.clone(),
+                    left_path,
+                    right_path,
+                });
             }
             ExitAction::KeepRunning
         }

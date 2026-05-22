@@ -11,15 +11,33 @@ pub struct FullDiff;
 #[derive(Debug, Clone)]
 pub struct FullDiffReq {
     pub node_path: PathBuf,
-    pub left_path: PathBuf,
-    pub right_path: PathBuf,
+    pub left_path: Option<PathBuf>,
+    pub right_path: Option<PathBuf>,
 }
 
 #[derive(Debug)]
 pub struct FullDiffRes {
     pub node_path: PathBuf,
     pub file_diff: FileDiff,
-    pub right_path: PathBuf,
+    pub right_path: Option<PathBuf>,
+}
+
+async fn read_file_safe(path: &PathBuf, side: &str) -> String {
+    match fs::read(path).await {
+        Ok(bytes) => {
+            match String::from_utf8(bytes) {
+                Ok(text) => text,
+                Err(_) => {
+                    tracing::warn!(path = %path.display(), side, "File is not valid UTF-8 (likely binary)");
+                    format!("// [oyui] Binary or invalid UTF-8 file content cannot be displayed for {}\n", side)
+                }
+            }
+        }
+        Err(e) => {
+            tracing::error!(path = %path.display(), error = %e, side, "Failed to read file");
+            format!("// [oyui] Error reading file: {}\n", e)
+        }
+    }
 }
 
 impl WorkerTask for FullDiff {
@@ -29,14 +47,29 @@ impl WorkerTask for FullDiff {
 
     #[tracing::instrument(skip_all, fields(node_path = %req.node_path.display()))]
     async fn handle(req: Self::Request, _ctx: Self::Context) -> Self::Response {
-        tracing::debug!("Computing full diff");
-
-        let (left_res, right_res) = tokio::join!(
-            fs::read_to_string(&req.left_path),
-            fs::read_to_string(&req.right_path)
+        tracing::debug!(
+            left_path = ?req.left_path,
+            right_path = ?req.right_path,
+            "Computing full diff"
         );
-        let left_text = left_res.unwrap_or_default();
-        let right_text = right_res.unwrap_or_default();
+
+        let left_fut = async {
+            if let Some(p) = &req.left_path {
+                read_file_safe(p, "left").await
+            } else {
+                String::new()
+            }
+        };
+
+        let right_fut = async {
+            if let Some(p) = &req.right_path {
+                read_file_safe(p, "right").await
+            } else {
+                String::new()
+            }
+        };
+
+        let (left_text, right_text) = tokio::join!(left_fut, right_fut);
 
         let input = InternedInput::new(left_text.as_str(), right_text.as_str());
         let diff = Diff::compute(Algorithm::Histogram, &input);
