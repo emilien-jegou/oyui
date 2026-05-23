@@ -5,4 +5,4 @@ Bug should still be reported in github issues.
 
 ## List
 
-- There’s some strange issue with line position in the file view. (to retest)
+...

@@ -2,7 +2,7 @@ use imara_diff::{Algorithm, Diff, InternedInput};
 use oyui_tasker::WorkerTask;
 use rayon::prelude::*;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::diff::DiffStats;
 
@@ -18,6 +18,37 @@ pub struct StatsRes {
     pub stats: Vec<(PathBuf, DiffStats)>,
 }
 
+/// Helper to check metadata and binary status on the thread pool
+fn get_file_info(path: &Path) -> (bool, isize, Option<String>) {
+    let meta = match fs::metadata(path) {
+        Ok(m) => m,
+        Err(_) => return (false, 0, None),
+    };
+
+    let size = meta.len() as isize;
+
+    // Treat > 1MB as binary
+    if size > 1024 * 1024 {
+        return (true, size, None);
+    }
+
+    let buffer = match fs::read(path) {
+        Ok(b) => b,
+        Err(_) => return (false, size, None),
+    };
+
+    let check_len = std::cmp::min(buffer.len(), 8000);
+    let is_binary = buffer[..check_len].contains(&0);
+
+    let text = if !is_binary {
+        String::from_utf8(buffer).ok()
+    } else {
+        None
+    };
+
+    (is_binary || text.is_none(), size, text)
+}
+
 impl WorkerTask for Stats {
     type Request = StatsReq;
     type Response = StatsRes;
@@ -31,15 +62,24 @@ impl WorkerTask for Stats {
             req.files
                 .into_par_iter()
                 .map(|(node_path, left_path, right_path)| {
-                    let left_text = fs::read_to_string(&left_path).unwrap_or_default();
-                    let right_text = fs::read_to_string(&right_path).unwrap_or_default();
+                    let (l_bin, l_size, l_text) = get_file_info(&left_path);
+                    let (r_bin, r_size, r_text) = get_file_info(&right_path);
 
-                    let input = InternedInput::new(left_text.as_str(), right_text.as_str());
-                    let diff = Diff::compute(Algorithm::Myers, &input);
+                    let stats = if l_bin || r_bin {
+                        DiffStats::Binary {
+                            bytes: r_size - l_size,
+                        }
+                    } else {
+                        let l_str = l_text.unwrap_or_default();
+                        let r_str = r_text.unwrap_or_default();
 
-                    let stats = DiffStats {
-                        insertions: diff.count_additions() as usize,
-                        deletions: diff.count_removals() as usize,
+                        let input = InternedInput::new(l_str.as_str(), r_str.as_str());
+                        let diff = Diff::compute(Algorithm::Myers, &input);
+
+                        DiffStats::Text {
+                            insertions: diff.count_additions() as usize,
+                            deletions: diff.count_removals() as usize,
+                        }
                     };
 
                     (node_path, stats)

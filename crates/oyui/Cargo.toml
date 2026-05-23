@@ -22,3 +22,4 @@ clap = { workspace = true }
 typed-builder = { workspace = true }
 eyre = { workspace = true }
 tracing-flame = { workspace = true }
+infer = { workspace = true }
