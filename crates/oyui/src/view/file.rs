@@ -1,4 +1,4 @@
-use crate::diff_cache::DiffCache;
+use crate::{diff::DiffResult, diff_cache::DiffCache};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
@@ -108,14 +108,33 @@ impl FileViewData {
 
         if let Some(stats) = cache.stats.get(path).value() {
             header_spans.push(Span::raw("  "));
-            header_spans.push(Span::styled(
-                format!("+{} ", stats.insertions),
-                Style::default().fg(CLR_ADD_FG),
-            ));
-            header_spans.push(Span::styled(
-                format!("-{} ", stats.deletions),
-                Style::default().fg(CLR_DEL_FG),
-            ));
+            match stats {
+                crate::diff::DiffStats::Text {
+                    insertions,
+                    deletions,
+                } => {
+                    if *insertions != 0 {
+                        header_spans.push(Span::styled(
+                            format!("+{} ", insertions),
+                            Style::default().fg(CLR_ADD_FG),
+                        ));
+                    }
+
+                    if *deletions != 0 {
+                        header_spans.push(Span::styled(
+                            format!("-{} ", deletions),
+                            Style::default().fg(CLR_DEL_FG),
+                        ));
+                    }
+                }
+                crate::diff::DiffStats::Binary { bytes } => {
+                    header_spans.push(Span::styled("(binary)", Style::default().fg(Color::Blue)));
+                    header_spans.push(Span::styled(
+                        format!(" {} bytes", bytes),
+                        Style::default().fg(Color::Rgb(40, 40, 50)),
+                    ));
+                }
+            }
         }
 
         frame.render_widget(
@@ -123,10 +142,65 @@ impl FileViewData {
             header_area,
         );
 
-        // -- Draw Content --
-        let Some(diff) = cache.diffs.get(path).value() else {
+        let Some(diff_result) = cache.diffs.get(path).value() else {
             frame.render_widget(Paragraph::new("Loading...").bg(CLR_BG), list_area);
             return;
+        };
+
+        let diff = match diff_result {
+            crate::diff::DiffResult::Text(d) => d,
+            crate::diff::DiffResult::Empty => {
+                frame.render_widget(
+                    Paragraph::new("Empty file")
+                        .alignment(ratatui::layout::Alignment::Center)
+                        .style(Style::default().fg(Color::DarkGray)),
+                    list_area,
+                );
+                return;
+            }
+            crate::diff::DiffResult::Binary { size, mime, ext } => {
+                let size_str = if *size < 1024 {
+                    format!("{} B", size)
+                } else if *size < 1024 * 1024 {
+                    format!("{:.2} KB", *size as f64 / 1024.0)
+                } else {
+                    format!("{:.2} MB", *size as f64 / 1024.0 / 1024.0)
+                };
+
+                let msg = format!(
+                    "Binary file not shown\n(Files differ)\n\nType: {}\nExtension: {}\nSize: {}",
+                    mime, ext, size_str
+                );
+
+                frame.render_widget(
+                    Paragraph::new(msg)
+                        .alignment(ratatui::layout::Alignment::Center)
+                        .style(Style::default().fg(Color::DarkGray)),
+                    list_area,
+                );
+                return;
+            }
+            DiffResult::TooLarge(size) => {
+                frame.render_widget(
+                    Paragraph::new(format!(
+                        "File is too large ({} MB) to display inline.",
+                        size / 1024 / 1024
+                    ))
+                    .alignment(ratatui::layout::Alignment::Center)
+                    .style(Style::default().fg(Color::Yellow)),
+                    list_area,
+                );
+                return;
+            }
+            DiffResult::Error(e) => {
+                frame.render_widget(
+                    Paragraph::new(format!("Error reading file: {}", e))
+                        .alignment(ratatui::layout::Alignment::Center)
+                        .style(Style::default().fg(Color::Red)),
+                    list_area,
+                );
+                return;
+            }
         };
 
         let syntax_opt = cache.syntax.get(path).value();

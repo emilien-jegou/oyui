@@ -16,16 +16,22 @@ pub async fn process_events(worker: &mut Tasker, cache: &mut DiffCache) {
             }
             WorkerEvent::FullDiff(res) => {
                 tracing::debug!(node_path = %res.node_path.display(), "Applied FullDiff cache");
-                let text = res.file_diff.new_text.clone();
-                cache.diffs.set(res.node_path.clone(), res.file_diff);
-                cache.syntax.mark_started(res.node_path.clone());
 
-                tracing::trace!(node_path = %res.node_path.display(), "Queueing Syntax task");
-                let _ = worker.send(tasks::syntax::SyntaxReq {
-                    node_path: res.node_path,
-                    text,
-                    right_path: res.right_path,
-                });
+                // If the file is valid text, we can also trigger the syntax highlighter!
+                if let crate::diff::DiffResult::Text(ref file_diff) = res.result {
+                    let text = file_diff.new_text.clone();
+                    cache.syntax.mark_started(res.node_path.clone());
+
+                    tracing::trace!(node_path = %res.node_path.display(), "Queueing Syntax task");
+                    let _ = worker.send(tasks::syntax::SyntaxReq {
+                        node_path: res.node_path.clone(),
+                        text,
+                        right_path: res.right_path.clone(),
+                    });
+                }
+
+                // Cache the full result (Text, Binary, TooLarge, or Error) for the view
+                cache.diffs.set(res.node_path, res.result);
             }
             WorkerEvent::Syntax(res) => {
                 tracing::debug!(node_path = %res.node_path.display(), "Applied Syntax cache");

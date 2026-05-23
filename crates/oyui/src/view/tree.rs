@@ -1,7 +1,10 @@
-use crate::diff_cache::DiffCache;
 use crate::commons::lazy;
+use crate::diff_cache::DiffCache;
 use crate::ui_state::TreeUiState;
-use crate::{diff::DiffStats, tree::{FileTree, StagingState, TreeNode}};
+use crate::{
+    diff::DiffStats,
+    tree::{FileTree, StagingState, TreeNode},
+};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
@@ -42,14 +45,8 @@ pub struct TreeViewData {
 impl TreeViewData {
     pub fn flat_rows(&self, tree: &FileTree, cache: &DiffCache) -> Vec<TreeRow> {
         let mut rows = Vec::new();
-        let visible_nodes: Vec<&TreeNode> = tree
-            .nodes
-            .iter()
-            .filter(|node| should_show_node(node, cache))
-            .collect();
-
-        let count = visible_nodes.len();
-        for (i, node) in visible_nodes.into_iter().enumerate() {
+        let count = tree.nodes.len();
+        for (i, node) in tree.nodes.iter().enumerate() {
             let is_last = i == count - 1;
             flatten_recursive(
                 node,
@@ -180,8 +177,12 @@ impl TreeViewData {
     ) {
         let (a, d, m) = diff_summary;
         let (tot_ins, tot_del) = cache.stats.iter().fold((0, 0), |acc, s| {
-            if let lazy::Lazy::Ready(s) = s {
-                (acc.0 + s.insertions, acc.1 + s.deletions)
+            if let lazy::Lazy::Ready(DiffStats::Text {
+                insertions,
+                deletions,
+            }) = s
+            {
+                (acc.0 + insertions, acc.1 + deletions)
             } else {
                 acc
             }
@@ -271,11 +272,6 @@ fn flatten_recursive(
     match node {
         TreeNode::File(file) => {
             let stats = cache.stats.get(&file.path).value().cloned();
-            if let Some(s) = &stats {
-                if s.insertions == 0 && s.deletions == 0 {
-                    return;
-                }
-            }
 
             rows.push(TreeRow {
                 path: file.path.clone(),
@@ -310,15 +306,10 @@ fn flatten_recursive(
             });
 
             if !folded {
-                let visible_children: Vec<&TreeNode> = dir
-                    .children
-                    .iter()
-                    .filter(|child| should_show_node(child, cache))
-                    .collect();
                 let mut child_continuations = parent_continuations.to_vec();
                 child_continuations.push(!is_last);
-                let child_count = visible_children.len();
-                for (i, child) in visible_children.into_iter().enumerate() {
+                let child_count = dir.children.len();
+                for (i, child) in dir.children.iter().enumerate() {
                     let child_is_last = i == child_count - 1;
                     flatten_recursive(
                         child,
@@ -332,23 +323,6 @@ fn flatten_recursive(
                 }
             }
         }
-    }
-}
-
-fn should_show_node(node: &TreeNode, cache: &DiffCache) -> bool {
-    match node {
-        TreeNode::File(f) => {
-            let stats_lazy = cache.stats.get(&f.path);
-            if let Some(s) = stats_lazy.value() {
-                s.insertions > 0 || s.deletions > 0
-            } else {
-                true
-            }
-        }
-        TreeNode::Directory(d) => d
-            .children
-            .iter()
-            .any(|child| should_show_node(child, cache)),
     }
 }
 
@@ -414,23 +388,38 @@ fn render_tree_row(row: &TreeRow) -> ListItem<'_> {
     }
 
     // 5. Dynamic Stats
-    if let Some(s) = &row.stats {
-        if s.insertions > 0 || s.deletions > 0 {
-            spans.push(Span::raw("  "));
-        }
-
-        if s.insertions > 0 {
-            spans.push(Span::styled(
-                format!("+{} ", s.insertions),
-                Style::default().fg(get_diff_color(s.insertions, true)),
-            ));
-        }
-
-        if s.deletions > 0 {
-            spans.push(Span::styled(
-                format!("-{} ", s.deletions),
-                Style::default().fg(get_diff_color(s.deletions, false)),
-            ));
+    if let Some(stats) = &row.stats {
+        match stats {
+            DiffStats::Binary { bytes } => {
+                spans.push(Span::raw(" "));
+                spans.push(Span::styled("(binary)", Style::default().fg(Color::Blue)));
+                spans.push(Span::raw(" "));
+                let sign = if *bytes > 0 { "+" } else { "" };
+                spans.push(Span::styled(
+                    format!("{}{} bytes ", sign, bytes),
+                    Style::default().fg(Color::DarkGray),
+                ));
+            }
+            DiffStats::Text {
+                insertions,
+                deletions,
+            } => {
+                if *insertions > 0 || *deletions > 0 {
+                    spans.push(Span::raw("  "));
+                }
+                if *insertions > 0 {
+                    spans.push(Span::styled(
+                        format!("+{} ", insertions),
+                        Style::default().fg(get_diff_color(*insertions, true)),
+                    ));
+                }
+                if *deletions > 0 {
+                    spans.push(Span::styled(
+                        format!("-{} ", deletions),
+                        Style::default().fg(get_diff_color(*deletions, false)),
+                    ));
+                }
+            }
         }
     }
 

@@ -7,7 +7,7 @@ use crate::tree::FileTree;
 use crate::worker::context::AppWorkerContext;
 use crate::worker::{tasks, Tasker};
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event},
+    event::{self, Event},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -84,7 +84,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::debug!("Initializing terminal");
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
@@ -133,11 +133,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ── Cleanup ──────────────────────────────────────────────────────────────
     tracing::debug!("Restoring terminal state");
     disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    )?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
 
     tracing::info!("Shutting down background worker...");
