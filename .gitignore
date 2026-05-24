@@ -17,6 +17,9 @@
 !crates/oyui/
 !crates/oyui/**/*
 
+!crates/syndiff/
+!crates/syndiff/**/*
+
 !docs/
 !docs/**/*
 
