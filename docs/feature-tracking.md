@@ -6,7 +6,6 @@ project. Feature requests are still done via github issues.
 ## List
 
 - Have the tool work as a difftool for jujutsu
-- Have next file/prev file navigation for file view
 - Have segments view (scroll on whole diff instead of single file)
 - advanced search for pattern e.g.:
 ```
@@ -21,3 +20,4 @@ project. Feature requests are still done via github issues.
 - In split edition e.g. 'd' for deleting a change in file view without leaving the tool
 - merge long directory chain e.g. 'packages/ui/src' could be all on one line
 - remote merge review (github)
+- Identify binary file incoherence of file signature (e.g. an exe with a png extension)

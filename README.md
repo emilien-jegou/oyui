@@ -19,6 +19,7 @@ I built **Oyui** to bridge this gap, focusing on a friction-free experience with
 *   **Command Palette:** Perform bulk operations with simple commands.
     *   `:add ./icons/*` (or `:a`) to stage files.
     *   `:unstage ./icons/*` (or `:u`) to unstage files.
+*   **Binary support:** Infer binary files format using their [magic number signature](https://en.wikipedia.org/wiki/Magic_number_(programming)).
 *   **Themed Diffs:** Beautiful, readable syntax highlighting for your changes.
     ![Redesign screenshot](./docs/assets/screen1.png)
 
