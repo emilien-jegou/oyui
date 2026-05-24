@@ -1,4 +1,5 @@
 use crate::app::events::ExitAction;
+use crate::diff_cache::DiffCache;
 use crate::tree::{FileTree, StagingState, TreeNode};
 use std::error::Error;
 use std::path::Path;
@@ -8,6 +9,7 @@ pub fn confirm_and_write(
     tree: &mut FileTree,
     should_quit: &mut bool,
     right_dir: &Path,
+    cache: &DiffCache,
 ) -> Result<ExitAction, Box<dyn Error>> {
     let has_staged_changes = is_anything_staged(&tree.nodes);
 
@@ -17,7 +19,7 @@ pub fn confirm_and_write(
         ));
     }
 
-    apply_tree_changes(&tree.nodes, right_dir)?;
+    apply_tree_changes(&tree.nodes, right_dir, cache)?;
     *should_quit = true;
     Ok(ExitAction::KeepRunning)
 }
@@ -26,7 +28,8 @@ fn is_anything_staged(nodes: &[TreeNode]) -> bool {
     for node in nodes {
         match node {
             TreeNode::File(f) => {
-                if f.state == StagingState::Staged {
+                // Must account for partially staged files as valid changes!
+                if f.state == StagingState::Staged || f.state == StagingState::PartiallyStaged {
                     return true;
                 }
             }
@@ -40,7 +43,11 @@ fn is_anything_staged(nodes: &[TreeNode]) -> bool {
     false
 }
 
-fn apply_tree_changes(nodes: &[TreeNode], right_dir: &Path) -> Result<(), Box<dyn Error>> {
+fn apply_tree_changes(
+    nodes: &[TreeNode],
+    right_dir: &Path,
+    cache: &DiffCache,
+) -> Result<(), Box<dyn Error>> {
     for node in nodes {
         match node {
             TreeNode::File(f) => {
@@ -67,10 +74,100 @@ fn apply_tree_changes(nodes: &[TreeNode], right_dir: &Path) -> Result<(), Box<dy
                         }
                         std::fs::copy(l, &r)?;
                     }
+                } else if f.state == StagingState::PartiallyStaged {
+                    // Reconstruct the file text using only the user's staged lines
+                    if let Some(crate::diff::DiffResult::Text(diff)) =
+                        cache.diffs.get(&f.path).value()
+                    {
+                        let mut out = String::new();
+                        let old_lines: Vec<&str> = diff.old_text.split('\n').collect();
+                        let new_lines: Vec<&str> = diff.new_text.split('\n').collect();
+
+                        let mut current_old_line = 0;
+                        let mut selection_idx = 0;
+                        let mut first_line_written = false;
+
+                        for hunk in &diff.hunks {
+                            while current_old_line < hunk.before_lines.start {
+                                if current_old_line < old_lines.len() {
+                                    if first_line_written {
+                                        out.push('\n');
+                                    }
+                                    out.push_str(old_lines[current_old_line]);
+                                    first_line_written = true;
+                                }
+                                current_old_line += 1;
+                            }
+
+                            for diff_line in &hunk.lines {
+                                let is_staged =
+                                    *diff.line_selections.get(selection_idx).unwrap_or(&false);
+                                selection_idx += 1;
+
+                                match diff_line {
+                                    crate::diff::DiffLine::Context { old_line_idx, .. } => {
+                                        if *old_line_idx < old_lines.len() {
+                                            if first_line_written {
+                                                out.push('\n');
+                                            }
+                                            out.push_str(old_lines[*old_line_idx]);
+                                            first_line_written = true;
+                                        }
+                                        current_old_line = *old_line_idx + 1;
+                                    }
+                                    crate::diff::DiffLine::Deletion { old_line_idx, .. } => {
+                                        if !is_staged {
+                                            // Unstaged deletion means we KEEP the old text
+                                            if *old_line_idx < old_lines.len() {
+                                                if first_line_written {
+                                                    out.push('\n');
+                                                }
+                                                out.push_str(old_lines[*old_line_idx]);
+                                                first_line_written = true;
+                                            }
+                                        }
+                                        current_old_line = *old_line_idx + 1;
+                                    }
+                                    crate::diff::DiffLine::Addition { new_line_idx, .. } => {
+                                        if is_staged {
+                                            // Staged addition means we ADD the new text
+                                            if *new_line_idx < new_lines.len() {
+                                                if first_line_written {
+                                                    out.push('\n');
+                                                }
+                                                out.push_str(new_lines[*new_line_idx]);
+                                                first_line_written = true;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Output any remaining unchanged old lines
+                        while current_old_line < old_lines.len() {
+                            if first_line_written {
+                                out.push('\n');
+                            }
+                            out.push_str(old_lines[current_old_line]);
+                            first_line_written = true;
+                            current_old_line += 1;
+                        }
+
+                        let r = match &f.right_path {
+                            Some(path) => path.clone(),
+                            None => right_dir.join(&f.path),
+                        };
+
+                        if let Some(parent) = r.parent() {
+                            std::fs::create_dir_all(parent)?;
+                        }
+                        std::fs::write(&r, out)?;
+                    }
                 }
             }
             TreeNode::Directory(d) => {
-                apply_tree_changes(&d.children, right_dir)?;
+                apply_tree_changes(&d.children, right_dir, cache)?;
             }
         }
     }
