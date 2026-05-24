@@ -1,4 +1,4 @@
-use crate::{cli::Opts, syntax::SyntaxEngine};
+use crate::{cli::{DiffAlgorithm, Opts}, syntax::SyntaxEngine};
 use oyui_tasker::TaskerProvide;
 use typed_builder::TypedBuilder;
 
@@ -6,4 +6,5 @@ use typed_builder::TypedBuilder;
 pub struct AppWorkerContext {
     pub syntax_engine: SyntaxEngine,
     pub config: Opts,
+    pub algorithm: DiffAlgorithm,
 }

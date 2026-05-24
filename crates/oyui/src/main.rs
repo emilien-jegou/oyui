@@ -51,6 +51,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let worker = Tasker::spawn(
         AppWorkerContext::builder()
             .syntax_engine(SyntaxEngine::new())
+            .algorithm(opts.diff_algorithm)
             .config(opts.clone())
             .build(),
     );

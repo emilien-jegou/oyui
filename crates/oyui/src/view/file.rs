@@ -228,42 +228,34 @@ impl FileViewData {
                     false,
                     false,
                     is_selected,
+                    &[],
                     syntax_opt,
                 ));
                 current_new += 1;
                 visual_row_idx += 1;
             }
 
-            // Print deleted lines (red context)
-            for old_idx in hunk.before_lines.clone() {
-                if old_idx < old_lines.len() {
-                    let is_selected = visual_row_idx == selected_row_idx;
-                    rows.push(render_line(
-                        old_lines[old_idx],
-                        old_idx,
-                        false,
-                        true,
-                        is_selected,
-                        None,
-                    ));
-                    visual_row_idx += 1;
-                }
-            }
-
-            // Print added lines (green context)
-            for new_idx in hunk.after_lines.clone() {
-                if new_idx < new_lines.len() {
-                    let is_selected = visual_row_idx == selected_row_idx;
-                    rows.push(render_line(
-                        new_lines[new_idx],
-                        new_idx,
-                        true,
-                        false,
-                        is_selected,
-                        syntax_opt,
-                    ));
-                    current_new += 1;
-                    visual_row_idx += 1;
+            // Print all rich lines within the hunk
+            for diff_line in &hunk.lines {
+                let is_selected = visual_row_idx == selected_row_idx;
+                match diff_line {
+                    crate::diff::DiffLine::Context { new_line_idx, .. } => {
+                        let line = new_lines.get(*new_line_idx).copied().unwrap_or("");
+                        rows.push(render_line(line, *new_line_idx, false, false, is_selected, &[], syntax_opt));
+                        current_new = *new_line_idx + 1;
+                        visual_row_idx += 1;
+                    }
+                    crate::diff::DiffLine::Deletion { old_line_idx, inline_highlights } => {
+                        let line = old_lines.get(*old_line_idx).copied().unwrap_or("");
+                        rows.push(render_line(line, *old_line_idx, false, true, is_selected, inline_highlights, None));
+                        visual_row_idx += 1;
+                    }
+                    crate::diff::DiffLine::Addition { new_line_idx, inline_highlights } => {
+                        let line = new_lines.get(*new_line_idx).copied().unwrap_or("");
+                        rows.push(render_line(line, *new_line_idx, true, false, is_selected, inline_highlights, syntax_opt));
+                        current_new = *new_line_idx + 1;
+                        visual_row_idx += 1;
+                    }
                 }
             }
         }
@@ -277,6 +269,7 @@ impl FileViewData {
                 false,
                 false,
                 is_selected,
+                &[],
                 syntax_opt,
             ));
             current_new += 1;
@@ -305,6 +298,7 @@ fn render_line<'a>(
     is_add: bool,
     is_del: bool,
     is_selected: bool,
+    inline_highlights: &[crate::diff::InlineChange],
     syntax_opt: Option<&'a Vec<Vec<(syntect::highlighting::Style, String)>>>,
 ) -> Row<'a> {
     let row_style = get_line_style(is_add, is_del, is_selected);
@@ -318,25 +312,85 @@ fn render_line<'a>(
 
     let mut row_spans = vec![Span::styled(prefix, row_style)];
 
-    // Apply syntax highlighting exclusively to un-deleted text if provided
-    if !is_del {
-        if let Some(syntax_lines) = syntax_opt {
-            if let Some(styles) = syntax_lines.get(idx) {
-                for (syn_style, text) in styles {
-                    let mut base_style = to_tui_style(*syn_style);
-                    if is_add {
-                        base_style = base_style.fg(CLR_ADD_FG);
-                    }
-                    row_spans.push(Span::styled(text.clone(), base_style));
-                }
-            } else {
-                row_spans.push(Span::styled(content.to_string(), row_style));
-            }
-        } else {
-            row_spans.push(Span::styled(content.to_string(), row_style));
-        }
+    // Establish vivid inline highlight background colors mimicking Difftastic/GitHub
+    let inline_bg = if is_selected {
+        if is_add { Color::Rgb(65, 130, 65) } else { Color::Rgb(150, 65, 65) }
     } else {
-        row_spans.push(Span::styled(content.to_string(), row_style));
+        if is_add { Color::Rgb(40, 100, 40) } else { Color::Rgb(120, 40, 40) }
+    };
+
+    // Construct a fallback syntax token for lines lacking syntect data (or deleted lines)
+    let fallback_style = syntect::highlighting::Style {
+        foreground: syntect::highlighting::Color { r: 200, g: 200, b: 200, a: 255 },
+        background: syntect::highlighting::Color::WHITE, // ignored
+        font_style: syntect::highlighting::FontStyle::empty(),
+    };
+    let fallback_tokens = vec![(fallback_style, content.to_string())];
+
+    let tokens = if !is_del {
+        syntax_opt
+            .and_then(|lines| lines.get(idx))
+            .filter(|t| !t.is_empty())
+            .unwrap_or(&fallback_tokens)
+    } else {
+        &fallback_tokens
+    };
+
+    let mut current_byte = 0;
+
+    for (syn_style, text) in tokens {
+        let text_start = current_byte;
+        let text_end = text_start + text.len();
+        
+        let mut base_style = to_tui_style(*syn_style);
+        if is_add { base_style = base_style.fg(CLR_ADD_FG); }
+        if is_del { base_style = base_style.fg(CLR_DEL_FG); }
+
+        let mut token_offset = 0;
+        
+        while token_offset < text.len() {
+            let abs_byte = text_start + token_offset;
+            let active_hl = inline_highlights.iter().find(|h| h.byte_range.contains(&abs_byte));
+            
+            let prev_offset = token_offset;
+
+            if let Some(hl) = active_hl {
+                // Slice up to the end of the highlight, or the end of the text chunk (whichever comes first)
+                let hl_end_in_token = (hl.byte_range.end.saturating_sub(text_start)).min(text.len());
+                
+                // .get() safely handles misaligned unicode byte bounds without panicking
+                if let Some(slice) = text.get(token_offset..hl_end_in_token) {
+                    row_spans.push(Span::styled(slice.to_string(), base_style.bg(inline_bg)));
+                } else {
+                    row_spans.push(Span::styled(text[token_offset..].to_string(), base_style));
+                    break;
+                }
+                token_offset = hl_end_in_token;
+            } else {
+                // Find where the NEXT highlight begins within this token
+                let next_hl_start = inline_highlights.iter()
+                    .map(|h| h.byte_range.start)
+                    .filter(|&start| start > abs_byte)
+                    .min()
+                    .unwrap_or(text_end);
+                
+                let next_hl_in_token = (next_hl_start.saturating_sub(text_start)).min(text.len());
+                
+                if let Some(slice) = text.get(token_offset..next_hl_in_token) {
+                    row_spans.push(Span::styled(slice.to_string(), base_style));
+                } else {
+                    row_spans.push(Span::styled(text[token_offset..].to_string(), base_style));
+                    break;
+                }
+                token_offset = next_hl_in_token;
+            }
+
+            // Fallback lock prevention: Ensure we continually step forward
+            if token_offset <= prev_offset {
+                break;
+            }
+        }
+        current_byte = text_end;
     }
 
     let line_num_style = if is_selected {

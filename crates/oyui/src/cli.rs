@@ -1,5 +1,15 @@
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use std::path::PathBuf;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum DiffAlgorithm {
+    Histogram,
+    Myers,
+    #[clap(alias = "myers-minimal")]
+    MyersMinimal,
+    #[clap(alias = "experimental--syntax-aware")]
+    SyntaxAware,
+}
 
 #[derive(Clone, Debug, Parser)]
 #[command(name = "oyui")]
@@ -33,4 +43,8 @@ pub struct Opts {
     /// Enable console logging (will automatically suspend while the TUI is drawn)
     #[arg(long = "log-console")]
     pub log_console: bool,
+
+    /// Diff algorithm to use for file view
+    #[arg(long = "diff-algorithm", default_value = "histogram")]
+    pub diff_algorithm: DiffAlgorithm,
 }
