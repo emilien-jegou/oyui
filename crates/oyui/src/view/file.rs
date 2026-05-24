@@ -20,6 +20,7 @@ pub struct FileViewData {
     pub row_counts: HashMap<PathBuf, usize>,
     pub current_path: Option<PathBuf>,
     pub pending_g: bool,
+    pub scrolloff: usize,
 }
 
 impl FileViewData {
@@ -241,18 +242,48 @@ impl FileViewData {
                 match diff_line {
                     crate::diff::DiffLine::Context { new_line_idx, .. } => {
                         let line = new_lines.get(*new_line_idx).copied().unwrap_or("");
-                        rows.push(render_line(line, *new_line_idx, false, false, is_selected, &[], syntax_opt));
+                        rows.push(render_line(
+                            line,
+                            *new_line_idx,
+                            false,
+                            false,
+                            is_selected,
+                            &[],
+                            syntax_opt,
+                        ));
                         current_new = *new_line_idx + 1;
                         visual_row_idx += 1;
                     }
-                    crate::diff::DiffLine::Deletion { old_line_idx, inline_highlights } => {
+                    crate::diff::DiffLine::Deletion {
+                        old_line_idx,
+                        inline_highlights,
+                    } => {
                         let line = old_lines.get(*old_line_idx).copied().unwrap_or("");
-                        rows.push(render_line(line, *old_line_idx, false, true, is_selected, inline_highlights, None));
+                        rows.push(render_line(
+                            line,
+                            *old_line_idx,
+                            false,
+                            true,
+                            is_selected,
+                            inline_highlights,
+                            None,
+                        ));
                         visual_row_idx += 1;
                     }
-                    crate::diff::DiffLine::Addition { new_line_idx, inline_highlights } => {
+                    crate::diff::DiffLine::Addition {
+                        new_line_idx,
+                        inline_highlights,
+                    } => {
                         let line = new_lines.get(*new_line_idx).copied().unwrap_or("");
-                        rows.push(render_line(line, *new_line_idx, true, false, is_selected, inline_highlights, syntax_opt));
+                        rows.push(render_line(
+                            line,
+                            *new_line_idx,
+                            true,
+                            false,
+                            is_selected,
+                            inline_highlights,
+                            syntax_opt,
+                        ));
                         current_new = *new_line_idx + 1;
                         visual_row_idx += 1;
                     }
@@ -288,6 +319,20 @@ impl FileViewData {
         )
         .block(Block::default().borders(Borders::NONE).bg(CLR_BG));
 
+        let height = list_area.height as usize;
+        if height > 0 {
+            let mut offset = scroll_state.offset();
+            // Prevent scrolloff from overlapping itself if the screen is tiny
+            let scrolloff = self.scrolloff.min(height.saturating_sub(1) / 2);
+
+            if selected_row_idx < offset + scrolloff {
+                offset = selected_row_idx.saturating_sub(scrolloff);
+            } else if selected_row_idx + scrolloff >= offset + height {
+                offset = (selected_row_idx + scrolloff + 1).saturating_sub(height);
+            }
+            *scroll_state.offset_mut() = offset;
+        }
+
         frame.render_stateful_widget(table, list_area, scroll_state);
     }
 }
@@ -314,14 +359,27 @@ fn render_line<'a>(
 
     // Establish vivid inline highlight background colors mimicking Difftastic/GitHub
     let inline_bg = if is_selected {
-        if is_add { Color::Rgb(65, 130, 65) } else { Color::Rgb(150, 65, 65) }
+        if is_add {
+            Color::Rgb(65, 130, 65)
+        } else {
+            Color::Rgb(150, 65, 65)
+        }
     } else {
-        if is_add { Color::Rgb(40, 100, 40) } else { Color::Rgb(120, 40, 40) }
+        if is_add {
+            Color::Rgb(40, 100, 40)
+        } else {
+            Color::Rgb(120, 40, 40)
+        }
     };
 
     // Construct a fallback syntax token for lines lacking syntect data (or deleted lines)
     let fallback_style = syntect::highlighting::Style {
-        foreground: syntect::highlighting::Color { r: 200, g: 200, b: 200, a: 255 },
+        foreground: syntect::highlighting::Color {
+            r: 200,
+            g: 200,
+            b: 200,
+            a: 255,
+        },
         background: syntect::highlighting::Color::WHITE, // ignored
         font_style: syntect::highlighting::FontStyle::empty(),
     };
@@ -341,23 +399,30 @@ fn render_line<'a>(
     for (syn_style, text) in tokens {
         let text_start = current_byte;
         let text_end = text_start + text.len();
-        
+
         let mut base_style = to_tui_style(*syn_style);
-        if is_add { base_style = base_style.fg(CLR_ADD_FG); }
-        if is_del { base_style = base_style.fg(CLR_DEL_FG); }
+        if is_add {
+            base_style = base_style.fg(CLR_ADD_FG);
+        }
+        if is_del {
+            base_style = base_style.fg(CLR_DEL_FG);
+        }
 
         let mut token_offset = 0;
-        
+
         while token_offset < text.len() {
             let abs_byte = text_start + token_offset;
-            let active_hl = inline_highlights.iter().find(|h| h.byte_range.contains(&abs_byte));
-            
+            let active_hl = inline_highlights
+                .iter()
+                .find(|h| h.byte_range.contains(&abs_byte));
+
             let prev_offset = token_offset;
 
             if let Some(hl) = active_hl {
                 // Slice up to the end of the highlight, or the end of the text chunk (whichever comes first)
-                let hl_end_in_token = (hl.byte_range.end.saturating_sub(text_start)).min(text.len());
-                
+                let hl_end_in_token =
+                    (hl.byte_range.end.saturating_sub(text_start)).min(text.len());
+
                 // .get() safely handles misaligned unicode byte bounds without panicking
                 if let Some(slice) = text.get(token_offset..hl_end_in_token) {
                     row_spans.push(Span::styled(slice.to_string(), base_style.bg(inline_bg)));
@@ -368,14 +433,15 @@ fn render_line<'a>(
                 token_offset = hl_end_in_token;
             } else {
                 // Find where the NEXT highlight begins within this token
-                let next_hl_start = inline_highlights.iter()
+                let next_hl_start = inline_highlights
+                    .iter()
                     .map(|h| h.byte_range.start)
                     .filter(|&start| start > abs_byte)
                     .min()
                     .unwrap_or(text_end);
-                
+
                 let next_hl_in_token = (next_hl_start.saturating_sub(text_start)).min(text.len());
-                
+
                 if let Some(slice) = text.get(token_offset..next_hl_in_token) {
                     row_spans.push(Span::styled(slice.to_string(), base_style));
                 } else {

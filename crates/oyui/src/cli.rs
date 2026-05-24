@@ -47,4 +47,8 @@ pub struct Opts {
     /// Diff algorithm to use for file view
     #[arg(long = "diff-algorithm", default_value = "histogram")]
     pub diff_algorithm: DiffAlgorithm,
+
+    /// Number of lines to keep as padding when scrolling
+    #[arg(long = "scrolloff", default_value = "2")]
+    pub scrolloff: usize,
 }
