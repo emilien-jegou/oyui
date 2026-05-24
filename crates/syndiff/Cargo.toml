@@ -10,17 +10,61 @@ categories = ["algorithms", "text-processing", "development-tools"]
 readme = "README.md"
 documentation = "https://docs.rs/syndiff/"
 
+[features]
+default = ["all-languages"]
+rust = ["dep:tree-sitter-rust"]
+python = ["dep:tree-sitter-python"]
+go = ["dep:tree-sitter-go"]
+javascript = ["dep:tree-sitter-javascript"]
+typescript = ["dep:tree-sitter-typescript"]
+c = ["dep:tree-sitter-c"]
+cpp = ["dep:tree-sitter-cpp"]
+c-sharp = ["dep:tree-sitter-c-sharp"]
+java = ["dep:tree-sitter-java"]
+ruby = ["dep:tree-sitter-ruby"]
+php = ["dep:tree-sitter-php"]
+json = ["dep:tree-sitter-json"]
+yaml = ["dep:tree-sitter-yaml"]
+toml = ["dep:tree-sitter-toml-ng"]
+html = ["dep:tree-sitter-html"]
+css = ["dep:tree-sitter-css"]
+bash = ["dep:tree-sitter-bash"]
+
+
+all-languages = [
+    "rust", "python", "go", "javascript", "typescript", "c", "cpp", "c-sharp",
+    "java", "ruby", "php", "json", "yaml", "toml", "html", "css", "bash"
+]
+
 [dependencies]
 arrayvec = { workspace = true }
 imara-diff = { workspace = true }
 rustc-hash = { workspace = true }
 smallvec = { workspace = true }
 strsim = { workspace = true }
+
+# tree-sitter
 tree-sitter = { workspace = true }
+tree-sitter-rust = { workspace = true, optional = true }
+tree-sitter-python = { workspace = true, optional = true }
+tree-sitter-go = { workspace = true, optional = true }
+tree-sitter-javascript = { workspace = true, optional = true }
+tree-sitter-typescript = { workspace = true, optional = true }
+tree-sitter-c = { workspace = true, optional = true }
+tree-sitter-cpp = { workspace = true, optional = true }
+tree-sitter-c-sharp = { workspace = true, optional = true }
+tree-sitter-java = { workspace = true, optional = true }
+tree-sitter-ruby = { workspace = true, optional = true }
+tree-sitter-php = { workspace = true, optional = true }
+tree-sitter-json = { workspace = true, optional = true }
+tree-sitter-yaml = { workspace = true, optional = true }
+tree-sitter-toml-ng = { workspace = true, optional = true }
+tree-sitter-html = { workspace = true, optional = true }
+tree-sitter-css = { workspace = true, optional = true }
+tree-sitter-bash = { workspace = true, optional = true }
 
 [dev-dependencies]
 indoc = { workspace = true }
 rstest = { workspace = true }
-tree-sitter-json = { workspace = true }
 tree-sitter-rust = { workspace = true }
-
+tree-sitter-json = { workspace = true }

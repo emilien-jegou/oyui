@@ -160,6 +160,9 @@ use crate::syntax_tree::{SyntaxHint, SyntaxNode};
 mod syntax_delimiters;
 mod syntax_graph;
 mod syntax_tree;
+mod diff_source;
+
+pub use diff_source::*;
 
 pub use syntax_tree::{build_tree, SyntaxTree};
 

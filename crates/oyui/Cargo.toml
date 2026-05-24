@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 oyui-tasker = { path = "../oyui-tasker" }
+syndiff = { path = "../syndiff" }
 rayon = { workspace = true }
 tokio = { workspace = true }
 ratatui = { workspace = true }
