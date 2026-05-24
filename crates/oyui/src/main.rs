@@ -56,11 +56,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .build(),
     );
 
-    // 2. Pass the cloned worker wrapper into your App
     let mut app = App::new(worker);
     app.base_path = opts.base.clone();
     app.left_path = Some(opts.left.clone());
     app.right_path = Some(opts.right.clone());
+    app.view.file_view.scrolloff = opts.scrolloff;
+    app.view.tree_view.scrolloff = opts.scrolloff;
 
     tracing::info!(left = %opts.left.display(), right = %opts.right.display(), "Building file tree...");
     let (tree, files_to_stat) = FileTree::build_from_dir_diff(&opts.left, &opts.right);

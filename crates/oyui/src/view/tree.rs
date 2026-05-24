@@ -40,6 +40,8 @@ pub struct TreeViewData {
     pub selected_index: usize,
     pub ui_state: TreeUiState,
     pub pending_g: bool,
+    pub scrolloff: usize,
+    pub list_state: ListState,
 }
 
 impl TreeViewData {
@@ -227,14 +229,28 @@ impl TreeViewData {
     ) {
         let rows = self.flat_rows(tree, cache);
         let items: Vec<ListItem> = rows.iter().map(render_tree_row).collect();
-        let mut list_state = ListState::default();
-        list_state.select(Some(self.selected_index));
+        self.list_state.select(Some(self.selected_index));
+
+        let height = area.height as usize;
+        if height > 0 {
+            let selected = self.selected_index;
+            let mut offset = self.list_state.offset();
+            // Prevent scrolloff from overlapping itself if the screen is tiny
+            let scrolloff = self.scrolloff.min(height.saturating_sub(1) / 2);
+
+            if selected < offset + scrolloff {
+                offset = selected.saturating_sub(scrolloff);
+            } else if selected + scrolloff >= offset + height {
+                offset = (selected + scrolloff + 1).saturating_sub(height);
+            }
+            *self.list_state.offset_mut() = offset;
+        }
 
         let list = List::new(items)
             .block(Block::default().style(Style::default().bg(CLR_BG)))
             .highlight_style(Style::default().bg(CLR_CURSOR_BG));
 
-        frame.render_stateful_widget(list, area, &mut list_state);
+        frame.render_stateful_widget(list, area, &mut self.list_state);
     }
 }
 
