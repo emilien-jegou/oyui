@@ -61,6 +61,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.left_path = Some(opts.left.clone());
     app.right_path = Some(opts.right.clone());
     app.view.file_view.scrolloff = opts.scrolloff;
+    app.view.file_view.context_lines = opts.context_lines;
     app.view.tree_view.scrolloff = opts.scrolloff;
 
     tracing::info!(left = %opts.left.display(), right = %opts.right.display(), "Building file tree...");
