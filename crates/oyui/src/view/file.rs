@@ -1,4 +1,7 @@
-use crate::{diff::DiffResult, diff_cache::DiffCache};
+use crate::{
+    diff::{DiffResult, FileDiff},
+    diff_cache::DiffCache,
+};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
@@ -14,18 +17,98 @@ use super::{
     ViewAction, CLR_ADD_BG, CLR_ADD_FG, CLR_BG, CLR_CURSOR_BG, CLR_DEL_BG, CLR_DEL_FG, CLR_FG,
 };
 
-#[derive(Default)]
 pub struct FileViewData {
     pub scroll_states: HashMap<PathBuf, TableState>,
     pub row_counts: HashMap<PathBuf, usize>,
+    pub line_mapping: HashMap<PathBuf, Vec<usize>>,
     pub current_path: Option<PathBuf>,
     pub pending_g: bool,
     pub scrolloff: usize,
+    pub is_folded: bool,
+    pub context_lines: usize,
+}
+
+impl Default for FileViewData {
+    fn default() -> Self {
+        Self {
+            scroll_states: HashMap::new(),
+            row_counts: HashMap::new(),
+            line_mapping: HashMap::new(),
+            current_path: None,
+            pending_g: false,
+            scrolloff: 0,
+            is_folded: true,
+            context_lines: 4,
+        }
+    }
 }
 
 impl FileViewData {
+    fn get_line_map(&self, diff: &FileDiff, new_lines_len: usize) -> Vec<usize> {
+        let mut line_map = Vec::new();
+        let mut current_new = 0;
+
+        for (i, hunk) in diff.hunks.iter().enumerate() {
+            let hunk_new_start = hunk.after_lines.start;
+            let context_start = hunk_new_start.saturating_sub(self.context_lines);
+
+            if self.is_folded && current_new < context_start {
+                line_map.push(current_new);
+                current_new = context_start;
+            }
+
+            while current_new < hunk_new_start && current_new < new_lines_len {
+                line_map.push(current_new);
+                current_new += 1;
+            }
+
+            for diff_line in &hunk.lines {
+                match diff_line {
+                    crate::diff::DiffLine::Context { new_line_idx, .. } => {
+                        line_map.push(current_new);
+                        current_new = *new_line_idx + 1;
+                    }
+                    crate::diff::DiffLine::Deletion { .. } => {
+                        line_map.push(current_new);
+                    }
+                    crate::diff::DiffLine::Addition { new_line_idx, .. } => {
+                        line_map.push(current_new);
+                        current_new = *new_line_idx + 1;
+                    }
+                }
+            }
+
+            if self.is_folded {
+                let next_hunk_start = diff
+                    .hunks
+                    .get(i + 1)
+                    .map(|h| h.after_lines.start)
+                    .unwrap_or(new_lines_len);
+                let context_end = current_new
+                    .saturating_add(self.context_lines)
+                    .min(next_hunk_start);
+
+                while current_new < context_end && current_new < new_lines_len {
+                    line_map.push(current_new);
+                    current_new += 1;
+                }
+            }
+        }
+
+        if !self.is_folded {
+            while current_new < new_lines_len {
+                line_map.push(current_new);
+                current_new += 1;
+            }
+        } else if current_new < new_lines_len {
+            line_map.push(current_new);
+        }
+
+        line_map
+    }
+
     #[tracing::instrument(skip_all)]
-    pub fn handle_input(&mut self, key: KeyEvent) -> ViewAction {
+    pub fn handle_input(&mut self, key: KeyEvent, cache: &DiffCache) -> ViewAction {
         let mut clear_pending = true;
         let is_ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
 
@@ -35,12 +118,22 @@ impl FileViewData {
                 .get(path)
                 .map(|&c| c.saturating_sub(1))
                 .unwrap_or(0);
-            let state = self.scroll_states.entry(path.clone()).or_default();
+
+            let (current_selected, current_offset) = {
+                let s = self.scroll_states.get(path);
+                (
+                    s.and_then(|st| st.selected()).unwrap_or(0),
+                    s.map(|st| st.offset()).unwrap_or(0),
+                )
+            };
+            let screen_y = current_selected.saturating_sub(current_offset);
+
+            let mut next_selected = current_selected;
+            let mut next_offset = None;
 
             let mut move_cursor = |delta: isize| {
-                let current = state.selected().unwrap_or(0) as isize;
-                let next = (current + delta).clamp(0, max_idx as isize) as usize;
-                state.select(Some(next));
+                next_selected =
+                    (current_selected as isize + delta).clamp(0, max_idx as isize) as usize;
             };
 
             match (key.code, is_ctrl) {
@@ -56,10 +149,36 @@ impl FileViewData {
                 (KeyCode::Char('j'), false) | (KeyCode::Down, _) => move_cursor(1),
                 (KeyCode::Char('k'), false) | (KeyCode::Up, _) => move_cursor(-1),
 
-                (KeyCode::Char('G'), false) => state.select(Some(max_idx)),
+                (KeyCode::Char('G'), false) => next_selected = max_idx,
+                (KeyCode::Char('f'), false) | (KeyCode::Char('z'), false) => {
+                    let mut target_logical = 0;
+                    if let Some(mapping) = self.line_mapping.get(path) {
+                        target_logical = mapping.get(current_selected).copied().unwrap_or(0);
+                    }
+
+                    self.is_folded = !self.is_folded;
+
+                    if let Some(diff_result) = cache.diffs.get(path).value() {
+                        if let crate::diff::DiffResult::Text(diff) = diff_result {
+                            let new_lines_len = diff.new_text.lines().count();
+                            let new_map = self.get_line_map(diff, new_lines_len);
+
+                            next_selected = new_map
+                                .iter()
+                                .position(|&l| l >= target_logical)
+                                .unwrap_or(new_map.len().saturating_sub(1));
+                        } else {
+                            next_selected = 0;
+                        }
+                    } else {
+                        next_selected = 0;
+                    }
+
+                    next_offset = Some(next_selected.saturating_sub(screen_y));
+                }
                 (KeyCode::Char('g'), false) => {
                     if self.pending_g {
-                        state.select(Some(0));
+                        next_selected = 0;
                         self.pending_g = false;
                         clear_pending = false;
                     } else {
@@ -68,6 +187,12 @@ impl FileViewData {
                     }
                 }
                 _ => {}
+            }
+
+            let state = self.scroll_states.entry(path.clone()).or_default();
+            state.select(Some(next_selected));
+            if let Some(off) = next_offset {
+                *state.offset_mut() = off;
             }
         } else {
             // No current path, handle globals
@@ -214,11 +339,29 @@ impl FileViewData {
         let selected_row_idx = scroll_state.selected().unwrap_or(0);
 
         let mut rows = Vec::new();
+        let mut line_map = Vec::new();
         let mut current_new = 0;
         let mut visual_row_idx = 0;
 
-        for hunk in &diff.hunks {
+        for (i, hunk) in diff.hunks.iter().enumerate() {
             let hunk_new_start = hunk.after_lines.start;
+            let context_start = hunk_new_start.saturating_sub(self.context_lines);
+
+            if self.is_folded {
+                if current_new < context_start {
+                    let hidden_count = context_start - current_new;
+                    let is_selected = visual_row_idx == selected_row_idx;
+                    rows.push(render_separator(
+                        hidden_count,
+                        Some(hunk.before_lines.start),
+                        Some(hunk.after_lines.start),
+                        is_selected,
+                    ));
+                    line_map.push(current_new);
+                    current_new = context_start;
+                    visual_row_idx += 1;
+                }
+            }
 
             // Print unchanged lines up to the hunk
             while current_new < hunk_new_start && current_new < new_lines.len() {
@@ -232,6 +375,7 @@ impl FileViewData {
                     &[],
                     syntax_opt,
                 ));
+                line_map.push(current_new);
                 current_new += 1;
                 visual_row_idx += 1;
             }
@@ -251,6 +395,7 @@ impl FileViewData {
                             &[],
                             syntax_opt,
                         ));
+                        line_map.push(current_new);
                         current_new = *new_line_idx + 1;
                         visual_row_idx += 1;
                     }
@@ -268,6 +413,7 @@ impl FileViewData {
                             inline_highlights,
                             None,
                         ));
+                        line_map.push(current_new);
                         visual_row_idx += 1;
                     }
                     crate::diff::DiffLine::Addition {
@@ -284,31 +430,73 @@ impl FileViewData {
                             inline_highlights,
                             syntax_opt,
                         ));
+                        line_map.push(current_new);
                         current_new = *new_line_idx + 1;
                         visual_row_idx += 1;
                     }
                 }
             }
+
+            if self.is_folded {
+                let next_hunk_start = diff
+                    .hunks
+                    .get(i + 1)
+                    .map(|h| h.after_lines.start)
+                    .unwrap_or(new_lines.len());
+                let context_end = current_new
+                    .saturating_add(self.context_lines)
+                    .min(next_hunk_start);
+
+                while current_new < context_end && current_new < new_lines.len() {
+                    let is_selected = visual_row_idx == selected_row_idx;
+                    rows.push(render_line(
+                        new_lines[current_new],
+                        current_new,
+                        false,
+                        false,
+                        is_selected,
+                        &[],
+                        syntax_opt,
+                    ));
+                    line_map.push(current_new);
+                    current_new += 1;
+                    visual_row_idx += 1;
+                }
+            }
         }
 
         // Print remaining unchanged lines safely
-        while current_new < new_lines.len() {
-            let is_selected = visual_row_idx == selected_row_idx;
-            rows.push(render_line(
-                new_lines[current_new],
-                current_new,
-                false,
-                false,
-                is_selected,
-                &[],
-                syntax_opt,
-            ));
-            current_new += 1;
-            visual_row_idx += 1;
+        if !self.is_folded {
+            while current_new < new_lines.len() {
+                let is_selected = visual_row_idx == selected_row_idx;
+                rows.push(render_line(
+                    new_lines[current_new],
+                    current_new,
+                    false,
+                    false,
+                    is_selected,
+                    &[],
+                    syntax_opt,
+                ));
+                line_map.push(current_new);
+                current_new += 1;
+                visual_row_idx += 1;
+            }
+        } else {
+            if current_new < new_lines.len() {
+                let hidden_count = new_lines.len() - current_new;
+                let is_selected = visual_row_idx == selected_row_idx;
+                rows.push(render_separator(hidden_count, None, None, is_selected));
+                line_map.push(current_new);
+                visual_row_idx += 1;
+            }
         }
 
+        let total_rows = rows.len();
+
         // Cache the total mapped row count for `handle_input` limits
-        self.row_counts.insert(path.clone(), rows.len());
+        self.row_counts.insert(path.clone(), total_rows);
+        self.line_mapping.insert(path.clone(), line_map);
 
         let table = Table::new(
             rows,
@@ -330,6 +518,10 @@ impl FileViewData {
             } else if selected_row_idx + scrolloff >= offset + height {
                 offset = (selected_row_idx + scrolloff + 1).saturating_sub(height);
             }
+
+            let max_offset = total_rows.saturating_sub(height);
+            offset = offset.min(max_offset);
+
             *scroll_state.offset_mut() = offset;
         }
 
@@ -505,4 +697,44 @@ fn to_tui_style(style: syntect::highlighting::Style) -> Style {
         style.foreground.g,
         style.foreground.b,
     ))
+}
+
+fn render_separator<'a>(
+    hidden_count: usize,
+    next_old: Option<usize>,
+    next_new: Option<usize>,
+    is_selected: bool,
+) -> Row<'a> {
+    let mut style = Style::default()
+        .bg(Color::Rgb(8, 8, 11))
+        .fg(Color::Rgb(100, 130, 180));
+    if is_selected {
+        style = style.bg(CLR_CURSOR_BG).fg(Color::White);
+    }
+
+    let mut spans = vec![];
+    if let (Some(old), Some(new)) = (next_old, next_new) {
+        spans.push(Span::styled(
+            format!(" @@ -{} +{} @@ ", old + 1, new + 1),
+            style.fg(if is_selected {
+                Color::White
+            } else {
+                Color::Rgb(130, 160, 220)
+            }),
+        ));
+    }
+    spans.push(Span::styled(
+        format!(" ⋯ {} hidden lines ⋯ ", hidden_count),
+        style,
+    ));
+
+    Row::new(vec![
+        Cell::from("  ⋮  ").style(style.fg(if is_selected {
+            Color::White
+        } else {
+            Color::DarkGray
+        })),
+        Cell::from(Line::from(spans)).style(style),
+    ])
+    .style(style)
 }

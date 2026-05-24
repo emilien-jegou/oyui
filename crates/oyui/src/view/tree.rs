@@ -304,12 +304,26 @@ fn flatten_recursive(
             });
         }
         TreeNode::Directory(dir) => {
-            let folded = ui_state.is_folded(&dir.path);
+            let mut current_dir = dir;
+            let mut combined_name = current_dir.name.clone();
+
+            // Look ahead: if the directory only contains exactly 1 directory child, compress it!
+            while current_dir.children.len() == 1 {
+                if let TreeNode::Directory(child_dir) = &current_dir.children[0] {
+                    combined_name.push('/');
+                    combined_name.push_str(&child_dir.name);
+                    current_dir = child_dir;
+                } else {
+                    break;
+                }
+            }
+
+            let folded = ui_state.is_folded(&current_dir.path);
             let staging_state = node.compute_staging_state();
 
             rows.push(TreeRow {
-                path: dir.path.clone(),
-                name: dir.name.clone(),
+                path: current_dir.path.clone(),
+                name: combined_name,
                 depth,
                 is_dir: true,
                 is_folded: folded,
@@ -324,8 +338,8 @@ fn flatten_recursive(
             if !folded {
                 let mut child_continuations = parent_continuations.to_vec();
                 child_continuations.push(!is_last);
-                let child_count = dir.children.len();
-                for (i, child) in dir.children.iter().enumerate() {
+                let child_count = current_dir.children.len();
+                for (i, child) in current_dir.children.iter().enumerate() {
                     let child_is_last = i == child_count - 1;
                     flatten_recursive(
                         child,

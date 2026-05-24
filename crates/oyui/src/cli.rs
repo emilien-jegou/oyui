@@ -51,4 +51,8 @@ pub struct Opts {
     /// Number of lines to keep as padding when scrolling
     #[arg(long = "scrolloff", default_value = "2")]
     pub scrolloff: usize,
+
+     /// Number of context lines to show around hunks in collapsed file view
+    #[arg(long = "context-lines", default_value = "4")]
+    pub context_lines: usize,
 }

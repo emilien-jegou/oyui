@@ -67,7 +67,7 @@ impl View {
     ) -> ViewAction {
         match self.current {
             ViewKind::Tree => self.tree_view.handle_input(key, tree, cache),
-            ViewKind::File => self.file_view.handle_input(key),
+            ViewKind::File => self.file_view.handle_input(key, cache),
         }
     }
 
