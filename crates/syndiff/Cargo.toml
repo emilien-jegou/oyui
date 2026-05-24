@@ -1,0 +1,26 @@
+[package]
+name = "syndiff"
+version = "0.2.0"
+edition = "2021"
+authors = ["Marco Mihai Condrache"]
+license = "MIT"
+description = "Standalone library that implements a structural diff algorithm inspired by Difftastic"
+keywords = ["diff", "tree-sitter", "syntax", "structural", "ast"]
+categories = ["algorithms", "text-processing", "development-tools"]
+readme = "README.md"
+documentation = "https://docs.rs/syndiff/"
+
+[dependencies]
+arrayvec = { workspace = true }
+imara-diff = { workspace = true }
+rustc-hash = { workspace = true }
+smallvec = { workspace = true }
+strsim = { workspace = true }
+tree-sitter = { workspace = true }
+
+[dev-dependencies]
+indoc = { workspace = true }
+rstest = { workspace = true }
+tree-sitter-json = { workspace = true }
+tree-sitter-rust = { workspace = true }
+
