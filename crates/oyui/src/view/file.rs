@@ -21,11 +21,13 @@ pub struct FileViewData {
     pub scroll_states: HashMap<PathBuf, TableState>,
     pub row_counts: HashMap<PathBuf, usize>,
     pub line_mapping: HashMap<PathBuf, Vec<usize>>,
+    pub hunk_starts: HashMap<PathBuf, Vec<usize>>,
     pub current_path: Option<PathBuf>,
     pub pending_g: bool,
     pub scrolloff: usize,
     pub is_folded: bool,
     pub context_lines: usize,
+    pub last_height: usize,
 }
 
 impl Default for FileViewData {
@@ -34,11 +36,13 @@ impl Default for FileViewData {
             scroll_states: HashMap::new(),
             row_counts: HashMap::new(),
             line_mapping: HashMap::new(),
+            hunk_starts: HashMap::new(),
             current_path: None,
             pending_g: false,
             scrolloff: 0,
             is_folded: true,
             context_lines: 4,
+            last_height: 0,
         }
     }
 }
@@ -148,6 +152,33 @@ impl FileViewData {
 
                 (KeyCode::Char('j'), false) | (KeyCode::Down, _) => move_cursor(1),
                 (KeyCode::Char('k'), false) | (KeyCode::Up, _) => move_cursor(-1),
+                (KeyCode::Char('n'), false) => {
+                    if let Some(starts) = self.hunk_starts.get(path) {
+                        let target = starts
+                            .iter()
+                            .find(|&&idx| idx > current_selected)
+                            .or_else(|| starts.first());
+                        if let Some(&t) = target {
+                            next_selected = t;
+                            let padding = self.last_height.saturating_sub(1) / 3;
+                            next_offset = Some(t.saturating_sub(padding));
+                        }
+                    }
+                }
+                (KeyCode::Char('N'), false) => {
+                    if let Some(starts) = self.hunk_starts.get(path) {
+                        let target = starts
+                            .iter()
+                            .rev()
+                            .find(|&&idx| idx < current_selected)
+                            .or_else(|| starts.last());
+                        if let Some(&t) = target {
+                            next_selected = t;
+                            let padding = self.last_height.saturating_sub(1) / 3;
+                            next_offset = Some(t.saturating_sub(padding));
+                        }
+                    }
+                }
 
                 (KeyCode::Char('G'), false) => next_selected = max_idx,
                 (KeyCode::Char('f'), false) | (KeyCode::Char('z'), false) => {
@@ -340,6 +371,7 @@ impl FileViewData {
 
         let mut rows = Vec::new();
         let mut line_map = Vec::new();
+        let mut hunk_starts_for_file = Vec::new();
         let mut current_new = 0;
         let mut visual_row_idx = 0;
 
@@ -347,8 +379,8 @@ impl FileViewData {
             let hunk_new_start = hunk.after_lines.start;
             let context_start = hunk_new_start.saturating_sub(self.context_lines);
 
-            if self.is_folded {
-                if current_new < context_start {
+            if self.is_folded
+                && current_new < context_start {
                     let hidden_count = context_start - current_new;
                     let is_selected = visual_row_idx == selected_row_idx;
                     rows.push(render_separator(
@@ -361,7 +393,6 @@ impl FileViewData {
                     current_new = context_start;
                     visual_row_idx += 1;
                 }
-            }
 
             // Print unchanged lines up to the hunk
             while current_new < hunk_new_start && current_new < new_lines.len() {
@@ -381,6 +412,8 @@ impl FileViewData {
             }
 
             // Print all rich lines within the hunk
+            // Print all rich lines within the hunk
+            let mut recorded_hunk_start = false;
             for diff_line in &hunk.lines {
                 let is_selected = visual_row_idx == selected_row_idx;
                 match diff_line {
@@ -403,6 +436,10 @@ impl FileViewData {
                         old_line_idx,
                         inline_highlights,
                     } => {
+                        if !recorded_hunk_start {
+                            hunk_starts_for_file.push(visual_row_idx);
+                            recorded_hunk_start = true;
+                        }
                         let line = old_lines.get(*old_line_idx).copied().unwrap_or("");
                         rows.push(render_line(
                             line,
@@ -420,6 +457,10 @@ impl FileViewData {
                         new_line_idx,
                         inline_highlights,
                     } => {
+                        if !recorded_hunk_start {
+                            hunk_starts_for_file.push(visual_row_idx);
+                            recorded_hunk_start = true;
+                        }
                         let line = new_lines.get(*new_line_idx).copied().unwrap_or("");
                         rows.push(render_line(
                             line,
@@ -497,6 +538,7 @@ impl FileViewData {
         // Cache the total mapped row count for `handle_input` limits
         self.row_counts.insert(path.clone(), total_rows);
         self.line_mapping.insert(path.clone(), line_map);
+        self.hunk_starts.insert(path.clone(), hunk_starts_for_file);
 
         let table = Table::new(
             rows,
@@ -508,6 +550,8 @@ impl FileViewData {
         .block(Block::default().borders(Borders::NONE).bg(CLR_BG));
 
         let height = list_area.height as usize;
+        self.last_height = height;
+
         if height > 0 {
             let mut offset = scroll_state.offset();
             // Prevent scrolloff from overlapping itself if the screen is tiny
