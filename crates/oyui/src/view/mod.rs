@@ -37,6 +37,7 @@ pub enum ViewAction {
     OpenCommandMode,
     ConfirmMerge,
     ToggleStageSelected,
+    ToggleStageHunk(usize),
     InvertSelection,
     OpenFileView {
         path: PathBuf,
@@ -86,7 +87,9 @@ impl View {
                 self.tree_view
                     .draw(frame, area, tree, cache, base_path, diff_summary)
             }
-            ViewKind::File => self.file_view.draw(frame, area, cache),
+            // Pass the tree to the file view
+            ViewKind::File => self.file_view.draw(frame, area, cache, tree),
         }
     }
 }
+

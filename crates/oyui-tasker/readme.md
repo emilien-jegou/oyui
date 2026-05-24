@@ -1,6 +1,6 @@
 # Oyui tasker
 
-A way to manage async work in oyui via threaded background workers. Tasks are executed concurrently on Tokio's worker pool, and communication is handled smoothly via lock-free channels.
+A way to manage async work in oyui via threaded background workers. Tasks are executed concurrently on Tokio's worker pool, and communication is handled seamlessly via asynchronous `mpsc` channels.
 
 ## Usage
 
@@ -57,7 +57,7 @@ register_tasker! {
 ```
 
 ### 3. Spawn and Interact!
-Everything runs through the unified `Tasker` object.
+Everything runs through the unified `Tasker` object. Because the channels are now asynchronous, you `await` responses.
 
 ```rust
 #[tokio::main]
@@ -72,8 +72,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 2. Send a request
     worker.send(StatsReq { path: "/tmp".to_string() }).unwrap();
 
-    // 3. Receive a response (usually done in your app's event/tick loop)
-    while let Ok(event) = worker.try_recv() {
+    // 3. Receive a response (non-blocking await)
+    if let Some(event) = worker.recv().await {
         match event {
             WorkerEvent::Stats(res) => {
                 println!("Got stats for {}: {}", res.path, res.size);
@@ -93,24 +93,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ## Advanced Usage
 
 ### Tasks with Multiple Dependencies (`TaskerContext`)
-If a task requires multiple pieces of context (e.g., a Database connection *and* a Config file), you shouldn't tie it directly to your global `AppContext`. Instead, define a local struct using `#[derive(TaskerContext)]`. 
-
-It will automatically assemble itself from the global context!
+If a task requires multiple pieces of context, define a local struct using `#[derive(TaskerContext)]`. It will automatically assemble itself from the global context at runtime!
 
 ```rust
 use oyui_tasker::TaskerContext;
 
-// 1. Define exactly what this specific task needs
 #[derive(TaskerContext)]
 pub struct StatContext {
     firstname: MyFirstName,
     lastname: MyLastName,
 }
 
-// 2. Use it in the task
 impl WorkerTask for StatsTask {
-    type Request = StatsReq;
-    type Response = StatsRes;
+    // ... define Request/Response ...
     type Context = StatContext;
 
     async fn handle(req: Self::Request, ctx: Self::Context) -> Self::Response {
@@ -121,15 +116,18 @@ impl WorkerTask for StatsTask {
 ```
 
 ### Splitting the Tasker
-If you have a UI thread reading events, and multiple other background threads sending requests, you can split the `Tasker`:
+If you need to move the request-sending capability to another thread, use `into_split()` to consume the `Tasker` and extract the sender.
 
 ```rust
-// Extracts lightweight Sender and Receiver handles
-let (sender, receiver, _handle) = worker.into_split();
+// Consumes the tasker to get a standalone sender
+let (sender, mut receiver, handle) = worker.into_split();
 
-// `sender` and `receiver` can be safely cloned and moved across threads.
-let sender_clone = sender.clone();
-std::thread::spawn(move || {
-    sender_clone.send(StatsReq { path: "/usr".into() }).unwrap();
+tokio::spawn(async move {
+    sender.send(StatsReq { path: "/usr".into() }).unwrap();
 });
+
+// The receiver remains in your main loop
+while let Some(event) = receiver.recv().await {
+    // ... process events ...
+}
 ```

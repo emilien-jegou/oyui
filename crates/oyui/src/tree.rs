@@ -48,6 +48,7 @@ pub struct FileTree {
     pub nodes: Vec<TreeNode>,
 }
 
+// ... (leave other imports and structs the same)
 impl FileTree {
     pub fn new() -> Self {
         Self { nodes: Vec::new() }
@@ -58,6 +59,27 @@ impl FileTree {
             TreeNode::File(_) => false,
             TreeNode::Directory(d) => d.children.is_empty(),
         })
+    }
+
+    pub fn get_file_state(&self, target_path: &Path) -> Option<StagingState> {
+        fn find(nodes: &[TreeNode], target: &Path) -> Option<StagingState> {
+            for node in nodes {
+                match node {
+                    TreeNode::File(f) => {
+                        if f.path == target {
+                            return Some(f.state);
+                        }
+                    }
+                    TreeNode::Directory(d) => {
+                        if let Some(s) = find(&d.children, target) {
+                            return Some(s);
+                        }
+                    }
+                }
+            }
+            None
+        }
+        find(&self.nodes, target_path)
     }
 
     #[tracing::instrument(skip_all)]
@@ -196,11 +218,7 @@ impl TreeNode {
     pub fn invert_state_recursive(&mut self) {
         match self {
             TreeNode::File(f) => {
-                f.state = match f.state {
-                    StagingState::Staged => StagingState::Unstaged,
-                    StagingState::Unstaged => StagingState::Staged,
-                    StagingState::PartiallyStaged => StagingState::PartiallyStaged,
-                };
+                f.state = f.state.toggle();
             }
             TreeNode::Directory(d) => {
                 for child in &mut d.children {

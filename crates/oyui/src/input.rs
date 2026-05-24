@@ -56,7 +56,14 @@ fn handle_view_action(app: &mut App, action: ViewAction) -> ExitAction {
                 let new_state = row.staging_state.toggle();
                 tracing::debug!(path = %row.path.display(), ?new_state, "Toggling stage state");
                 commands::set_state_for_path(&mut app.tree, &row.path, new_state);
+
+                // Keep file hunks in sync with tree toggles
+                app.sync_cache_with_tree();
             }
+            ExitAction::KeepRunning
+        }
+        ViewAction::ToggleStageHunk(hunk_idx) => {
+            app.toggle_stage_hunk(hunk_idx);
             ExitAction::KeepRunning
         }
         ViewAction::InvertSelection => {
@@ -64,6 +71,9 @@ fn handle_view_action(app: &mut App, action: ViewAction) -> ExitAction {
             for node in &mut app.tree.nodes {
                 node.invert_state_recursive();
             }
+            // Keep file hunks in sync with tree inversions
+            app.sync_cache_with_tree();
+
             ExitAction::KeepRunning
         }
         ViewAction::OpenFileView {
@@ -118,6 +128,9 @@ fn handle_command_input(app: &mut App, key: KeyEvent) -> ExitAction {
 
             tracing::info!(cmd = %cmd, "Executing command");
             app.execute_command(&cmd);
+
+            // Keep file hunks in sync after command actions (like :stage all)
+            app.sync_cache_with_tree();
         }
         KeyCode::Backspace => {
             if let CommandMode::Active(ref mut buf) = app.command_mode {
