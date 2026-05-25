@@ -1,3 +1,5 @@
+use std::sync::Arc;
+use syntect::highlighting::Theme;
 use tokio::sync::mpsc::error::TryRecvError;
 
 use crate::{
@@ -5,7 +7,11 @@ use crate::{
     worker::{tasks, Tasker, WorkerEvent},
 };
 
-pub async fn process_events(worker: &mut Tasker, cache: &mut DiffCache) {
+pub async fn process_events(
+    worker: &mut Tasker,
+    cache: &mut DiffCache,
+    syntax_theme: &Arc<Theme>,
+) {
     match worker.try_recv() {
         Ok(event) => match event {
             WorkerEvent::Stats(res) => {
@@ -17,7 +23,6 @@ pub async fn process_events(worker: &mut Tasker, cache: &mut DiffCache) {
             WorkerEvent::FullDiff(res) => {
                 tracing::debug!(node_path = %res.node_path.display(), "Applied FullDiff cache");
 
-                // If the file is valid text, we can also trigger the syntax highlighter!
                 if let crate::diff::DiffResult::Text(ref file_diff) = res.result {
                     let text = file_diff.new_text.clone();
                     cache.syntax.mark_started(res.node_path.clone());
@@ -27,10 +32,10 @@ pub async fn process_events(worker: &mut Tasker, cache: &mut DiffCache) {
                         node_path: res.node_path.clone(),
                         text,
                         right_path: res.right_path.clone(),
+                        theme: syntax_theme.clone(),
                     });
                 }
 
-                // Cache the full result (Text, Binary, TooLarge, or Error) for the view
                 cache.diffs.set(res.node_path, res.result);
             }
             WorkerEvent::Syntax(res) => {

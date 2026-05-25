@@ -1,5 +1,6 @@
 use clap::Parser;
 use std::io;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::syntax::SyntaxEngine;
@@ -16,6 +17,7 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 pub mod app;
 pub mod cli;
 pub mod commons;
+pub mod config; // Add config module
 pub mod diff;
 pub mod diff_cache;
 pub mod draw;
@@ -46,7 +48,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .setup()?;
 
     tracing::info!("Starting oyui...");
-    tracing::debug!(?opts, "Parsed CLI options");
+
+    let config_path = dirs::config_dir()
+        .map(|d| d.join("oyui/config.toml"))
+        .unwrap_or_else(|| PathBuf::from(".config/oyui/config.toml"));
+
+    let (ui_theme, syntax_theme) = crate::config::load_config_and_theme(&config_path)
+        .unwrap_or_else(|_| crate::config::builtin::fallback_theme());
+
+    // Spawn async background config watcher (returns channel of tuples)
+    let (theme_tx, mut theme_rx) = tokio::sync::mpsc::channel::<(
+        crate::config::theme::UiTheme,
+        syntect::highlighting::Theme,
+    )>(1);
+    crate::config::watch_config(config_path, theme_tx);
 
     let worker = Tasker::spawn(
         AppWorkerContext::builder()
@@ -57,6 +72,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let mut app = App::new(worker);
+    app.theme = ui_theme;
+    app.syntax_theme = std::sync::Arc::new(syntax_theme);
     app.base_path = opts.base.clone();
     app.left_path = Some(opts.left.clone());
     app.right_path = Some(opts.right.clone());
@@ -75,11 +92,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     app.tree = tree;
 
-    tracing::info!(
-        count = files_to_stat.len(),
-        "Queueing background diff stats"
-    );
-
     let _ = app.worker.send(tasks::stats::StatsReq {
         files: files_to_stat,
     });
@@ -94,30 +106,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("Entering main event loop");
     let mut aborted = false;
     loop {
+        if let Ok((new_ui_theme, new_syntax_theme)) = theme_rx.try_recv() {
+            tracing::info!("Config file change detected. Live reloading theme.");
+            app.theme = new_ui_theme;
+            app.syntax_theme = std::sync::Arc::new(new_syntax_theme);
+            app.cache.syntax.clear();
+        }
+
         app.tick().await;
         terminal.draw(|f| draw(f, &mut app))?;
 
         if event::poll(Duration::from_millis(16))? {
             if let Event::Key(key) = event::read()? {
-                tracing::trace!(?key, "Key event received");
-
-                // The `input::handle_key` function now centrally routes input
-                // based on the App's command state and the View's current active sub-view.
                 let exit_action = handle_key(&mut app, key)
                     .unwrap_or_else(|e| ExitAction::QuitWithReason(format!("Error: {e}")));
 
                 match exit_action {
-                    ExitAction::QuitAndMerge => {
-                        tracing::info!("Exiting event loop: QuitAndMerge");
-                        break;
-                    }
+                    ExitAction::QuitAndMerge => break,
                     ExitAction::QuitWithReason(reason) => {
                         tracing::error!(%reason, "Exiting event loop: QuitWithReason");
                         aborted = true;
                         break;
                     }
                     ExitAction::QuitWithAbort => {
-                        tracing::warn!("Exiting event loop: User Abort");
                         aborted = true;
                         break;
                     }
@@ -126,14 +137,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
-        // If an inner system flagged a quit command (e.g., a successful merge write)
         if app.should_quit {
-            tracing::info!("app.should_quit flag raised. Exiting event loop.");
             break;
         }
     }
 
-    // ── Cleanup ──────────────────────────────────────────────────────────────
     tracing::debug!("Restoring terminal state");
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;

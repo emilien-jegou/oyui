@@ -1,8 +1,8 @@
 use crate::app::{App, CommandMode};
-use crate::view::{CLR_BG, CLR_CMD, CLR_DIM, CLR_FG};
+use crate::config::UiTheme;
 use ratatui::{
     layout::{Constraint, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph},
     Frame,
@@ -35,10 +35,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         &app.cache,
         app.base_path.as_ref(),
         diff_summary,
+        &app.theme,
     );
 
-    draw_hint_bar(frame, hint_area, &app.command_mode);
-    draw_command_bar(frame, cmd_area, &app.command_mode);
+    draw_hint_bar(frame, hint_area, &app.command_mode, &app.theme);
+    draw_command_bar(frame, cmd_area, &app.command_mode, &app.theme);
 
     if let CommandMode::ConfirmMerge = app.command_mode {
         let confirm_area = centered_rect(40, 3, frame.area());
@@ -46,13 +47,13 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         frame.render_widget(
             Paragraph::new("Press Enter to Confirm Merge")
                 .block(Block::default().borders(Borders::ALL).title(" Merge "))
-                .style(Style::default().fg(Color::Yellow)),
+                .style(Style::default().fg(app.theme.partial)),
             confirm_area,
         );
     }
 }
 
-fn draw_hint_bar(frame: &mut Frame, area: Rect, mode: &CommandMode) {
+fn draw_hint_bar(frame: &mut Frame, area: Rect, mode: &CommandMode, theme: &UiTheme) {
     let hints = match mode {
         CommandMode::Normal => vec![
             ("j/k", "move"),
@@ -69,26 +70,37 @@ fn draw_hint_bar(frame: &mut Frame, area: Rect, mode: &CommandMode) {
         .into_iter()
         .flat_map(|(k, v)| {
             vec![
-                Span::styled(k, Style::default().fg(CLR_FG).add_modifier(Modifier::BOLD)),
-                Span::styled(format!(" {}  ", v), Style::default().fg(CLR_DIM)),
+                Span::styled(
+                    k,
+                    Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(format!(" {}  ", v), Style::default().fg(theme.dim)),
             ]
         })
         .collect();
     frame.render_widget(
-        Paragraph::new(Line::from(spans)).style(Style::default().bg(CLR_BG)),
+        Paragraph::new(Line::from(spans)).style(Style::default().bg(theme.bg)),
         area,
     );
 }
 
-fn draw_command_bar(frame: &mut Frame, area: Rect, mode: &CommandMode) {
+fn draw_command_bar(frame: &mut Frame, area: Rect, mode: &CommandMode, theme: &UiTheme) {
     if let CommandMode::Active(buf) = mode {
         let line = Line::from(vec![
-            Span::styled(":", Style::default().fg(CLR_CMD).add_modifier(Modifier::BOLD)),
-            Span::styled(buf, Style::default().fg(CLR_FG)),
-            Span::styled("▌", Style::default().fg(CLR_CMD)),
+            Span::styled(
+                ":",
+                Style::default().fg(theme.cmd).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(buf, Style::default().fg(theme.fg)),
+            Span::styled("▌", Style::default().fg(theme.cmd)),
         ]);
         frame.render_widget(
-            Paragraph::new(line).style(Style::default().bg(Color::Rgb(20, 20, 30))),
+            Paragraph::new(line).style(Style::default().bg(theme.cursor_bg)),
+            area,
+        );
+    } else {
+        frame.render_widget(
+            Paragraph::new("").style(Style::default().bg(theme.bg)),
             area,
         );
     }

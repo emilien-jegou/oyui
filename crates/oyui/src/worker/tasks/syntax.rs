@@ -12,6 +12,7 @@ pub struct SyntaxReq {
     pub node_path: PathBuf,
     pub text: Arc<str>,
     pub right_path: Option<PathBuf>,
+    pub theme: Arc<syntect::highlighting::Theme>,
 }
 
 #[derive(Debug)]
@@ -35,7 +36,7 @@ impl WorkerTask for Syntax {
         tracing::debug!("Computing syntax highlighting");
 
         let syntax_set = &ctx.engine.syntax_set;
-        let theme = &ctx.engine.theme;
+        let theme = &req.theme;
         let syntax = syntax_set
             .find_syntax_by_extension(
                 req.right_path

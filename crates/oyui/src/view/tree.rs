@@ -1,4 +1,5 @@
 use crate::commons::lazy;
+use crate::config::UiTheme;
 use crate::diff_cache::DiffCache;
 use crate::ui_state::TreeUiState;
 use crate::{
@@ -15,10 +16,7 @@ use ratatui::{
 };
 use std::path::PathBuf;
 
-use super::{
-    ViewAction, CLR_ADD_FG, CLR_BG, CLR_CURSOR_BG, CLR_DEL_FG, CLR_DIM, CLR_DIR, CLR_FG,
-    CLR_PARTIAL, CLR_STAGED, CLR_UNSTAGED,
-};
+use super::ViewAction;
 
 #[derive(Debug, Clone)]
 pub struct TreeRow {
@@ -162,11 +160,12 @@ impl TreeViewData {
         cache: &DiffCache,
         base_path: Option<&PathBuf>,
         diff_summary: (usize, usize, usize),
+        theme: &UiTheme,
     ) {
         let [header, body] =
             Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(area);
-        self.draw_header(frame, header, cache, base_path, diff_summary);
-        self.draw_tree_body(frame, body, tree, cache);
+        self.draw_header(frame, header, cache, base_path, diff_summary, theme);
+        self.draw_tree_body(frame, body, tree, cache, theme);
     }
 
     fn draw_header(
@@ -176,6 +175,7 @@ impl TreeViewData {
         cache: &DiffCache,
         base_path: Option<&PathBuf>,
         diff_summary: (usize, usize, usize),
+        theme: &UiTheme,
     ) {
         let (a, d, m) = diff_summary;
         let (tot_ins, tot_del) = cache.stats.iter().fold((0, 0), |acc, s| {
@@ -197,25 +197,25 @@ impl TreeViewData {
         let left_spans = vec![
             Span::styled(
                 format!(" {} ", path),
-                Style::default().bg(Color::Rgb(40, 40, 50)).fg(CLR_FG),
+                Style::default().bg(theme.cursor_bg).fg(theme.fg),
             ),
             Span::raw("  "),
-            Span::styled(format!("{}A ", a), Style::default().fg(CLR_ADD_FG)),
-            Span::styled(format!("{}D ", d), Style::default().fg(CLR_DEL_FG)),
-            Span::styled(format!("{}M ", m), Style::default().fg(Color::Yellow)),
+            Span::styled(format!("{}A ", a), Style::default().fg(theme.add_fg)),
+            Span::styled(format!("{}D ", d), Style::default().fg(theme.del_fg)),
+            Span::styled(format!("{}M ", m), Style::default().fg(theme.partial)),
         ];
 
         let right_spans = vec![
-            Span::styled(format!("+{} ", tot_ins), Style::default().fg(CLR_ADD_FG)),
-            Span::styled(format!("-{} ", tot_del), Style::default().fg(CLR_DEL_FG)),
+            Span::styled(format!("+{} ", tot_ins), Style::default().fg(theme.add_fg)),
+            Span::styled(format!("-{} ", tot_del), Style::default().fg(theme.del_fg)),
         ];
 
         let chunks = Layout::horizontal([Constraint::Min(0), Constraint::Length(20)]).split(area);
-        frame.render_widget(Paragraph::new(Line::from(left_spans)).bg(CLR_BG), chunks[0]);
+        frame.render_widget(Paragraph::new(Line::from(left_spans)).bg(theme.bg), chunks[0]);
         frame.render_widget(
             Paragraph::new(Line::from(right_spans))
                 .alignment(ratatui::layout::Alignment::Right)
-                .bg(CLR_BG),
+                .bg(theme.bg),
             chunks[1],
         );
     }
@@ -226,9 +226,10 @@ impl TreeViewData {
         area: Rect,
         tree: &FileTree,
         cache: &DiffCache,
+        theme: &UiTheme,
     ) {
         let rows = self.flat_rows(tree, cache);
-        let items: Vec<ListItem> = rows.iter().map(render_tree_row).collect();
+        let items: Vec<ListItem> = rows.iter().map(|r| render_tree_row(r, theme)).collect();
         self.list_state.select(Some(self.selected_index));
 
         let height = area.height as usize;
@@ -247,33 +248,33 @@ impl TreeViewData {
         }
 
         let list = List::new(items)
-            .block(Block::default().style(Style::default().bg(CLR_BG)))
-            .highlight_style(Style::default().bg(CLR_CURSOR_BG));
+            .block(Block::default().style(Style::default().bg(theme.bg)))
+            .highlight_style(Style::default().bg(theme.cursor_bg));
 
         frame.render_stateful_widget(list, area, &mut self.list_state);
     }
 }
 
-fn get_diff_color(value: usize, is_addition: bool) -> Color {
-    // Normalize to 0.0 - 1.0
-    let t = (value as f64 / 100.0).min(1.0);
+fn lerp_color(c1: Color, c2: Color, t: f32) -> Color {
+    let (r1, g1, b1) = match c1 {
+        Color::Rgb(r, g, b) => (r, g, b),
+        _ => (0, 0, 0),
+    };
+    let (r2, g2, b2) = match c2 {
+        Color::Rgb(r, g, b) => (r, g, b),
+        _ => (255, 255, 255),
+    };
+    Color::Rgb(
+        (r1 as f32 + (r2 as f32 - r1 as f32) * t).clamp(0.0, 255.0) as u8,
+        (g1 as f32 + (g2 as f32 - g1 as f32) * t).clamp(0.0, 255.0) as u8,
+        (b1 as f32 + (b2 as f32 - b1 as f32) * t).clamp(0.0, 255.0) as u8,
+    )
+}
 
-    // Square root curve: steep at the beginning, flattens out later.
-    let factor = t.sqrt();
-
-    // We use a base value (min color) and a range (how much to add).
-    let min_val = 120;
-    let range = 125.0;
-
-    if is_addition {
-        // Start: Rgb(60, 120, 60) -> End: Rgb(60, 255, 60)
-        let g = (min_val as f64 + (range * factor)) as u8;
-        Color::Rgb(60, g, 60)
-    } else {
-        // Start: Rgb(120, 60, 60) -> End: Rgb(255, 60, 60)
-        let r = (min_val as f64 + (range * factor)) as u8;
-        Color::Rgb(r, 60, 60)
-    }
+fn get_diff_color(value: usize, is_addition: bool, theme: &UiTheme) -> Color {
+    let t = (value as f64 / 100.0).min(1.0).sqrt() as f32;
+    let target = if is_addition { theme.add_fg } else { theme.del_fg };
+    lerp_color(theme.dim, target, t)
 }
 
 fn flatten_recursive(
@@ -356,27 +357,27 @@ fn flatten_recursive(
     }
 }
 
-fn render_tree_row(row: &TreeRow) -> ListItem<'_> {
+fn render_tree_row<'a>(row: &'a TreeRow, theme: &'a UiTheme) -> ListItem<'a> {
     let mut spans = Vec::new();
 
     // 1. Determine the base color for the entire row based on status
     let base_fg = if !row.is_dir {
         if row.left_path.is_none() {
-            CLR_ADD_FG
+            theme.add_fg
         } else if row.right_path.is_none() {
-            CLR_DEL_FG
+            theme.del_fg
         } else {
-            CLR_FG
+            theme.fg
         }
     } else {
-        CLR_FG
+        theme.fg
     };
 
     // 2. Tree structure spans (keep these structural)
     for &has_sibling in &row.parent_continuations {
         spans.push(Span::styled(
             if has_sibling { "│  " } else { "   " },
-            Style::default().fg(CLR_DIM),
+            Style::default().fg(theme.dim),
         ));
     }
     spans.push(Span::styled(
@@ -385,14 +386,14 @@ fn render_tree_row(row: &TreeRow) -> ListItem<'_> {
         } else {
             "├── "
         },
-        Style::default().fg(CLR_DIM),
+        Style::default().fg(theme.dim),
     ));
 
     // 3. Staging symbols
     let (stage_sym, stage_color) = match row.staging_state {
-        StagingState::Staged => ("●", CLR_STAGED),
-        StagingState::Unstaged => ("○", CLR_UNSTAGED),
-        StagingState::PartiallyStaged => ("◐", CLR_PARTIAL),
+        StagingState::Staged => ("●", theme.staged),
+        StagingState::Unstaged => ("○", theme.unstaged),
+        StagingState::PartiallyStaged => ("◐", theme.partial),
     };
     spans.push(Span::styled(stage_sym, Style::default().fg(stage_color)));
     spans.push(Span::raw(" "));
@@ -400,14 +401,14 @@ fn render_tree_row(row: &TreeRow) -> ListItem<'_> {
     // 4. File/Dir Name and Icon
     if row.is_dir {
         let arrow = if row.is_folded { "▸ " } else { "▾ " };
-        spans.push(Span::styled(arrow, Style::default().fg(CLR_FG)));
-        spans.push(Span::styled(" ", Style::default().fg(CLR_DIR)));
+        spans.push(Span::styled(arrow, Style::default().fg(theme.fg)));
+        spans.push(Span::styled(" ", Style::default().fg(theme.dir)));
         spans.push(Span::styled(
             row.name.as_str(),
-            Style::default().fg(CLR_DIR).bold(),
+            Style::default().fg(theme.dir).bold(),
         ));
     } else {
-        let icon = get_file_icon(&row.name);
+        let icon = get_file_icon(&row.name, theme);
         // Using base_fg for the icon and filename to color the whole row
         spans.push(Span::styled(icon.0, Style::default().fg(base_fg)));
         spans.push(Span::raw(" "));
@@ -422,12 +423,12 @@ fn render_tree_row(row: &TreeRow) -> ListItem<'_> {
         match stats {
             DiffStats::Binary { bytes } => {
                 spans.push(Span::raw(" "));
-                spans.push(Span::styled("(binary)", Style::default().fg(Color::Blue)));
+                spans.push(Span::styled("(binary)", Style::default().fg(theme.dir)));
                 spans.push(Span::raw(" "));
                 let sign = if *bytes > 0 { "+" } else { "" };
                 spans.push(Span::styled(
                     format!("{}{} bytes ", sign, bytes),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(theme.dim),
                 ));
             }
             DiffStats::Text {
@@ -440,13 +441,13 @@ fn render_tree_row(row: &TreeRow) -> ListItem<'_> {
                 if *insertions > 0 {
                     spans.push(Span::styled(
                         format!("+{} ", insertions),
-                        Style::default().fg(get_diff_color(*insertions, true)),
+                        Style::default().fg(get_diff_color(*insertions, true, theme)),
                     ));
                 }
                 if *deletions > 0 {
                     spans.push(Span::styled(
                         format!("-{} ", deletions),
-                        Style::default().fg(get_diff_color(*deletions, false)),
+                        Style::default().fg(get_diff_color(*deletions, false, theme)),
                     ));
                 }
             }
@@ -456,14 +457,14 @@ fn render_tree_row(row: &TreeRow) -> ListItem<'_> {
     ListItem::new(Line::from(spans))
 }
 
-fn get_file_icon(name: &str) -> (&'static str, Color) {
+fn get_file_icon(name: &str, theme: &UiTheme) -> (&'static str, Color) {
     let ext = name.split('.').next_back().unwrap_or("");
     match ext {
-        "tsx" | "jsx" => ("", Color::Rgb(80, 200, 255)),
-        "ts" | "js" => ("", Color::Rgb(240, 220, 80)),
-        "svg" => ("󰕙", Color::Rgb(255, 180, 100)),
-        "md" => ("", Color::Rgb(200, 200, 200)),
-        "json" => ("", Color::Rgb(250, 200, 50)),
-        _ => ("󰈚", Color::Rgb(180, 180, 190)),
+        "tsx" | "jsx" => ("", theme.dir),
+        "ts" | "js" => ("", theme.partial),
+        "svg" => ("󰕙", theme.partial),
+        "md" => ("", theme.fg),
+        "json" => ("", theme.partial),
+        _ => ("󰈚", theme.dim),
     }
 }

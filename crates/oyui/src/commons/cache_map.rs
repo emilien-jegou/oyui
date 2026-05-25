@@ -15,6 +15,10 @@ impl<T> Default for CacheMap<T> {
 }
 
 impl<T> CacheMap<T> {
+    pub fn clear(&mut self) {
+        self.inner.clear();
+    }
+
     pub fn get(&self, path: &PathBuf) -> &Lazy<T> {
         self.inner.get(path).unwrap_or(&Lazy::Unstarted)
     }
