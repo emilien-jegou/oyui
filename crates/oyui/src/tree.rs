@@ -115,7 +115,6 @@ impl FileTree {
                             Some(right_path.clone()),
                         );
                     } else {
-                        // Added file: Pass None for left_path
                         added_count += 1;
                         tracing::trace!(path = %rel_path_buf.display(), "Discovered added file");
                         tree.insert_file(rel_path_buf.clone(), None, Some(right_path.clone()));

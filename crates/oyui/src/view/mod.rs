@@ -1,27 +1,13 @@
 pub mod file;
 pub mod tree;
 
+use crate::config::UiTheme;
 use crate::diff_cache::DiffCache;
 use crate::tree::FileTree;
 use crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
-use ratatui::style::Color;
 use ratatui::Frame;
 use std::path::PathBuf;
-
-pub const CLR_BG: Color = Color::Rgb(14, 14, 18);
-pub const CLR_CURSOR_BG: Color = Color::Rgb(30, 30, 42);
-pub const CLR_FG: Color = Color::Rgb(200, 200, 210);
-pub const CLR_DIM: Color = Color::Rgb(70, 70, 85);
-pub const CLR_STAGED: Color = Color::Rgb(130, 210, 150);
-pub const CLR_UNSTAGED: Color = Color::Rgb(110, 110, 110);
-pub const CLR_PARTIAL: Color = Color::Rgb(210, 170, 80);
-pub const CLR_DIR: Color = Color::Rgb(100, 140, 210);
-pub const CLR_CMD: Color = Color::Rgb(180, 140, 255);
-pub const CLR_ADD_BG: Color = Color::Rgb(30, 45, 30);
-pub const CLR_DEL_BG: Color = Color::Rgb(45, 30, 30);
-pub const CLR_ADD_FG: Color = Color::Rgb(130, 255, 130);
-pub const CLR_DEL_FG: Color = Color::Rgb(255, 130, 130);
 
 #[derive(Default, PartialEq, Eq)]
 pub enum ViewKind {
@@ -81,15 +67,14 @@ impl View {
         cache: &DiffCache,
         base_path: Option<&PathBuf>,
         diff_summary: (usize, usize, usize),
+        theme: &UiTheme,
     ) {
         match self.current {
             ViewKind::Tree => {
                 self.tree_view
-                    .draw(frame, area, tree, cache, base_path, diff_summary)
+                    .draw(frame, area, tree, cache, base_path, diff_summary, theme)
             }
-            // Pass the tree to the file view
-            ViewKind::File => self.file_view.draw(frame, area, cache, tree),
+            ViewKind::File => self.file_view.draw(frame, area, cache, tree, theme),
         }
     }
 }
-

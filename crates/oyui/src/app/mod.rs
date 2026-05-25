@@ -5,16 +5,21 @@ pub mod worker;
 
 pub use events::{CommandMode, ExitAction};
 
+use crate::config::UiTheme;
 use crate::diff_cache::DiffCache;
 use crate::tree::{FileTree, TreeNode};
 use crate::view::View;
 use crate::worker::Tasker;
 use std::path::PathBuf;
+use std::sync::Arc;
+use syntect::highlighting::Theme;
 
 pub struct App {
     pub tree: FileTree,
     pub cache: DiffCache,
     pub view: View,
+    pub theme: UiTheme,
+    pub syntax_theme: Arc<Theme>, // <--- ADDED
 
     pub command_mode: CommandMode,
     pub should_quit: bool,
@@ -28,10 +33,14 @@ pub struct App {
 
 impl App {
     pub fn new(worker: Tasker) -> Self {
+        let (theme, syntax_theme) = crate::config::builtin::fallback_theme();
+
         Self {
             tree: FileTree::new(),
             cache: DiffCache::default(),
             view: View::new(),
+            theme,
+            syntax_theme: Arc::new(syntax_theme),
             command_mode: CommandMode::Normal,
             should_quit: false,
             worker,
@@ -43,7 +52,8 @@ impl App {
     }
 
     pub async fn tick(&mut self) {
-        worker::process_events(&mut self.worker, &mut self.cache).await;
+        // Pass the syntax_theme reference directly to the event processor
+        worker::process_events(&mut self.worker, &mut self.cache, &self.syntax_theme).await;
     }
 
     #[tracing::instrument(skip_all)]
@@ -74,7 +84,8 @@ impl App {
                         let mut diff_clone = None;
                         if let Some(val) = cache.diffs.get(&f.path).value() {
                             if let crate::diff::DiffResult::Text(diff) = val {
-                                let total_lines: usize = diff.hunks.iter().map(|h| h.lines.len()).sum();
+                                let total_lines: usize =
+                                    diff.hunks.iter().map(|h| h.lines.len()).sum();
                                 // Only clone and rewrite if there's actually a desync
                                 let needs_sync = diff.line_selections.len() != total_lines
                                     || diff.line_selections.iter().any(|&v| v != target_val);
@@ -87,7 +98,8 @@ impl App {
 
                         if let Some(mut diff_result) = diff_clone {
                             if let crate::diff::DiffResult::Text(ref mut diff) = diff_result {
-                                let total_lines: usize = diff.hunks.iter().map(|h| h.lines.len()).sum();
+                                let total_lines: usize =
+                                    diff.hunks.iter().map(|h| h.lines.len()).sum();
                                 diff.line_selections.clear();
                                 diff.line_selections.resize(total_lines, target_val);
                             }
@@ -116,9 +128,13 @@ impl App {
         if let Some(mut diff_result) = diff_clone {
             if let crate::diff::DiffResult::Text(ref mut diff) = diff_result {
                 let total_lines: usize = diff.hunks.iter().map(|h| h.lines.len()).sum();
-                
+
                 // Inherit the overall file status to apply to uninitialized lines
-                let default_staged = self.tree.get_file_state(&path).unwrap_or(crate::tree::StagingState::Unstaged) == crate::tree::StagingState::Staged;
+                let default_staged = self
+                    .tree
+                    .get_file_state(&path)
+                    .unwrap_or(crate::tree::StagingState::Unstaged)
+                    == crate::tree::StagingState::Staged;
 
                 if diff.line_selections.len() != total_lines {
                     diff.line_selections.resize(total_lines, default_staged);
@@ -132,8 +148,17 @@ impl App {
                 if let Some(hunk) = diff.hunks.get(hunk_idx) {
                     let mut all_staged = true;
                     for (j, line) in hunk.lines.iter().enumerate() {
-                        if matches!(line, crate::diff::DiffLine::Addition { .. } | crate::diff::DiffLine::Deletion { .. }) {
-                            if !diff.line_selections.get(start_idx + j).copied().unwrap_or(default_staged) {
+                        if matches!(
+                            line,
+                            crate::diff::DiffLine::Addition { .. }
+                                | crate::diff::DiffLine::Deletion { .. }
+                        ) {
+                            if !diff
+                                .line_selections
+                                .get(start_idx + j)
+                                .copied()
+                                .unwrap_or(default_staged)
+                            {
                                 all_staged = false;
                                 break;
                             }
@@ -142,7 +167,11 @@ impl App {
 
                     let new_state = !all_staged;
                     for (j, line) in hunk.lines.iter().enumerate() {
-                        if matches!(line, crate::diff::DiffLine::Addition { .. } | crate::diff::DiffLine::Deletion { .. }) {
+                        if matches!(
+                            line,
+                            crate::diff::DiffLine::Addition { .. }
+                                | crate::diff::DiffLine::Deletion { .. }
+                        ) {
                             if start_idx + j < diff.line_selections.len() {
                                 diff.line_selections[start_idx + j] = new_state;
                             }
@@ -155,8 +184,16 @@ impl App {
                 let mut current_idx = 0;
                 for h in &diff.hunks {
                     for line in &h.lines {
-                        if matches!(line, crate::diff::DiffLine::Addition { .. } | crate::diff::DiffLine::Deletion { .. }) {
-                            let is_staged = diff.line_selections.get(current_idx).copied().unwrap_or(default_staged);
+                        if matches!(
+                            line,
+                            crate::diff::DiffLine::Addition { .. }
+                                | crate::diff::DiffLine::Deletion { .. }
+                        ) {
+                            let is_staged = diff
+                                .line_selections
+                                .get(current_idx)
+                                .copied()
+                                .unwrap_or(default_staged);
                             if is_staged {
                                 has_staged = true;
                             } else {
@@ -177,14 +214,17 @@ impl App {
 
                 self.update_file_state(&path, new_staging_state);
             }
-            
-            // Push updated changes back to the mapping
+
             self.cache.diffs.set(path, diff_result);
         }
     }
 
     fn update_file_state(&mut self, path: &PathBuf, new_state: crate::tree::StagingState) {
-        fn find_and_update(nodes: &mut [TreeNode], path: &PathBuf, new_state: crate::tree::StagingState) -> bool {
+        fn find_and_update(
+            nodes: &mut [TreeNode],
+            path: &PathBuf,
+            new_state: crate::tree::StagingState,
+        ) -> bool {
             for node in nodes {
                 match node {
                     TreeNode::File(f) => {
