@@ -20,6 +20,9 @@ pub struct Opts {
     /// Right-hand directory (new)
     pub right: PathBuf,
 
+    #[arg(short = 'c', long = "config")]
+    pub config: Option<PathBuf>,
+
     /// MERGETOOL ONLY: The common ancestor
     #[arg(short = 'b', long = "base")]
     pub base: Option<PathBuf>,
