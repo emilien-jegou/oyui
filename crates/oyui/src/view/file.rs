@@ -196,7 +196,7 @@ impl FileViewData {
                 }
 
                 (KeyCode::Char('G'), false) => next_selected = max_idx,
-                (KeyCode::Char('f'), false) | (KeyCode::Char('z'), false) => {
+                (KeyCode::Char('z'), false) => {
                     let mut target_logical = 0;
                     if let Some(mapping) = self.line_mapping.get(path) {
                         target_logical = mapping.get(current_selected).copied().unwrap_or(0);
