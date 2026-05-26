@@ -11,6 +11,13 @@ Many of the themes in this list have issues, feel free to provide upgrades or to
 
 
 
+### `carbonfox`
+| Tree view | File View |
+| :---: | :---: |
+| <img style="min-width:400px;" src="/docs/assets/themes/carbonfox-1.png" width="400"> | <img style="min-width:400px;" src="/docs/assets/themes/carbonfox.png" width="400"> |
+
+
+
 ### `catppuccin-frappe`
 | Tree view | File View |
 | :---: | :---: |
@@ -32,10 +39,31 @@ Many of the themes in this list have issues, feel free to provide upgrades or to
 
 
 
+### `dawnfox`
+| Tree view | File View |
+| :---: | :---: |
+| <img style="min-width:400px;" src="/docs/assets/themes/dawnfox-1.png" width="400"> | <img style="min-width:400px;" src="/docs/assets/themes/dawnfox.png" width="400"> |
+
+
+
+### `dayfox`
+| Tree view | File View |
+| :---: | :---: |
+| <img style="min-width:400px;" src="/docs/assets/themes/dayfox-1.png" width="400"> | <img style="min-width:400px;" src="/docs/assets/themes/dayfox.png" width="400"> |
+
+
+
 ### `dracula-dark`
 | Tree view | File View |
 | :---: | :---: |
 | <img style="min-width:400px;" src="/docs/assets/themes/dracula-dark-1.png" width="400"> | <img style="min-width:400px;" src="/docs/assets/themes/dracula-dark.png" width="400"> |
+
+
+
+### `duskfox`
+| Tree view | File View |
+| :---: | :---: |
+| <img style="min-width:400px;" src="/docs/assets/themes/duskfox-1.png" width="400"> | <img style="min-width:400px;" src="/docs/assets/themes/duskfox.png" width="400"> |
 
 
 
@@ -67,6 +95,13 @@ Many of the themes in this list have issues, feel free to provide upgrades or to
 
 
 
+### `nightfox`
+| Tree view | File View |
+| :---: | :---: |
+| <img style="min-width:400px;" src="/docs/assets/themes/nightfox-1.png" width="400"> | <img style="min-width:400px;" src="/docs/assets/themes/nightfox.png" width="400"> |
+
+
+
 ### `nightowl-dark`
 | Tree view | File View |
 | :---: | :---: |
@@ -88,6 +123,13 @@ Many of the themes in this list have issues, feel free to provide upgrades or to
 
 
 
+### `nordfox`
+| Tree view | File View |
+| :---: | :---: |
+| <img style="min-width:400px;" src="/docs/assets/themes/nordfox-1.png" width="400"> | <img style="min-width:400px;" src="/docs/assets/themes/nordfox.png" width="400"> |
+
+
+
 ### `one-dark-light`
 | Tree view | File View |
 | :---: | :---: |
@@ -102,6 +144,13 @@ Many of the themes in this list have issues, feel free to provide upgrades or to
 
 
 
+### `quaoar`
+| Tree view | File View |
+| :---: | :---: |
+| <img style="min-width:400px;" src="/docs/assets/themes/quaoar-1.png" width="400"> | <img style="min-width:400px;" src="/docs/assets/themes/quaoar.png" width="400"> |
+
+
+
 ### `solarized-dark`
 | Tree view | File View |
 | :---: | :---: |
@@ -109,10 +158,24 @@ Many of the themes in this list have issues, feel free to provide upgrades or to
 
 
 
+### `terafox`
+| Tree view | File View |
+| :---: | :---: |
+| <img style="min-width:400px;" src="/docs/assets/themes/terafox-1.png" width="400"> | <img style="min-width:400px;" src="/docs/assets/themes/terafox.png" width="400"> |
+
+
+
 ### `tokyonight-dark`
 | Tree view | File View |
 | :---: | :---: |
 | <img style="min-width:400px;" src="/docs/assets/themes/tokyonight-dark-1.png" width="400"> | <img style="min-width:400px;" src="/docs/assets/themes/tokyonight-dark.png" width="400"> |
+
+
+
+### `weywot`
+| Tree view | File View |
+| :---: | :---: |
+| <img style="min-width:400px;" src="/docs/assets/themes/weywot-1.png" width="400"> | <img style="min-width:400px;" src="/docs/assets/themes/weywot.png" width="400"> |
 
 
 
