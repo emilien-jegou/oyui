@@ -25,6 +25,13 @@ project. Feature requests are still done via github issues.
 - Identify binary file incoherence of file signature (e.g. an exe with a png extension) tie it to existing integration.
     - Image/video preview
 
+## Theming
+- Allow users to override default themes by providing a theme directly.
+e.g.
+```
+base_theme = "quaoar"
+```
+
 
 ## Accessibility
 - Default theme shouldn't change terminal background

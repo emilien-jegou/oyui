@@ -1,14 +1,23 @@
 use serde::Deserialize;
 use std::collections::HashMap;
-use std::io::BufReader;
 use std::path::{Path, PathBuf};
-use syntect::highlighting::ThemeSet;
 
 pub mod builtin;
+pub mod define_default_theme;
 pub mod theme;
 
-pub use builtin::{derive_ui_theme, fallback_theme, get_embedded_themes};
-pub use theme::{ThemeConfig, UiTheme};
+pub use builtin::{fallback_theme, get_embedded_themes};
+pub use define_default_theme::derive_ui_theme;
+pub use theme::{LineHighlightMode, ThemeConfig, UiTheme};
+
+// Keep this out of the macro file to avoid having ratatui as build deps
+impl From<theme::Color> for ratatui::style::Color {
+    fn from(c: theme::Color) -> Self {
+        match c {
+            theme::Color::Rgb(r, g, b) => ratatui::style::Color::Rgb(r, g, b),
+        }
+    }
+}
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct AppConfig {
@@ -32,52 +41,29 @@ pub fn load_config_and_theme(
         .as_deref()
         .unwrap_or("catppuccin-mocha");
 
-    let mut tm_theme = None;
-    let (mut final_theme, mut fallback_tm) = fallback_theme();
-    let theme_cfg = app_config.theme.get(chosen_name);
+    let runtime_theme_cfg = app_config.theme.get(chosen_name);
 
-    // 1. If user supplied a custom path, load it at runtime
-    if let Some(path) = theme_cfg.and_then(|c| c.tm_theme_path.as_ref()) {
-        if let Ok(file) = std::fs::File::open(path) {
-            let mut reader = BufReader::new(file);
-            if let Ok(ts) = ThemeSet::load_from_reader(&mut reader) {
-                tm_theme = Some(ts);
-            }
-        }
-    }
-    // 2. Otherwise search the fast binary embedded set
-    else if let Some(embedded_theme) = get_embedded_themes().themes.get(chosen_name) {
-        tm_theme = Some(embedded_theme.clone());
-    }
+    let mut final_theme;
+    let final_tm_theme;
 
-    // 3. Derive the UI theme dynamically!
-    if let Some(t) = &tm_theme {
-        final_theme = derive_ui_theme(t);
-        fallback_tm = t.clone();
+    if let Some(path) = runtime_theme_cfg.and_then(|c| c.tm_theme_path.as_ref()) {
+        let t = syntect::highlighting::ThemeSet::get_theme(path)?;
+        final_theme = derive_ui_theme(&t);
+        final_tm_theme = t;
+    } else if let Some((emb_ui, emb_tm)) = get_embedded_themes().get(chosen_name) {
+        final_theme = emb_ui.clone();
+        final_tm_theme = emb_tm.clone();
+    } else {
+        let (ui, tm) = fallback_theme();
+        final_theme = ui;
+        final_tm_theme = tm;
     }
 
-    // 4. Finally, apply specific manual overrides from the TOML if present
-    if let Some(cfg) = theme_cfg {
-        let get_col = |key: &str, default: ratatui::style::Color| -> ratatui::style::Color {
-            theme::resolve_color(cfg.colors.get(key), tm_theme.as_ref(), default)
-        };
-
-        final_theme.bg = get_col("bg", final_theme.bg);
-        final_theme.cursor_bg = get_col("cursor_bg", final_theme.cursor_bg);
-        final_theme.fg = get_col("fg", final_theme.fg);
-        final_theme.dim = get_col("dim", final_theme.dim);
-        final_theme.staged = get_col("staged", final_theme.staged);
-        final_theme.unstaged = get_col("unstaged", final_theme.unstaged);
-        final_theme.partial = get_col("partial", final_theme.partial);
-        final_theme.dir = get_col("dir", final_theme.dir);
-        final_theme.cmd = get_col("cmd", final_theme.cmd);
-        final_theme.add_bg = get_col("add_bg", final_theme.add_bg);
-        final_theme.del_bg = get_col("del_bg", final_theme.del_bg);
-        final_theme.add_fg = get_col("add_fg", final_theme.add_fg);
-        final_theme.del_fg = get_col("del_fg", final_theme.del_fg);
+    if let Some(cfg) = runtime_theme_cfg {
+        final_theme.apply_overrides(&cfg.colors, Some(&final_tm_theme));
     }
 
-    Ok((final_theme, fallback_tm))
+    Ok((final_theme, final_tm_theme))
 }
 
 pub fn watch_config(

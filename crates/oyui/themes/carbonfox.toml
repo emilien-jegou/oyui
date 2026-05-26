@@ -1,0 +1,5 @@
+file_staged_highlight = "solid"
+file_staged_highlight_opacity = 0.05
+
+file_change_highlight = "gradient:20%"
+file_change_highlight_opacity = 0.1

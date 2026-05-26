@@ -1,5 +1,5 @@
 use crate::{
-    config::UiTheme,
+    config::{LineHighlightMode, UiTheme},
     diff::{DiffResult, FileDiff},
     diff_cache::DiffCache,
 };
@@ -281,7 +281,9 @@ impl FileViewData {
 
         let mut header_spans = vec![Span::styled(
             format!(" {} ", path.display()),
-            Style::default().bg(theme.cursor_bg).fg(theme.fg),
+            Style::default()
+                .bg(theme.cursor_bg.into())
+                .fg(theme.fg.into()),
         )];
 
         if let Some(stats) = cache.stats.get(path).value() {
@@ -294,22 +296,25 @@ impl FileViewData {
                     if *insertions != 0 {
                         header_spans.push(Span::styled(
                             format!("+{} ", insertions),
-                            Style::default().fg(theme.add_fg),
+                            Style::default().fg(theme.add_fg.into()),
                         ));
                     }
 
                     if *deletions != 0 {
                         header_spans.push(Span::styled(
                             format!("-{} ", deletions),
-                            Style::default().fg(theme.del_fg),
+                            Style::default().fg(theme.del_fg.into()),
                         ));
                     }
                 }
                 crate::diff::DiffStats::Binary { bytes } => {
-                    header_spans.push(Span::styled("(binary)", Style::default().fg(theme.dir)));
+                    header_spans.push(Span::styled(
+                        "(binary)",
+                        Style::default().fg(theme.dir.into()),
+                    ));
                     header_spans.push(Span::styled(
                         format!(" {} bytes", bytes),
-                        Style::default().fg(theme.dim),
+                        Style::default().fg(theme.dim.into()),
                     ));
                 }
             }
@@ -331,7 +336,7 @@ impl FileViewData {
                 frame.render_widget(
                     Paragraph::new("Empty file")
                         .alignment(ratatui::layout::Alignment::Center)
-                        .style(Style::default().fg(theme.dim)),
+                        .style(Style::default().fg(theme.dim.into())),
                     list_area,
                 );
                 return;
@@ -353,7 +358,7 @@ impl FileViewData {
                 frame.render_widget(
                     Paragraph::new(msg)
                         .alignment(ratatui::layout::Alignment::Center)
-                        .style(Style::default().fg(theme.dim)),
+                        .style(Style::default().fg(theme.dim.into())),
                     list_area,
                 );
                 return;
@@ -365,7 +370,7 @@ impl FileViewData {
                         size / 1024 / 1024
                     ))
                     .alignment(ratatui::layout::Alignment::Center)
-                    .style(Style::default().fg(theme.partial)),
+                    .style(Style::default().fg(theme.partial.into())),
                     list_area,
                 );
                 return;
@@ -374,7 +379,7 @@ impl FileViewData {
                 frame.render_widget(
                     Paragraph::new(format!("Error reading file: {}", e))
                         .alignment(ratatui::layout::Alignment::Center)
-                        .style(Style::default().fg(theme.del_fg)),
+                        .style(Style::default().fg(theme.del_fg.into())),
                     list_area,
                 );
                 return;
@@ -595,7 +600,13 @@ impl FileViewData {
             if current_new < new_lines.len() {
                 let hidden_count = new_lines.len() - current_new;
                 let is_selected = visual_row_idx == selected_row_idx;
-                rows.push(render_separator(hidden_count, None, None, is_selected, theme));
+                rows.push(render_separator(
+                    hidden_count,
+                    None,
+                    None,
+                    is_selected,
+                    theme,
+                ));
                 line_map.push(current_new);
                 row_to_hunk_for_file.push(None);
             }
@@ -660,6 +671,55 @@ fn lerp_color(c1: Color, c2: Color, t: f32) -> Color {
     )
 }
 
+fn desaturate_color(c: Color, factor: f32) -> Color {
+    let (r, g, b) = match c {
+        Color::Rgb(r, g, b) => (r, g, b),
+        _ => return c,
+    };
+    let l = 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32;
+    Color::Rgb(
+        (r as f32 + (l - r as f32) * factor).clamp(0.0, 255.0) as u8,
+        (g as f32 + (l - g as f32) * factor).clamp(0.0, 255.0) as u8,
+        (b as f32 + (l - b as f32) * factor).clamp(0.0, 255.0) as u8,
+    )
+}
+
+fn darken_color(c: Color, factor: f32) -> Color {
+    let (r, g, b) = match c {
+        Color::Rgb(r, g, b) => (r, g, b),
+        _ => return c,
+    };
+    let mult = (1.0 - factor).clamp(0.0, 1.0);
+    Color::Rgb(
+        (r as f32 * mult) as u8,
+        (g as f32 * mult) as u8,
+        (b as f32 * mult) as u8,
+    )
+}
+
+fn lighten_color(c: Color, factor: f32) -> Color {
+    let (r, g, b) = match c {
+        Color::Rgb(r, g, b) => (r, g, b),
+        _ => return c,
+    };
+    Color::Rgb(
+        (r as f32 + (255.0 - r as f32) * factor).clamp(0.0, 255.0) as u8,
+        (g as f32 + (255.0 - g as f32) * factor).clamp(0.0, 255.0) as u8,
+        (b as f32 + (255.0 - b as f32) * factor).clamp(0.0, 255.0) as u8,
+    )
+}
+
+// TODO(refactor): theme mode should be stored so we should
+// never have a need this function
+fn is_dark(bg: Color) -> bool {
+    let (r, g, b) = match bg {
+        Color::Rgb(r, g, b) => (r, g, b),
+        _ => (0, 0, 0),
+    };
+    let luminance = 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32;
+    luminance < 128.0
+}
+
 fn render_line<'a>(
     content: &'a str,
     idx: usize,
@@ -686,21 +746,57 @@ fn render_line<'a>(
     let mut visual_x = 0;
 
     let area_width = area_width.max(10);
-    // Base gradient spans 50% of the screen
-    let grad1_width = (area_width as f32 * 0.5).max(1.0);
-    // Layered gradient spans 8% of the screen
-    let grad2_width = (area_width as f32 * 0.08).max(1.0);
 
-    let use_grad = use_gradient && (is_add || is_del);
+    let grad1_width = match theme.file_change_highlight {
+        LineHighlightMode::Gradient(pct) => (area_width as f64 * pct).max(1.0) as f32,
+        _ => 1.0,
+    };
+    let grad2_width = match theme.file_staged_highlight {
+        LineHighlightMode::Gradient(pct) => (area_width as f64 * pct).max(1.0) as f32,
+        _ => 1.0,
+    };
 
-    let end_bg = if is_selected { theme.cursor_bg } else { theme.bg };
-    let change_bg = if is_add { theme.add_bg } else { theme.del_bg };
-    let accent_bg_grad = lerp_color(theme.bg, theme.partial, 0.4);
+    let use_grad_change = use_gradient
+        && (is_add || is_del)
+        && matches!(theme.file_change_highlight, LineHighlightMode::Gradient(_));
+    let use_grad_staged = is_staged
+        && (is_add || is_del)
+        && matches!(theme.file_staged_highlight, LineHighlightMode::Gradient(_));
+    let char_by_char = use_grad_change || use_grad_staged;
 
-    // Helper closure to dynamically generate chars with interpolated background
+    let end_bg: Color = if is_selected {
+        theme.cursor_bg.into()
+    } else {
+        theme.bg.into()
+    };
+
+    let raw_change_bg: Color = if is_add {
+        theme.add_bg.into()
+    } else {
+        theme.del_bg.into()
+    };
+    let change_bg = lerp_color(
+        raw_change_bg,
+        end_bg,
+        1.0 - theme.file_change_highlight_opacity as f32,
+    );
+
+    let accent_bg_grad = lerp_color(
+        theme.bg.into(),
+        theme.partial.into(),
+        theme.file_staged_highlight_opacity as f32,
+    );
+
     let mut push_slice = |slice: &str, style: Style, has_inline: bool| {
-        if !use_grad || has_inline {
-            row_spans.push(Span::styled(slice.to_string(), style));
+        if !char_by_char || has_inline {
+            let mut final_style = style;
+            if is_staged
+                && (is_add || is_del)
+                && theme.file_staged_highlight == LineHighlightMode::Solid
+            {
+                final_style = final_style.bg(accent_bg_grad);
+            }
+            row_spans.push(Span::styled(slice.to_string(), final_style));
             visual_x += slice.chars().count();
             return;
         }
@@ -709,12 +805,27 @@ fn render_line<'a>(
         let mut current_bg = None;
 
         for c in slice.chars() {
-            let t1 = (visual_x as f32 / grad1_width).clamp(0.0, 1.0);
-            let base_bg = lerp_color(change_bg, end_bg, t1);
+            let base_bg = if use_grad_change {
+                let t1 = (visual_x as f32 / grad1_width).clamp(0.0, 1.0);
+                lerp_color(change_bg, end_bg, t1)
+            } else if use_gradient
+                && is_staged
+                && theme.file_change_highlight == LineHighlightMode::Solid
+            {
+                change_bg
+            } else {
+                end_bg
+            };
 
-            let target_bg = if is_staged {
-                let t2 = (visual_x as f32 / grad2_width).clamp(0.0, 1.0);
-                lerp_color(accent_bg_grad, base_bg, t2)
+            let target_bg = if is_staged && (is_add || is_del) {
+                if let LineHighlightMode::Gradient(_) = theme.file_staged_highlight {
+                    let t2 = (visual_x as f32 / grad2_width).clamp(0.0, 1.0);
+                    lerp_color(accent_bg_grad, base_bg, t2)
+                } else if theme.file_staged_highlight == LineHighlightMode::Solid {
+                    accent_bg_grad
+                } else {
+                    base_bg
+                }
             } else {
                 base_bg
             };
@@ -741,34 +852,54 @@ fn render_line<'a>(
         }
     };
 
-    // Push the +/- Prefix
-    push_slice(prefix, row_style, false);
+    let is_theme_dark = is_dark(theme.bg.into());
+    let mut prefix_style = row_style;
+    if is_add {
+        let mut col = theme.add_fg.into();
+        if !is_staged {
+            col = desaturate_color(col, 0.60);
+            if is_theme_dark {
+                col = darken_color(col, 0.30);
+            } else {
+                col = lighten_color(col, 0.30);
+            }
+        }
+        prefix_style = prefix_style.fg(col);
+    } else if is_del {
+        let mut col = theme.del_fg.into();
+        if !is_staged {
+            col = desaturate_color(col, 0.60);
+            if is_theme_dark {
+                col = darken_color(col, 0.30);
+            } else {
+                col = lighten_color(col, 0.30);
+            }
+        }
+        prefix_style = prefix_style.fg(col);
+    }
+    push_slice(prefix, prefix_style, false);
 
-    // Establish vivid inline highlight background colors mimicking Difftastic/GitHub
-    let inline_bg = if !is_staged {
+    let inline_bg: Color = if !is_staged {
         if is_selected {
-            theme.cursor_bg
+            theme.cursor_bg.into()
         } else {
-            theme.bg
+            theme.bg.into()
         }
     } else if is_selected {
         if is_add {
-            lerp_color(theme.add_bg, theme.add_fg, 0.4)
+            lerp_color(theme.add_bg.into(), theme.add_fg.into(), 0.4)
         } else {
-            lerp_color(theme.del_bg, theme.del_fg, 0.4)
+            lerp_color(theme.del_bg.into(), theme.del_fg.into(), 0.4)
         }
     } else {
         if is_add {
-            lerp_color(theme.add_bg, theme.add_fg, 0.2)
+            lerp_color(theme.add_bg.into(), theme.add_fg.into(), 0.2)
         } else {
-            lerp_color(theme.del_bg, theme.del_fg, 0.2)
+            lerp_color(theme.del_bg.into(), theme.del_fg.into(), 0.2)
         }
     };
 
-    let (fg_r, fg_g, fg_b) = match theme.fg {
-        Color::Rgb(r, g, b) => (r, g, b),
-        _ => (200, 200, 200),
-    };
+    let crate::config::theme::Color::Rgb(fg_r, fg_g, fg_b) = theme.fg;
 
     let fallback_style = syntect::highlighting::Style {
         foreground: syntect::highlighting::Color {
@@ -799,12 +930,11 @@ fn render_line<'a>(
 
         let mut base_style = to_tui_style(*syn_style);
 
-        // Code and sign column consistently keep their "change" FG color
         if is_add {
-            base_style = base_style.fg(theme.add_fg);
+            base_style = base_style.fg(theme.add_fg.into());
         }
         if is_del {
-            base_style = base_style.fg(theme.del_fg);
+            base_style = base_style.fg(theme.del_fg.into());
         }
 
         let mut token_offset = 0;
@@ -853,10 +983,10 @@ fn render_line<'a>(
     }
 
     let (sign_char, mut sign_style) = if is_add || is_del {
-        let fg = if is_staged {
-            theme.partial
+        let fg: Color = if is_staged {
+            theme.partial.into()
         } else {
-            theme.dim
+            theme.dim.into()
         };
         ("▎", Style::default().fg(fg))
     } else {
@@ -866,17 +996,23 @@ fn render_line<'a>(
     let line_num_style = if is_selected {
         if is_staged && (is_add || is_del) {
             Style::default()
-                .bg(lerp_color(theme.cursor_bg, theme.partial, 0.2))
-                .fg(theme.fg)
+                .bg(lerp_color(
+                    theme.cursor_bg.into(),
+                    theme.partial.into(),
+                    0.2,
+                ))
+                .fg(theme.fg.into())
         } else {
-            Style::default().bg(theme.cursor_bg).fg(theme.fg)
+            Style::default()
+                .bg(theme.cursor_bg.into())
+                .fg(theme.fg.into())
         }
     } else if is_staged && (is_add || is_del) {
         Style::default()
-            .bg(lerp_color(theme.bg, theme.partial, 0.1))
-            .fg(theme.partial)
+            .bg(lerp_color(theme.bg.into(), theme.partial.into(), 0.1))
+            .fg(theme.partial.into())
     } else {
-        Style::default().bg(theme.bg).fg(theme.dim)
+        Style::default().bg(theme.bg.into()).fg(theme.dim.into())
     };
 
     sign_style = sign_style.bg(line_num_style.bg.unwrap_or(Color::Reset));
@@ -900,44 +1036,77 @@ fn get_line_style(
     use_gradient: bool,
     theme: &UiTheme,
 ) -> Style {
-    if use_gradient && (is_add || is_del) {
-        let bg = if is_selected { theme.cursor_bg } else { theme.bg };
+    // Falls back to plain background if the line is not staged
+    let use_grad_change = use_gradient
+        && is_staged
+        && (is_add || is_del)
+        && matches!(theme.file_change_highlight, LineHighlightMode::Gradient(_));
+
+    if use_grad_change {
+        let bg = if is_selected {
+            theme.cursor_bg.into()
+        } else {
+            theme.bg.into()
+        };
         let mut style = Style::default().bg(bg);
         if is_add {
-            style = style.fg(theme.add_fg);
+            style = style.fg(theme.add_fg.into());
         } else {
-            style = style.fg(theme.del_fg);
+            style = style.fg(theme.del_fg.into());
         }
         return style;
     }
 
-    // Fallback logic when gradient is off
+    // Fallback logic when gradient is off (Solid or None) - only highlighted if staged
+    let has_highlight =
+        use_gradient && is_staged && theme.file_change_highlight != LineHighlightMode::None;
+
+    // Pre-calculate flat backgrounds blended with custom change opacity
+    let add_bg = lerp_color(
+        theme.add_bg.into(),
+        theme.bg.into(),
+        1.0 - theme.file_change_highlight_opacity as f32,
+    );
+    let del_bg = lerp_color(
+        theme.del_bg.into(),
+        theme.bg.into(),
+        1.0 - theme.file_change_highlight_opacity as f32,
+    );
+
     let mut style = if is_selected {
-        if is_add {
-            Style::default()
-                .bg(lerp_color(theme.cursor_bg, theme.add_bg, 0.6))
-                .fg(theme.add_fg)
-        } else if is_del {
-            Style::default()
-                .bg(lerp_color(theme.cursor_bg, theme.del_bg, 0.6))
-                .fg(theme.del_fg)
-        } else {
-            Style::default().bg(theme.cursor_bg).fg(theme.fg)
-        }
+        Style::default()
+            .bg(theme.cursor_bg.into())
+            .fg(theme.fg.into())
     } else {
-        if is_add {
-            Style::default().bg(theme.add_bg).fg(theme.add_fg)
-        } else if is_del {
-            Style::default().bg(theme.del_bg).fg(theme.del_fg)
-        } else {
-            Style::default().bg(theme.bg).fg(theme.fg)
-        }
+        Style::default().bg(theme.bg.into()).fg(theme.fg.into())
     };
 
+    if is_add {
+        style = style.fg(theme.add_fg.into());
+        if has_highlight {
+            let bg_col = if is_selected {
+                lerp_color(theme.cursor_bg.into(), add_bg, 0.6)
+            } else {
+                add_bg
+            };
+            style = style.bg(bg_col);
+        }
+    } else if is_del {
+        style = style.fg(theme.del_fg.into());
+        if has_highlight {
+            let bg_col = if is_selected {
+                lerp_color(theme.cursor_bg.into(), del_bg, 0.6)
+            } else {
+                del_bg
+            };
+            style = style.bg(bg_col);
+        }
+    }
+
     if !is_staged && (is_add || is_del) {
-        style = style.fg(theme.dim);
+        style = style.fg(theme.dim.into());
         if !is_selected {
-            style = style.bg(theme.bg);
+            style = style.bg(theme.bg.into());
         }
     }
 
@@ -960,10 +1129,10 @@ fn render_separator<'a>(
     theme: &UiTheme,
 ) -> Row<'a> {
     let mut style = Style::default()
-        .bg(lerp_color(theme.bg, theme.dir, 0.1))
-        .fg(lerp_color(theme.dim, theme.dir, 0.5));
+        .bg(lerp_color(theme.bg.into(), theme.dir.into(), 0.1))
+        .fg(lerp_color(theme.dim.into(), theme.dir.into(), 0.5));
     if is_selected {
-        style = style.bg(theme.cursor_bg).fg(theme.fg);
+        style = style.bg(theme.cursor_bg.into()).fg(theme.fg.into());
     }
 
     let mut spans = vec![];
@@ -971,9 +1140,9 @@ fn render_separator<'a>(
         spans.push(Span::styled(
             format!(" @@ -{} +{} @@ ", old + 1, new + 1),
             style.fg(if is_selected {
-                theme.fg
+                theme.fg.into()
             } else {
-                lerp_color(theme.dim, theme.dir, 0.8)
+                lerp_color(theme.dim.into(), theme.dir.into(), 0.8)
             }),
         ));
     }
@@ -984,7 +1153,11 @@ fn render_separator<'a>(
 
     Row::new(vec![
         Cell::from(" ").style(style),
-        Cell::from("  ⋮  ").style(style.fg(if is_selected { theme.fg } else { theme.dim })),
+        Cell::from("  ⋮  ").style(style.fg(if is_selected {
+            theme.fg.into()
+        } else {
+            theme.dim.into()
+        })),
         Cell::from(Line::from(spans)).style(style),
     ])
     .style(style)
