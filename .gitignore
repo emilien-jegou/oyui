@@ -4,10 +4,12 @@
 !Cargo.lock
 !Cargo.toml
 !README.md
-!shell.nix
 !devenv.nix
-!scripts.nix
-!nix/*
+!make.nix
+
+!scripts
+!scripts/*
+!scripts/**/*
 
 !crates/
 
