@@ -1,5 +1,6 @@
 use crate::app::{App, CommandMode};
 use crate::config::UiTheme;
+use crate::view::ViewKind;
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
@@ -38,7 +39,13 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         &app.theme,
     );
 
-    draw_hint_bar(frame, hint_area, &app.command_mode, &app.theme);
+    draw_hint_bar(
+        frame,
+        hint_area,
+        &app.command_mode,
+        &app.view.current,
+        &app.theme,
+    );
     draw_command_bar(frame, cmd_area, &app.command_mode, &app.theme);
 
     if let CommandMode::ConfirmMerge = app.command_mode {
@@ -53,19 +60,38 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     }
 }
 
-fn draw_hint_bar(frame: &mut Frame, area: Rect, mode: &CommandMode, theme: &UiTheme) {
+fn draw_hint_bar(
+    frame: &mut Frame,
+    area: Rect,
+    mode: &CommandMode,
+    view: &ViewKind,
+    theme: &UiTheme,
+) {
     let hints = match mode {
-        CommandMode::Normal => vec![
-            ("j/k", "move"),
-            ("h/l", "close dir / open file"),
-            ("space", "stage"),
-            ("enter", "open"),
-            (":", "cmd"),
-            ("q", "quit"),
-        ],
+        CommandMode::Normal => match view {
+            ViewKind::Tree => vec![
+                ("j/k", "move"),
+                ("h/l", "close/open"),
+                ("space", "stage"),
+                ("i", "invert"),
+                (":", "cmd"),
+                ("enter", "merge"),
+                ("q", "quit"),
+            ],
+            ViewKind::File => vec![
+                ("j/k", "move"),
+                ("n/N", "hunks"),
+                ("space", "stage"),
+                ("z", "unfold"),
+                ("h/esc", "back"),
+                ("enter", "merge"),
+                ("q", "quit"),
+            ],
+        },
         CommandMode::Active(_) => vec![("enter", "run"), ("esc", "cancel")],
-        CommandMode::ConfirmMerge => vec![("enter", "run"), ("esc", "cancel")],
+        CommandMode::ConfirmMerge => vec![("enter", "confirm"), ("q/esc", "cancel")],
     };
+
     let spans: Vec<Span> = hints
         .into_iter()
         .flat_map(|(k, v)| {
@@ -80,6 +106,7 @@ fn draw_hint_bar(frame: &mut Frame, area: Rect, mode: &CommandMode, theme: &UiTh
             ]
         })
         .collect();
+
     frame.render_widget(
         Paragraph::new(Line::from(spans)).style(Style::default().bg(theme.bg.into())),
         area,
