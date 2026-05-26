@@ -13,40 +13,116 @@ pub fn get_embedded_themes() -> &'static ThemeSet {
     })
 }
 
+fn is_dark(bg: Color) -> bool {
+    match bg {
+        Color::Rgb(r, g, b) => {
+            // Standard perceived luminance formula
+            let luminance = 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32;
+            luminance < 128.0
+        }
+        _ => true, // assume dark if non-RGB
+    }
+}
+
 /// Core function that extracts TUI colors intelligently from ANY .tmTheme
 pub fn derive_ui_theme(theme: &Theme) -> UiTheme {
-    let bg = syn_to_color(theme.settings.background).unwrap_or(Color::Rgb(14, 14, 18));
-    let fg = syn_to_color(theme.settings.foreground).unwrap_or(Color::Rgb(200, 200, 210));
+    // background is required — panic with a clear message if absent
+    let bg = syn_to_color(theme.settings.background)
+        .expect("tmTheme is missing a background color, which is required");
 
-    let cursor_bg = syn_to_color(theme.settings.line_highlight)
-        .or_else(|| syn_to_color(theme.settings.selection))
-        .unwrap_or_else(|| blend(fg, bg, 0.1)); // Fallback: slight highlight
+    let dark = is_dark(bg);
+
+    let fg = syn_to_color(theme.settings.foreground).unwrap_or_else(|| {
+        let default = if dark {
+            Color::Rgb(200, 200, 210)
+        } else {
+            Color::Rgb(40, 40, 50)
+        };
+        eprintln!("warning: tmTheme missing 'foreground', using default {:?}", default);
+        default
+    });
+
+    let cursor_bg = syn_to_color(theme.settings.line_highlight).unwrap_or_else(|| {
+        let derived = blend(fg, bg, 0.08);
+        eprintln!(
+            "warning: tmTheme missing 'lineHighlight', deriving cursor_bg from bg as {:?}",
+            derived
+        );
+        derived
+    });
 
     let dim = extract_scope_color(theme, &["comment", "punctuation"])
         .or_else(|| syn_to_color(theme.settings.gutter_foreground))
-        .unwrap_or(Color::Rgb(90, 90, 105));
+        .unwrap_or_else(|| {
+            let default = if dark {
+                Color::Rgb(90, 90, 105)
+            } else {
+                Color::Rgb(150, 150, 160)
+            };
+            eprintln!("warning: tmTheme missing comment/gutter color for 'dim', using default {:?}", default);
+            default
+        });
 
-    // Derive diff / git colors from semantic syntax highlighting
     let staged = extract_scope_color(theme, &["markup.inserted", "string", "entity.name.string"])
-        .unwrap_or(Color::Rgb(130, 210, 150));
+        .unwrap_or_else(|| {
+            let default = if dark {
+                Color::Rgb(130, 210, 150)
+            } else {
+                Color::Rgb(40, 140, 70)
+            };
+            eprintln!("warning: tmTheme missing inserted/string color for 'staged', using default {:?}", default);
+            default
+        });
 
     let partial = extract_scope_color(
         theme,
         &["markup.changed", "constant.numeric", "support.type"],
     )
-    .unwrap_or(Color::Rgb(210, 170, 80));
+    .unwrap_or_else(|| {
+        let default = if dark {
+            Color::Rgb(210, 170, 80)
+        } else {
+            Color::Rgb(160, 110, 20)
+        };
+        eprintln!("warning: tmTheme missing changed/numeric color for 'partial', using default {:?}", default);
+        default
+    });
 
     let del_fg = extract_scope_color(theme, &["markup.deleted", "invalid", "keyword.operator"])
-        .unwrap_or(Color::Rgb(255, 130, 130));
+        .unwrap_or_else(|| {
+            let default = if dark {
+                Color::Rgb(255, 130, 130)
+            } else {
+                Color::Rgb(180, 40, 40)
+            };
+            eprintln!("warning: tmTheme missing deleted/invalid color for 'del_fg', using default {:?}", default);
+            default
+        });
 
     let dir = extract_scope_color(theme, &["entity.name.type", "entity.name.class", "storage"])
-        .unwrap_or(Color::Rgb(100, 140, 210));
+        .unwrap_or_else(|| {
+            let default = if dark {
+                Color::Rgb(100, 140, 210)
+            } else {
+                Color::Rgb(30, 80, 170)
+            };
+            eprintln!("warning: tmTheme missing type/class color for 'dir', using default {:?}", default);
+            default
+        });
 
     let cmd = extract_scope_color(
         theme,
         &["keyword.control", "variable", "entity.name.function"],
     )
-    .unwrap_or(Color::Rgb(180, 140, 255));
+    .unwrap_or_else(|| {
+        let default = if dark {
+            Color::Rgb(180, 140, 255)
+        } else {
+            Color::Rgb(100, 60, 180)
+        };
+        eprintln!("warning: tmTheme missing keyword/function color for 'cmd', using default {:?}", default);
+        default
+    });
 
     UiTheme {
         bg,
@@ -66,12 +142,10 @@ pub fn derive_ui_theme(theme: &Theme) -> UiTheme {
 }
 
 pub fn fallback_theme() -> (UiTheme, Theme) {
-    // If absolutely nothing is provided, construct a baseline dark theme.
-    // (In reality, if "catppuccin-mocha.tmTheme" is embedded, it will use that)
     let themes = get_embedded_themes();
     let theme = themes
         .themes
-        .get("catppuccin-mocha")
+        .get("quaoar")
         .or_else(|| themes.themes.values().next())
         .unwrap()
         .clone();

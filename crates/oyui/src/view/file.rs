@@ -688,8 +688,8 @@ fn render_line<'a>(
     let area_width = area_width.max(10);
     // Base gradient spans 50% of the screen
     let grad1_width = (area_width as f32 * 0.5).max(1.0);
-    // Layered gradient spans 20% of the screen
-    let grad2_width = (area_width as f32 * 0.2).max(1.0);
+    // Layered gradient spans 8% of the screen
+    let grad2_width = (area_width as f32 * 0.08).max(1.0);
 
     let use_grad = use_gradient && (is_add || is_del);
 
