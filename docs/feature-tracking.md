@@ -29,7 +29,7 @@ project. Feature requests are still done via github issues.
 - Allow users to override default themes by providing a theme directly.
 e.g.
 ```
-base_theme = "quaoar"
+base_theme = "weywot"
 ```
 
 
