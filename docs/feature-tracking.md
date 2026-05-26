@@ -15,15 +15,11 @@ project. Feature requests are still done via github issues.
 ```
 - Allow the tool to be use as a standalone tool (built-in commit and branch navigation)
     - Replace the need for `jj arrange` by adding commit re-ordering
-- In-file hunk split (to get back partial files)
-- Manage conflict in diff highlight and behavior
-- Three-way split
-- In split edition e.g. 'd' for deleting a change in file view without leaving the tool
-- merge long directory chain e.g. 'packages/ui/src' could be all on one line
 - remote merge review with dynamic forge backend (github, gitlab, ...)
     - Open the tool for AI integration to pre-review the changes, give swift summary, and prompt questions
 - Identify binary file incoherence of file signature (e.g. an exe with a png extension) tie it to existing integration.
     - Image/video preview
+- Split a hunk, to get smaller hunks.
 
 ## Theming
 - Allow users to override default themes by providing a theme directly.
@@ -31,7 +27,6 @@ e.g.
 ```
 base_theme = "weywot"
 ```
-
 
 ## Accessibility
 - Default theme shouldn't change terminal background
@@ -45,3 +40,8 @@ base_theme = "weywot"
 | 24-bit True Color | ~16.7M colors (2⁸×2⁸×2⁸)          |
 
 - check for nerdfonts/icons support before displaying any.
+
+## Moonshot
+- Three-way split
+- In split edition e.g. 'd' for deleting a change in file view without leaving the tool
+
