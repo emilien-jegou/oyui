@@ -14,10 +14,13 @@ project. Feature requests are still done via github issues.
 > find in files: ... # interactive search of file in view (use fd)
 ```
 - Allow the tool to be use as a standalone tool (built-in commit and branch navigation)
+    - Replace the need for `jj arrange` by adding commit re-ordering
 - In-file hunk split (to get back partial files)
 - Manage conflict in diff highlight and behavior
 - Three-way split
 - In split edition e.g. 'd' for deleting a change in file view without leaving the tool
 - merge long directory chain e.g. 'packages/ui/src' could be all on one line
-- remote merge review (github)
-- Identify binary file incoherence of file signature (e.g. an exe with a png extension)
+- remote merge review with dynamic forge backend (github, gitlab, ...)
+    - Open the tool for AI integration to pre-review the changes, give swift summary, and prompt questions
+- Identify binary file incoherence of file signature (e.g. an exe with a png extension) tie it to existing integration.
+    - Image/video preview
