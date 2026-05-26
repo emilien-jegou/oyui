@@ -24,3 +24,17 @@ project. Feature requests are still done via github issues.
     - Open the tool for AI integration to pre-review the changes, give swift summary, and prompt questions
 - Identify binary file incoherence of file signature (e.g. an exe with a png extension) tie it to existing integration.
     - Image/video preview
+
+
+## Accessibility
+- Default theme shouldn't change terminal background
+- Default theme should check for terminal color support:
+
+| Mode              | Colors                            |
+| ----------------- | --------------------------------- |
+| Plain ASCII       | None                              |
+| ANSI (16-color)   | 16 colors (8 standard + 8 bright) |
+| 256-color palette | 256 colors                        |
+| 24-bit True Color | ~16.7M colors (2⁸×2⁸×2⁸)          |
+
+- check for nerdfonts/icons support before displaying any.

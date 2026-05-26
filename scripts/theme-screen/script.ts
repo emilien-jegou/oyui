@@ -183,13 +183,12 @@ async function generateThemeScreenshots(themes: Theme[], assetsFolderPath: strin
             }
             break;
           }
-          await Bun.sleep(100);
+          await Bun.sleep(200);
         }
 
         if (!windowReady) return err(new Error(`Window for ${theme.name} did not appear.`));
 
-        await Bun.sleep(100);
-
+        await Bun.sleep(200);
         const seq1 = await pressSequence(["j", "j", " "], 10);
         if (!seq1.ok) return err(seq1.error);
 

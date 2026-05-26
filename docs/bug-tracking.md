@@ -5,4 +5,6 @@ Bug should still be reported in github issues.
 
 ## List
 
+- Horizontal scroll does not work
+
 ...

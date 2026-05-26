@@ -79,7 +79,7 @@ Setup the default config for oyui
 #
 # Full list at:
 # https://github.com/emilien-jegou/oyui/tree/main/docs/themes
-chosen_theme = "catppuccin-mocha"
+chosen_theme = "quaoar"
 
 [theme.my-custom-theme]
 # (Optional) Path to a TextMate file.
