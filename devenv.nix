@@ -1,16 +1,18 @@
 { pkgs, ... }:
 
 let
-  make = import ./nix/make-cli.nix { inherit pkgs; };
+  make = import ./scripts/make-cli.nix { inherit pkgs; };
 in {
   packages = [
-    (make.mkCli (import ./scripts.nix))
+    (make.mkCli (import ./make.nix))
     pkgs.bacon
+    pkgs.bun
+    pkgs.wtype
   ];
 
   languages.rust = {
     enable = true;
-    channel = "nightly"; 
+    channel = "nightly";
     components =[ "rustc" "cargo" "rust-src" "rustfmt" "rust-analyzer" "clippy" ];
     targets =[ "wasm32-unknown-unknown" "x86_64-unknown-linux-gnu" ];
   };

@@ -17,5 +17,10 @@
       desc = "Run bacon";
       exec = "bacon";
     }
+    {
+      cmd = "theme-screen";
+      desc = "Generate the theme.md file";
+      exec = "./scripts/theme-screen/script.ts";
+    }
   ];
 }

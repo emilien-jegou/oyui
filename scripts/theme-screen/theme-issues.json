@@ -1,0 +1,18 @@
+{
+  "catppuccin-latte": ["⚠️ Badly chosen accent color"],
+  "cobalt2-dark": ["⚠️ Same color for add/del"],
+  "everforest-light": ["⚠️ Contrast issue"],
+  "flexoki-light": ["⚠️ Contrast issue"],
+  "gruvbox-dark": ["⚠️ Contrast issue"],
+  "gruvbox-light": ["⚠️ Contrast issue"],
+  "monokai-dark": ["⚠️ Weird bg and accent color"],
+  "one-dark": ["⚠️ Weird accent color"],
+  "rosepine-dark": ["⚠️ Weird deletion color"],
+  "rosepine-dawn": ["⚠️ Weird deletion color", "❌ Strong contrast issue"],
+  "solarized-light": ["⚠️ Weird accent color"],
+  "aura-dark": ["❌ Strong contrast issue"],
+  "github-dark": ["❌ Strong contrast issue"],
+  "github-light": ["❌ Bad fallback in tui lead to unreadable theme"],
+  "synthwave84-dark": ["❌ Bad fallback in tui lead to unreadable theme"],
+  "tokyonight-day": ["❌ Bad fallback in tui lead to unreadable theme"]
+}
