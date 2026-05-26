@@ -6,8 +6,9 @@ import { join } from "path";
 import { tmpdir } from "os";
 
 const TERMINAL_CMD = ["alacritty", "--class", "oyui-screens", "-e"];
-const WINDOW_WIDTH = 1200;
-const WINDOW_HEIGHT = 800;
+const WINDOW_WIDTH = 1400;
+// this is really font-size dependent, we just don't want a black bar at the bottom on the screen
+const WINDOW_HEIGHT = 703;
 
 const THEMES_DIR = "crates/oyui/themes";
 const ISSUES_FILE = "scripts/theme-screen/theme-issues.json";
