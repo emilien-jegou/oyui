@@ -31,3 +31,6 @@ serde_json = { workspace = true }
 
 [build-dependencies]
 syntect = { workspace = true }
+serde = { workspace = true }
+toml = { workspace = true }
+typed-builder = { workspace = true }

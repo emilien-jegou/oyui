@@ -84,13 +84,6 @@ chosen_theme = "quaoar"
 [theme.my-custom-theme]
 # (Optional) Path to a TextMate file.
 tm_theme_path = "~/.config/oyui/themes/MyCustomSyntax.tmTheme"
-
-# Define the UI colors for this theme.
-# Values can be standard Hex codes ("#RRGGBB") or references to the 
-# loaded tmTheme syntax file using the "tm:" prefix.
-[theme.my-custom-theme.colors]
-
-# -- General UI --
 bg = "tm:background"        # UI Background
 cursor_bg = "#1e1e2a"       # Selection/Cursor row background
 fg = "tm:foreground"        # Primary text color
@@ -110,6 +103,14 @@ add_bg = "#1e2d1e"          # Background for additions
 del_bg = "#2d1e1e"          # Background for deletions
 add_fg = "tm:markup.inserted" # Text color for additions
 del_fg = "tm:markup.deleted"  # Text color for deletions
+
+# -- Line Highlights --
+# Methods: "none", "solid", "gradient" (default), or "gradient:X%"
+file_staged_highlight = "solid"
+file_staged_highlight_opacity = 1.0
+
+file_change_highlight = "gradient:20%"
+file_change_highlight_opacity = 0.1
 
 # ==========================================
 # Available "tm:" references

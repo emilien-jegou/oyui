@@ -47,7 +47,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         frame.render_widget(
             Paragraph::new("Press Enter to Confirm Merge")
                 .block(Block::default().borders(Borders::ALL).title(" Merge "))
-                .style(Style::default().fg(app.theme.partial)),
+                .style(Style::default().fg(app.theme.partial.into())),
             confirm_area,
         );
     }
@@ -72,14 +72,16 @@ fn draw_hint_bar(frame: &mut Frame, area: Rect, mode: &CommandMode, theme: &UiTh
             vec![
                 Span::styled(
                     k,
-                    Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(theme.fg.into())
+                        .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(format!(" {}  ", v), Style::default().fg(theme.dim)),
+                Span::styled(format!(" {}  ", v), Style::default().fg(theme.dim.into())),
             ]
         })
         .collect();
     frame.render_widget(
-        Paragraph::new(Line::from(spans)).style(Style::default().bg(theme.bg)),
+        Paragraph::new(Line::from(spans)).style(Style::default().bg(theme.bg.into())),
         area,
     );
 }
@@ -89,18 +91,20 @@ fn draw_command_bar(frame: &mut Frame, area: Rect, mode: &CommandMode, theme: &U
         let line = Line::from(vec![
             Span::styled(
                 ":",
-                Style::default().fg(theme.cmd).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme.cmd.into())
+                    .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(buf, Style::default().fg(theme.fg)),
-            Span::styled("▌", Style::default().fg(theme.cmd)),
+            Span::styled(buf, Style::default().fg(theme.fg.into())),
+            Span::styled("▌", Style::default().fg(theme.cmd.into())),
         ]);
         frame.render_widget(
-            Paragraph::new(line).style(Style::default().bg(theme.cursor_bg)),
+            Paragraph::new(line).style(Style::default().bg(theme.cursor_bg.into())),
             area,
         );
     } else {
         frame.render_widget(
-            Paragraph::new("").style(Style::default().bg(theme.bg)),
+            Paragraph::new("").style(Style::default().bg(theme.bg.into())),
             area,
         );
     }

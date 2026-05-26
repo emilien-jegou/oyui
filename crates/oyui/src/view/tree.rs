@@ -197,21 +197,36 @@ impl TreeViewData {
         let left_spans = vec![
             Span::styled(
                 format!(" {} ", path),
-                Style::default().bg(theme.cursor_bg).fg(theme.fg),
+                Style::default()
+                    .bg(theme.cursor_bg.into())
+                    .fg(theme.fg.into()),
             ),
             Span::raw("  "),
-            Span::styled(format!("{}A ", a), Style::default().fg(theme.add_fg)),
-            Span::styled(format!("{}D ", d), Style::default().fg(theme.del_fg)),
-            Span::styled(format!("{}M ", m), Style::default().fg(theme.partial)),
+            Span::styled(format!("{}A ", a), Style::default().fg(theme.add_fg.into())),
+            Span::styled(format!("{}D ", d), Style::default().fg(theme.del_fg.into())),
+            Span::styled(
+                format!("{}M ", m),
+                Style::default().fg(theme.partial.into()),
+            ),
         ];
 
         let right_spans = vec![
-            Span::styled(format!("+{} ", tot_ins), Style::default().fg(theme.add_fg)),
-            Span::styled(format!("-{} ", tot_del), Style::default().fg(theme.del_fg)),
+            Span::styled(
+                format!("+{} ", tot_ins),
+                Style::default().fg(theme.add_fg.into()),
+            ),
+            Span::styled(
+                format!("-{} ", tot_del),
+                Style::default().fg(theme.del_fg.into()),
+            ),
         ];
 
         let chunks = Layout::horizontal([Constraint::Min(0), Constraint::Length(20)]).split(area);
-        frame.render_widget(Paragraph::new(Line::from(left_spans)).bg(theme.bg), chunks[0]);
+
+        frame.render_widget(
+            Paragraph::new(Line::from(left_spans)).bg(theme.bg),
+            chunks[0],
+        );
         frame.render_widget(
             Paragraph::new(Line::from(right_spans))
                 .alignment(ratatui::layout::Alignment::Right)
@@ -248,8 +263,8 @@ impl TreeViewData {
         }
 
         let list = List::new(items)
-            .block(Block::default().style(Style::default().bg(theme.bg)))
-            .highlight_style(Style::default().bg(theme.cursor_bg));
+            .block(Block::default().style(Style::default().bg(theme.bg.into())))
+            .highlight_style(Style::default().bg(theme.cursor_bg.into()));
 
         frame.render_stateful_widget(list, area, &mut self.list_state);
     }
@@ -273,8 +288,12 @@ fn lerp_color(c1: Color, c2: Color, t: f32) -> Color {
 
 fn get_diff_color(value: usize, is_addition: bool, theme: &UiTheme) -> Color {
     let t = (value as f64 / 100.0).min(1.0).sqrt() as f32;
-    let target = if is_addition { theme.add_fg } else { theme.del_fg };
-    lerp_color(theme.dim, target, t)
+    let target = if is_addition {
+        theme.add_fg.into()
+    } else {
+        theme.del_fg.into()
+    };
+    lerp_color(theme.dim.into(), target, t)
 }
 
 fn flatten_recursive(
@@ -361,23 +380,23 @@ fn render_tree_row<'a>(row: &'a TreeRow, theme: &'a UiTheme) -> ListItem<'a> {
     let mut spans = Vec::new();
 
     // 1. Determine the base color for the entire row based on status
-    let base_fg = if !row.is_dir {
+    let base_fg: Color = if !row.is_dir {
         if row.left_path.is_none() {
-            theme.add_fg
+            theme.add_fg.into()
         } else if row.right_path.is_none() {
-            theme.del_fg
+            theme.del_fg.into()
         } else {
-            theme.fg
+            theme.fg.into()
         }
     } else {
-        theme.fg
+        theme.fg.into()
     };
 
     // 2. Tree structure spans (keep these structural)
     for &has_sibling in &row.parent_continuations {
         spans.push(Span::styled(
             if has_sibling { "│  " } else { "   " },
-            Style::default().fg(theme.dim),
+            Style::default().fg(theme.dim.into()),
         ));
     }
     spans.push(Span::styled(
@@ -386,14 +405,14 @@ fn render_tree_row<'a>(row: &'a TreeRow, theme: &'a UiTheme) -> ListItem<'a> {
         } else {
             "├── "
         },
-        Style::default().fg(theme.dim),
+        Style::default().fg(theme.dim.into()),
     ));
 
     // 3. Staging symbols
-    let (stage_sym, stage_color) = match row.staging_state {
-        StagingState::Staged => ("●", theme.staged),
-        StagingState::Unstaged => ("○", theme.unstaged),
-        StagingState::PartiallyStaged => ("◐", theme.partial),
+    let (stage_sym, stage_color): (&str, Color) = match row.staging_state {
+        StagingState::Staged => ("●", theme.staged.into()),
+        StagingState::Unstaged => ("○", theme.unstaged.into()),
+        StagingState::PartiallyStaged => ("◐", theme.partial.into()),
     };
     spans.push(Span::styled(stage_sym, Style::default().fg(stage_color)));
     spans.push(Span::raw(" "));
@@ -401,11 +420,11 @@ fn render_tree_row<'a>(row: &'a TreeRow, theme: &'a UiTheme) -> ListItem<'a> {
     // 4. File/Dir Name and Icon
     if row.is_dir {
         let arrow = if row.is_folded { "▸ " } else { "▾ " };
-        spans.push(Span::styled(arrow, Style::default().fg(theme.fg)));
-        spans.push(Span::styled(" ", Style::default().fg(theme.dir)));
+        spans.push(Span::styled(arrow, Style::default().fg(theme.fg.into())));
+        spans.push(Span::styled(" ", Style::default().fg(theme.dir.into())));
         spans.push(Span::styled(
             row.name.as_str(),
-            Style::default().fg(theme.dir).bold(),
+            Style::default().fg(theme.dir.into()).bold(),
         ));
     } else {
         let icon = get_file_icon(&row.name, theme);
@@ -423,12 +442,15 @@ fn render_tree_row<'a>(row: &'a TreeRow, theme: &'a UiTheme) -> ListItem<'a> {
         match stats {
             DiffStats::Binary { bytes } => {
                 spans.push(Span::raw(" "));
-                spans.push(Span::styled("(binary)", Style::default().fg(theme.dir)));
+                spans.push(Span::styled(
+                    "(binary)",
+                    Style::default().fg(theme.dir.into()),
+                ));
                 spans.push(Span::raw(" "));
                 let sign = if *bytes > 0 { "+" } else { "" };
                 spans.push(Span::styled(
                     format!("{}{} bytes ", sign, bytes),
-                    Style::default().fg(theme.dim),
+                    Style::default().fg(theme.dim.into()),
                 ));
             }
             DiffStats::Text {
@@ -460,11 +482,11 @@ fn render_tree_row<'a>(row: &'a TreeRow, theme: &'a UiTheme) -> ListItem<'a> {
 fn get_file_icon(name: &str, theme: &UiTheme) -> (&'static str, Color) {
     let ext = name.split('.').next_back().unwrap_or("");
     match ext {
-        "tsx" | "jsx" => ("", theme.dir),
-        "ts" | "js" => ("", theme.partial),
-        "svg" => ("󰕙", theme.partial),
-        "md" => ("", theme.fg),
-        "json" => ("", theme.partial),
-        _ => ("󰈚", theme.dim),
+        "tsx" | "jsx" => ("", theme.dir.into()),
+        "ts" | "js" => ("", theme.partial.into()),
+        "svg" => ("󰕙", theme.partial.into()),
+        "md" => ("", theme.fg.into()),
+        "json" => ("", theme.partial.into()),
+        _ => ("󰈚", theme.dim.into()),
     }
 }
