@@ -18,6 +18,7 @@ use super::ViewAction;
 
 pub struct FileViewData {
     pub scroll_states: HashMap<PathBuf, TableState>,
+    pub hscroll_states: HashMap<PathBuf, usize>,
     pub row_counts: HashMap<PathBuf, usize>,
     pub line_mapping: HashMap<PathBuf, Vec<usize>>,
     pub hunk_starts: HashMap<PathBuf, Vec<usize>>,
@@ -28,6 +29,7 @@ pub struct FileViewData {
     pub is_folded: bool,
     pub context_lines: usize,
     pub last_height: usize,
+    pub last_width: usize,
     pub use_gradient: bool,
 }
 
@@ -35,6 +37,7 @@ impl Default for FileViewData {
     fn default() -> Self {
         Self {
             scroll_states: HashMap::new(),
+            hscroll_states: HashMap::new(),
             row_counts: HashMap::new(),
             line_mapping: HashMap::new(),
             hunk_starts: HashMap::new(),
@@ -45,6 +48,7 @@ impl Default for FileViewData {
             is_folded: true,
             context_lines: 4,
             last_height: 0,
+            last_width: 0,
             use_gradient: true,
         }
     }
@@ -143,6 +147,32 @@ impl FileViewData {
                     (current_selected as isize + delta).clamp(0, max_idx as isize) as usize;
             };
 
+            let mut move_hscroll = |delta: isize| {
+                let mut max_line_len = 0;
+                if let Some(diff_result) = cache.diffs.get(path).value() {
+                    if let crate::diff::DiffResult::Text(diff) = diff_result {
+                        let old_max = diff
+                            .old_text
+                            .lines()
+                            .map(|l| l.chars().count())
+                            .max()
+                            .unwrap_or(0);
+                        let new_max = diff
+                            .new_text
+                            .lines()
+                            .map(|l| l.chars().count())
+                            .max()
+                            .unwrap_or(0);
+                        max_line_len = old_max.max(new_max);
+                    }
+                }
+                let code_col_width = self.last_width.saturating_sub(6);
+                let max_hscroll = max_line_len.saturating_sub(code_col_width) + 10;
+
+                let hs = self.hscroll_states.entry(path.clone()).or_insert(0);
+                *hs = (*hs as isize + delta).clamp(0, max_hscroll as isize) as usize;
+            };
+
             match (key.code, is_ctrl) {
                 (KeyCode::Enter, _) => return ViewAction::ConfirmMerge,
                 (KeyCode::Char('c'), true) => return ViewAction::QuitWithAbort,
@@ -152,7 +182,12 @@ impl FileViewData {
                 (KeyCode::Char('u'), true) => move_cursor(-20),
 
                 (KeyCode::Char('q'), false) => return ViewAction::QuitWithAbort,
-                (KeyCode::Esc, _) | (KeyCode::Char('h'), _) => return ViewAction::CloseFileView,
+                (KeyCode::Esc, _) | (KeyCode::Char('h'), false) => {
+                    return ViewAction::CloseFileView
+                }
+
+                (KeyCode::Char('l'), true) | (KeyCode::Right, _) => move_hscroll(4),
+                (KeyCode::Char('h'), true) | (KeyCode::Left, _) => move_hscroll(-4),
 
                 (KeyCode::Char('j'), false) | (KeyCode::Down, _) => move_cursor(1),
                 (KeyCode::Char('k'), false) | (KeyCode::Up, _) => move_cursor(-1),
@@ -395,6 +430,7 @@ impl FileViewData {
         let scroll_state = self.scroll_states.entry(path.clone()).or_default();
         let selected_row_idx = scroll_state.selected().unwrap_or(0);
 
+        let hscroll = self.hscroll_states.get(path).copied().unwrap_or(0);
         let area_width = list_area.width;
         let use_gradient = self.use_gradient;
 
@@ -425,6 +461,7 @@ impl FileViewData {
                     Some(hunk.after_lines.start),
                     is_selected,
                     theme,
+                    hscroll,
                 ));
                 line_map.push(current_new);
                 row_to_hunk_for_file.push(None);
@@ -447,6 +484,7 @@ impl FileViewData {
                     area_width,
                     use_gradient,
                     theme,
+                    hscroll,
                 ));
                 line_map.push(current_new);
                 row_to_hunk_for_file.push(Some(i));
@@ -479,6 +517,7 @@ impl FileViewData {
                             area_width,
                             use_gradient,
                             theme,
+                            hscroll,
                         ));
                         line_map.push(current_new);
                         row_to_hunk_for_file.push(Some(i));
@@ -506,6 +545,7 @@ impl FileViewData {
                             area_width,
                             use_gradient,
                             theme,
+                            hscroll,
                         ));
                         line_map.push(current_new);
                         row_to_hunk_for_file.push(Some(i));
@@ -532,6 +572,7 @@ impl FileViewData {
                             area_width,
                             use_gradient,
                             theme,
+                            hscroll,
                         ));
                         line_map.push(current_new);
                         row_to_hunk_for_file.push(Some(i));
@@ -565,6 +606,7 @@ impl FileViewData {
                         area_width,
                         use_gradient,
                         theme,
+                        hscroll,
                     ));
                     line_map.push(current_new);
                     row_to_hunk_for_file.push(Some(i));
@@ -590,6 +632,7 @@ impl FileViewData {
                     area_width,
                     use_gradient,
                     theme,
+                    hscroll,
                 ));
                 line_map.push(current_new);
                 row_to_hunk_for_file.push(None);
@@ -606,6 +649,7 @@ impl FileViewData {
                     None,
                     is_selected,
                     theme,
+                    hscroll,
                 ));
                 line_map.push(current_new);
                 row_to_hunk_for_file.push(None);
@@ -632,7 +676,9 @@ impl FileViewData {
         .block(Block::default().borders(Borders::NONE).bg(theme.bg));
 
         let height = list_area.height as usize;
+        let width = list_area.width as usize;
         self.last_height = height;
+        self.last_width = width;
 
         if height > 0 {
             let mut offset = scroll_state.offset();
@@ -720,6 +766,133 @@ fn is_dark(bg: Color) -> bool {
     luminance < 128.0
 }
 
+fn slice_spans<'a>(spans: Vec<Span<'a>>, skip: usize) -> Vec<Span<'a>> {
+    if skip == 0 {
+        return spans;
+    }
+    let mut result = Vec::new();
+    let mut skipped = 0;
+    for span in spans {
+        if skipped >= skip {
+            result.push(span);
+            continue;
+        }
+        let chars_count = span.content.chars().count();
+        if skipped + chars_count <= skip {
+            skipped += chars_count;
+            continue;
+        }
+        let chars_to_skip = skip - skipped;
+        let new_content: String = span.content.chars().skip(chars_to_skip).collect();
+        result.push(Span::styled(new_content, span.style));
+        skipped = skip;
+    }
+    result
+}
+
+fn prepare_code_spans<'a>(
+    spans: Vec<Span<'a>>,
+    hscroll: usize,
+    code_col_width: usize,
+    content_len: usize,
+    theme: &UiTheme,
+) -> Vec<Span<'a>> {
+    if content_len == 0 {
+        return spans;
+    }
+
+    let has_left = hscroll > 0;
+    let has_right = content_len > hscroll + code_col_width;
+
+    // 1. Skip first `hscroll` characters
+    let mut skipped_spans = Vec::new();
+    let mut skipped = 0;
+    for span in spans {
+        let chars_count = span.content.chars().count();
+        if skipped + chars_count <= hscroll {
+            skipped += chars_count;
+            continue;
+        }
+        if skipped < hscroll {
+            let chars_to_skip = hscroll - skipped;
+            let new_content: String = span.content.chars().skip(chars_to_skip).collect();
+            skipped_spans.push(Span::styled(new_content, span.style));
+            skipped = hscroll;
+        } else {
+            skipped_spans.push(span);
+        }
+    }
+
+    // 2. Truncate to `code_col_width` characters
+    let mut capped_spans = Vec::new();
+    let mut current_width = 0;
+    for span in skipped_spans {
+        let chars_count = span.content.chars().count();
+        if current_width >= code_col_width {
+            break;
+        }
+        if current_width + chars_count > code_col_width {
+            let allowed = code_col_width - current_width;
+            let new_content: String = span.content.chars().take(allowed).collect();
+            capped_spans.push(Span::styled(new_content, span.style));
+            current_width = code_col_width;
+        } else {
+            current_width += chars_count;
+            capped_spans.push(span);
+        }
+    }
+
+    // 3. Apply indicators dimly using theme.dim without bleeding style to adjacent text
+    let indicator_style = Style::default().fg(theme.dim.into());
+
+    if has_left && !capped_spans.is_empty() {
+        let first_span = capped_spans.remove(0);
+        let mut chars = first_span.content.chars();
+        chars.next(); // Drop the first char
+        let rest: String = chars.collect();
+
+        let symbol = if has_right && capped_spans.is_empty() && rest.is_empty() {
+            "↔"
+        } else {
+            "˂"
+        };
+
+        // Insert the dimly styled indicator
+        capped_spans.insert(
+            0,
+            Span::styled(symbol, first_span.style.patch(indicator_style)),
+        );
+
+        // Put the rest of the text back with its original syntax highlighting style
+        if !rest.is_empty() {
+            capped_spans.insert(1, Span::styled(rest, first_span.style));
+        }
+    }
+
+    if has_right && !capped_spans.is_empty() {
+        let last_span = capped_spans.pop().unwrap();
+        let chars_count = last_span.content.chars().count();
+        if chars_count > 0 {
+            let prefix: String = last_span.content.chars().take(chars_count - 1).collect();
+            let symbol = if has_left && capped_spans.is_empty() && prefix.is_empty() {
+                "↔"
+            } else {
+                "˃"
+            };
+
+            // Push the prefix back with its original syntax highlighting style
+            if !prefix.is_empty() {
+                capped_spans.push(Span::styled(prefix, last_span.style));
+            }
+
+            // Push the dimly styled indicator at the very end
+            capped_spans.push(Span::styled(symbol, last_span.style.patch(indicator_style)));
+        }
+    }
+
+    capped_spans
+}
+
 fn render_line<'a>(
     content: &'a str,
     idx: usize,
@@ -732,6 +905,7 @@ fn render_line<'a>(
     area_width: u16,
     use_gradient: bool,
     theme: &UiTheme,
+    hscroll: usize,
 ) -> Row<'a> {
     let row_style = get_line_style(is_add, is_del, is_selected, is_staged, use_gradient, theme);
     let prefix = if is_add {
@@ -1020,10 +1194,15 @@ fn render_line<'a>(
     let sign_span = Span::styled(sign_char, sign_style);
     let line_num_span = Span::styled(format!("{:>4} ", idx + 1), line_num_style);
 
+    let content_len = content.chars().count() + 2; // Offset by 2 for change prefixes ("+ "/"  ")
+    let code_col_width = (area_width as usize).saturating_sub(6);
+
+    let final_spans = prepare_code_spans(row_spans, hscroll, code_col_width, content_len, theme);
+
     Row::new(vec![
         Cell::from(sign_span).style(sign_style),
         Cell::from(line_num_span).style(line_num_style),
-        Cell::from(Line::from(row_spans)),
+        Cell::from(Line::from(final_spans)),
     ])
     .style(row_style)
 }
@@ -1127,6 +1306,7 @@ fn render_separator<'a>(
     next_new: Option<usize>,
     is_selected: bool,
     theme: &UiTheme,
+    hscroll: usize,
 ) -> Row<'a> {
     let mut style = Style::default()
         .bg(lerp_color(theme.bg.into(), theme.dir.into(), 0.1))
@@ -1151,6 +1331,12 @@ fn render_separator<'a>(
         style,
     ));
 
+    let final_spans = if hscroll > 0 {
+        slice_spans(spans, hscroll)
+    } else {
+        spans
+    };
+
     Row::new(vec![
         Cell::from(" ").style(style),
         Cell::from("  ⋮  ").style(style.fg(if is_selected {
@@ -1158,7 +1344,7 @@ fn render_separator<'a>(
         } else {
             theme.dim.into()
         })),
-        Cell::from(Line::from(spans)).style(style),
+        Cell::from(Line::from(final_spans)).style(style),
     ])
     .style(style)
 }
