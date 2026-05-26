@@ -49,9 +49,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tracing::info!("Starting oyui...");
 
-    let config_path = dirs::config_dir()
-        .map(|d| d.join("oyui/config.toml"))
-        .unwrap_or_else(|| PathBuf::from(".config/oyui/config.toml"));
+    let config_path = opts.config.clone().unwrap_or(
+        dirs::config_dir()
+            .map(|d| d.join("oyui/config.toml"))
+            .unwrap_or_else(|| PathBuf::from(".config/oyui/config.toml")),
+    );
 
     let (ui_theme, syntax_theme) = crate::config::load_config_and_theme(&config_path)
         .unwrap_or_else(|_| crate::config::builtin::fallback_theme());
