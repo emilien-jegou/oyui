@@ -17,7 +17,7 @@ pub fn get_embedded_themes() -> &'static EmbeddedThemeMap {
 pub fn fallback_theme() -> (UiTheme, Theme) {
     let themes = get_embedded_themes();
     themes
-        .get("quaoar")
+        .get("weywot")
         .or_else(|| themes.values().next())
         .expect("At least one theme should be present")
         .clone()

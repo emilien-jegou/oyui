@@ -2,7 +2,7 @@
 
 **Oyui** is a TUI merge tool and staging interface designed for [Jujutsu](https://github.com/martinvonz/jj) and Git.
 
-![Redesign screenshot](./docs/assets/screen0.png)
+![Redesign screenshot](./docs/assets/themes/weywot-1.png)
 
 ## Why Another merge editor?
 
@@ -24,7 +24,7 @@ I built **Oyui** to bridge this gap, focusing on a friction-free experience with
 *   **Live config reload:** modify the config, see changes live.
 *   **Partial staging:** stage only changes you need.
 *   **Themed Diffs:** Beautiful, readable syntax highlighting for your changes.
-    ![Redesign screenshot](./docs/assets/screen1.png)
+    ![Redesign screenshot](./docs/assets/themes/weywot.png)
 
 ---
 
@@ -79,7 +79,7 @@ Setup the default config for oyui
 #
 # Full list at:
 # https://github.com/emilien-jegou/oyui/tree/main/docs/themes
-chosen_theme = "quaoar"
+chosen_theme = "weywot"
 
 [theme.my-custom-theme]
 # (Optional) Path to a TextMate file.
