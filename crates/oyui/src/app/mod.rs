@@ -152,8 +152,8 @@ impl App {
                             line,
                             crate::diff::DiffLine::Addition { .. }
                                 | crate::diff::DiffLine::Deletion { .. }
-                        ) {
-                            if !diff
+                        )
+                            && !diff
                                 .line_selections
                                 .get(start_idx + j)
                                 .copied()
@@ -162,7 +162,6 @@ impl App {
                                 all_staged = false;
                                 break;
                             }
-                        }
                     }
 
                     let new_state = !all_staged;
@@ -171,11 +170,10 @@ impl App {
                             line,
                             crate::diff::DiffLine::Addition { .. }
                                 | crate::diff::DiffLine::Deletion { .. }
-                        ) {
-                            if start_idx + j < diff.line_selections.len() {
+                        )
+                            && start_idx + j < diff.line_selections.len() {
                                 diff.line_selections[start_idx + j] = new_state;
                             }
-                        }
                     }
                 }
 
