@@ -29,6 +29,7 @@ pub mod ui_state;
 pub mod view;
 pub mod worker;
 
+pub use crate::view::ViewAction;
 use crate::app::{App, ExitAction};
 use crate::cli::Opts;
 use crate::draw::draw;
@@ -55,8 +56,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .unwrap_or_else(|| PathBuf::from(".config/oyui/config.toml")),
     );
 
-    let (ui_theme, syntax_theme) = crate::config::load_config_and_theme(&config_path)
-        .unwrap_or_else(|_| crate::config::builtin::fallback_theme());
+    let (ui_theme, syntax_theme) = config::load_config_and_theme(&config_path)
+        .unwrap_or_else(|_| config::builtin::fallback_theme());
 
     // Spawn async background config watcher (returns channel of tuples)
     let (theme_tx, mut theme_rx) = tokio::sync::mpsc::channel::<(

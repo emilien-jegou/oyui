@@ -16,7 +16,7 @@ pub enum ViewKind {
     File,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum ViewAction {
     None,
     QuitWithAbort,
