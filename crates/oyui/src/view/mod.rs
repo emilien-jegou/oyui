@@ -1,3 +1,4 @@
+pub mod config_error;
 pub mod file;
 pub mod tree;
 

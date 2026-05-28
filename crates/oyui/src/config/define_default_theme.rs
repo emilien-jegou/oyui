@@ -145,6 +145,12 @@ pub fn derive_ui_theme(theme: &Theme) -> UiTheme {
     ThemeContext::new(theme).derive_ui_theme()
 }
 
+pub fn is_dark(bg: Color) -> bool {
+    let Color::Rgb(r, g, b) = bg;
+    let luminance = 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32;
+    luminance < 128.0
+}
+
 fn extract_scope_color(theme: &Theme, target_scopes: &[&str]) -> Option<Color> {
     for &target in target_scopes {
         let matched_color = theme
@@ -158,12 +164,6 @@ fn extract_scope_color(theme: &Theme, target_scopes: &[&str]) -> Option<Color> {
         }
     }
     None
-}
-
-fn is_dark(bg: Color) -> bool {
-    let Color::Rgb(r, g, b) = bg;
-    let luminance = 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32;
-    luminance < 128.0
 }
 
 fn blend(fg: Color, bg: Color, alpha: f32) -> Color {

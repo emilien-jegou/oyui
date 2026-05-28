@@ -29,11 +29,11 @@ pub mod ui_state;
 pub mod view;
 pub mod worker;
 
-pub use crate::view::ViewAction;
 use crate::app::{App, ExitAction};
 use crate::cli::Opts;
 use crate::draw::draw;
 use crate::input::handle_key;
+pub use crate::view::ViewAction;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -52,18 +52,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let config_path = opts.config.clone().unwrap_or(
         dirs::config_dir()
-            .map(|d| d.join("oyui/config.toml"))
-            .unwrap_or_else(|| PathBuf::from(".config/oyui/config.toml")),
+            .map(|d| d.join("oyui/config.rn"))
+            .unwrap_or_else(|| PathBuf::from(".config/oyui/config.rn")),
     );
 
-    let (ui_theme, syntax_theme) = config::load_config_and_theme(&config_path)
-        .unwrap_or_else(|_| config::builtin::fallback_theme());
+    // Load initial config and catch startup errors
+    let mut config_error = None;
+    let (ui_theme, syntax_theme) = match config::load_config_and_theme(&config_path) {
+        Ok(theme) => theme,
+        Err(e) => {
+            config_error = Some(e.to_string());
+            config::builtin::fallback_theme()
+        }
+    };
 
-    // Spawn async background config watcher (returns channel of tuples)
-    let (theme_tx, mut theme_rx) = tokio::sync::mpsc::channel::<(
-        crate::config::theme::UiTheme,
-        syntect::highlighting::Theme,
-    )>(1);
+    // Spawn async background config watcher sending Results downstream
+    let (theme_tx, mut theme_rx) = tokio::sync::mpsc::channel::<
+        Result<(crate::config::theme::UiTheme, syntect::highlighting::Theme), String>,
+    >(1);
     crate::config::watch_config(config_path, theme_tx);
 
     let worker = Tasker::spawn(
@@ -77,6 +83,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut app = App::new(worker);
     app.theme = ui_theme;
     app.syntax_theme = std::sync::Arc::new(syntax_theme);
+    app.config_error = config_error; // <--- ADDED
     app.base_path = opts.base.clone();
     app.left_path = Some(opts.left.clone());
     app.right_path = Some(opts.right.clone());
@@ -109,11 +116,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("Entering main event loop");
     let mut aborted = false;
     loop {
-        if let Ok((new_ui_theme, new_syntax_theme)) = theme_rx.try_recv() {
-            tracing::info!("Config file change detected. Live reloading theme.");
-            app.theme = new_ui_theme;
-            app.syntax_theme = std::sync::Arc::new(new_syntax_theme);
-            app.cache.syntax.clear();
+        // Receive updates from the config watcher channel
+        if let Ok(res) = theme_rx.try_recv() {
+            match res {
+                Ok((new_ui_theme, new_syntax_theme)) => {
+                    tracing::info!("Config file change detected. Live reloading theme.");
+                    app.theme = new_ui_theme;
+                    app.syntax_theme = std::sync::Arc::new(new_syntax_theme);
+                    app.config_error = None; // Clear the error on success
+                    app.cache.syntax.clear();
+                }
+                Err(err_msg) => {
+                    tracing::error!(error = %err_msg, "Config file compilation error detected");
+                    app.config_error = Some(err_msg); // Set the error
+                }
+            }
         }
 
         app.tick().await;

@@ -19,7 +19,8 @@ pub struct App {
     pub cache: DiffCache,
     pub view: View,
     pub theme: UiTheme,
-    pub syntax_theme: Arc<Theme>, // <--- ADDED
+    pub syntax_theme: Arc<Theme>,
+    pub config_error: Option<String>,
 
     pub command_mode: CommandMode,
     pub should_quit: bool,
@@ -41,6 +42,7 @@ impl App {
             view: View::new(),
             theme,
             syntax_theme: Arc::new(syntax_theme),
+            config_error: None,
             command_mode: CommandMode::Normal,
             should_quit: false,
             worker,

@@ -28,16 +28,21 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     ])
     .areas(area);
 
-    let diff_summary = app.get_diff_summary();
-    app.view.draw(
-        frame,
-        view_area,
-        &app.tree,
-        &app.cache,
-        app.base_path.as_ref(),
-        diff_summary,
-        &app.theme,
-    );
+    // If there is an active configuration error, render that view instead
+    if let Some(ref err) = app.config_error {
+        crate::view::config_error::draw(frame, view_area, err, &app.theme);
+    } else {
+        let diff_summary = app.get_diff_summary();
+        app.view.draw(
+            frame,
+            view_area,
+            &app.tree,
+            &app.cache,
+            app.base_path.as_ref(),
+            diff_summary,
+            &app.theme,
+        );
+    }
 
     draw_hint_bar(
         frame,
