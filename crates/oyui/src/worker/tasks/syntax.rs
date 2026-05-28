@@ -1,8 +1,10 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::diff_cache::DiffCache;
 use crate::syntax::SyntaxEngine;
-use oyui_tasker::{TaskerContext, WorkerTask};
+use oyui_tasker::{Listener, TaskerContext};
+use parking_lot::RwLock;
 use syntect::highlighting::Style as SyntectStyle;
 
 pub struct Syntax;
@@ -15,7 +17,7 @@ pub struct SyntaxReq {
     pub theme: Arc<syntect::highlighting::Theme>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SyntaxRes {
     pub node_path: PathBuf,
     pub highlighted: Vec<Vec<(SyntectStyle, String)>>,
@@ -26,20 +28,23 @@ pub struct SyntaxContext {
     engine: SyntaxEngine,
 }
 
-impl WorkerTask for Syntax {
-    type Request = SyntaxReq;
-    type Response = SyntaxRes;
+impl Listener<SyntaxReq, crate::worker::EventSender> for Syntax {
     type Context = SyntaxContext;
 
-    #[tracing::instrument(skip_all, fields(node_path = %req.node_path.display()))]
-    async fn handle(req: Self::Request, ctx: Self::Context) -> Self::Response {
+    #[tracing::instrument(skip_all, fields(node_path = %event.node_path.display()))]
+    async fn handle(
+        event: SyntaxReq,
+        ctx: Self::Context,
+        tx: crate::worker::EventSender,
+    ) -> eyre::Result<()> {
         tracing::debug!("Computing syntax highlighting");
 
         let syntax_set = &ctx.engine.syntax_set;
-        let theme = &req.theme;
+        let theme = &event.theme;
         let syntax = syntax_set
             .find_syntax_by_extension(
-                req.right_path
+                event
+                    .right_path
                     .as_ref()
                     .and_then(|p| p.extension())
                     .and_then(|s| s.to_str())
@@ -48,7 +53,7 @@ impl WorkerTask for Syntax {
             .unwrap_or_else(|| syntax_set.find_syntax_plain_text());
 
         let mut highlighter = syntect::easy::HighlightLines::new(syntax, theme);
-        let highlighted: Vec<Vec<_>> = req
+        let highlighted: Vec<Vec<_>> = event
             .text
             .lines()
             .map(|line| {
@@ -62,9 +67,30 @@ impl WorkerTask for Syntax {
             .collect();
 
         tracing::trace!("Syntax highlighting finished");
-        SyntaxRes {
-            node_path: req.node_path,
+        tx.send(SyntaxRes {
+            node_path: event.node_path.clone(),
             highlighted,
-        }
+        })?;
+        Ok(())
+    }
+}
+
+#[derive(TaskerContext)]
+pub struct SyntaxResCtx {
+    pub cache: Arc<RwLock<DiffCache>>,
+}
+
+pub struct SyntaxResListener;
+impl Listener<SyntaxRes, crate::worker::EventSender> for SyntaxResListener {
+    type Context = SyntaxResCtx;
+
+    async fn handle(
+        event: SyntaxRes,
+        ctx: Self::Context,
+        _tx: crate::worker::EventSender,
+    ) -> eyre::Result<()> {
+        tracing::debug!(node_path = %event.node_path.display(), "Applied Syntax cache");
+        ctx.cache.write().syntax.set(event.node_path, event.highlighted);
+        Ok(())
     }
 }

@@ -1,4 +1,3 @@
-pub mod input;
 pub mod mapping;
 pub mod render;
 pub mod utils;

@@ -1,59 +1,166 @@
 pub mod commands;
+pub mod draw;
 pub mod events;
 pub mod merge;
-pub mod worker;
 
 pub use events::{CommandMode, ExitAction};
+use typed_builder::TypedBuilder;
 
+use crate::commands::CommandError;
+use crate::commons::lazy::Lazy;
 use crate::config::UiTheme;
 use crate::diff_cache::DiffCache;
 use crate::tree::{FileTree, TreeNode};
 use crate::view::View;
-use crate::worker::Tasker;
+use crate::worker::{tasks, EventRegistry};
+use parking_lot::RwLock;
 use std::path::PathBuf;
 use std::sync::Arc;
 use syntect::highlighting::Theme;
 
-pub struct App {
-    pub tree: FileTree,
-    pub cache: DiffCache,
-    pub view: View,
-    pub theme: UiTheme,
-    pub syntax_theme: Arc<Theme>, // <--- ADDED
+use crossterm::{
+    event::{self, Event},
+    execute,
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+};
+use ratatui::{backend::CrosstermBackend, Terminal};
+use std::io;
+use std::time::Duration;
 
+#[derive(TypedBuilder)]
+pub struct App {
+    #[builder(default = Arc::new(RwLock::new(FileTree::default())))]
+    pub tree: Arc<RwLock<FileTree>>,
+    #[builder(default = Arc::new(RwLock::new(DiffCache::default())))]
+    pub cache: Arc<RwLock<DiffCache>>,
+    #[builder(default)]
+    pub view: View,
+    #[builder(default)]
+    pub theme: Lazy<UiTheme>,
+    #[builder(default = Arc::new(RwLock::new(Lazy::Uninitialized)))]
+    pub syntax_theme: Arc<RwLock<Lazy<Arc<Theme>>>>,
+    pub config_path: PathBuf,
+    #[builder(default = Arc::new(RwLock::new(None)))]
+    pub config_error: Arc<RwLock<Option<String>>>,
+    #[builder(default = Arc::new(RwLock::new(None)))]
+    pub current_path: Arc<RwLock<Option<PathBuf>>>,
+
+    #[builder(default = CommandMode::Normal)]
     pub command_mode: CommandMode,
+
+    #[builder(default = false)]
     pub should_quit: bool,
 
-    pub worker: Tasker,
+    pub worker: EventRegistry,
 
-    pub left_path: Option<PathBuf>,
-    pub right_path: Option<PathBuf>,
+    pub left_path: PathBuf,
+    pub right_path: PathBuf,
     pub base_path: Option<PathBuf>,
+
+    #[builder(default = Arc::new(RwLock::new(crate::actions::state::TuiState::new("weywot"))))]
+    pub state: Arc<RwLock<crate::actions::state::TuiState>>,
 }
 
 impl App {
-    pub fn new(worker: Tasker) -> Self {
-        let (theme, syntax_theme) = crate::config::builtin::fallback_theme();
-
-        Self {
-            tree: FileTree::new(),
-            cache: DiffCache::default(),
-            view: View::new(),
-            theme,
-            syntax_theme: Arc::new(syntax_theme),
-            command_mode: CommandMode::Normal,
-            should_quit: false,
-            worker,
-
-            left_path: None,
-            right_path: None,
-            base_path: None,
-        }
+    pub async fn start(&mut self) -> Result<(), CommandError> {
+        self.start_tree_calculation()?;
+        self.start_config_watching(self.config_path.clone())?;
+        self.run().await?;
+        Ok(())
     }
 
     pub async fn tick(&mut self) {
-        // Pass the syntax_theme reference directly to the event processor
-        worker::process_events(&mut self.worker, &mut self.cache, &self.syntax_theme).await;
+        // Process Main-Thread Events (Like Script Reloads)
+        while let Ok(event) = self.worker.try_recv() {
+            if let crate::worker::Event::WatchConfigRes(res) = event {
+                tracing::info!("Reloading config on main thread...");
+                if let Err(e) = crate::config::load_config(
+                    &res.path,
+                    self.state.clone(),
+                    self.tree.clone(),
+                    self.cache.clone(),
+                    self.view.clone(),
+                ) {
+                    tracing::error!("Config compilation error: {}", e);
+                    *self.config_error.write() = Some(e.to_string());
+                } else {
+                    *self.config_error.write() = None;
+                }
+            }
+        }
+
+        let mut state = self.state.write();
+
+        self.theme = Lazy::Ready(state.theme.ui.clone());
+        *self.syntax_theme.write() = Lazy::Ready(Arc::new(state.theme.tm_theme.clone()));
+
+        let current_path_val = self.view.file_view.read().current_path.clone();
+        let mut path_guard = self.current_path.write();
+        if *path_guard != current_path_val {
+            *path_guard = current_path_val.clone();
+            if let Some(path) = current_path_val {
+                let mut cache_write = self.cache.write();
+                if matches!(
+                    cache_write.diffs.get(&path),
+                    crate::commons::lazy::Lazy::Uninitialized
+                ) {
+                    tracing::debug!(path = %path.display(), "Queueing full diff calculation");
+                    cache_write.diffs.mark_started(path.clone());
+
+                    let tree_read = self.tree.read();
+                    fn find_file_paths_recursive(
+                        nodes: &[TreeNode],
+                        path: &std::path::Path,
+                    ) -> Option<(Option<std::path::PathBuf>, Option<std::path::PathBuf>)>
+                    {
+                        for node in nodes {
+                            match node {
+                                TreeNode::File(f) => {
+                                    if f.path == path {
+                                        return Some((f.left_path.clone(), f.right_path.clone()));
+                                    }
+                                }
+                                TreeNode::Directory(d) => {
+                                    if let Some(paths) =
+                                        find_file_paths_recursive(&d.children, path)
+                                    {
+                                        return Some(paths);
+                                    }
+                                }
+                            }
+                        }
+                        None
+                    }
+                    if let Some((left_path, right_path)) =
+                        find_file_paths_recursive(&tree_read.nodes, &path)
+                    {
+                        let _ = self.worker.send(tasks::full_diff::FullDiffReq {
+                            node_path: path.clone(),
+                            left_path,
+                            right_path,
+                        });
+                    }
+                }
+            }
+        }
+        drop(path_guard); // Terminates immutable borrow of self before self.confirm_merge()
+
+        if state.should_quit {
+            self.should_quit = true;
+        }
+
+        match state.command_mode {
+            CommandMode::Normal => {}
+            _ => {
+                self.command_mode = std::mem::replace(&mut state.command_mode, CommandMode::Normal);
+            }
+        }
+
+        if state.confirm_merge_triggered {
+            state.confirm_merge_triggered = false;
+            drop(state);
+            let _ = self.confirm_merge();
+        }
     }
 
     #[tracing::instrument(skip_all)]
@@ -63,13 +170,133 @@ impl App {
 
     #[tracing::instrument(skip_all, fields(cmd = cmd))]
     pub fn execute_command(&mut self, cmd: &str) {
-        commands::execute(cmd, &mut self.tree, &self.view.tree_view, &self.cache);
+        let mut tree = self.tree.write();
+        let cache = self.cache.read();
+        let view_read = self.view.tree_view.read();
+        commands::execute(cmd, &mut tree, &view_read, &cache);
     }
 
-    /// Synchronizes the cache's line_selections with the structural FileTree state.
-    /// This resolves desyncs when a file is staged/unstaged from the Sidebar.
+    pub fn start_tree_calculation(&self) -> eyre::Result<()> {
+        self.worker
+            .send(tasks::calculate_file_tree::CalculateFileTreeReq {
+                left: self.left_path.clone(),
+                right: self.right_path.clone(),
+            })?;
+        Ok(())
+    }
+
+    pub fn start_config_watching(&self, path: PathBuf) -> eyre::Result<()> {
+        self.worker.send(tasks::watch_config::WatchConfigReq {
+            path,
+            last_mtime: None,
+        })?;
+        Ok(())
+    }
+
+    pub async fn run(&mut self) -> Result<(), crate::commands::CommandError> {
+        tracing::debug!("Initializing terminal");
+        enable_raw_mode()?;
+        let mut stdout = io::stdout();
+        execute!(stdout, EnterAlternateScreen)?;
+        let backend = CrosstermBackend::new(stdout);
+        let mut terminal = Terminal::new(backend)?;
+
+        let handler = crate::actions::handlers::AppActionsHandler {
+            state: self.state.clone(),
+            tree: self.tree.clone(),
+            cache: self.cache.clone(),
+            view: self.view.clone(),
+        };
+
+        tracing::info!("Entering main event loop");
+        let mut aborted = false;
+        loop {
+            self.tick().await;
+            terminal.draw(|f| draw::draw(f, self))?;
+
+            if event::poll(Duration::from_millis(16))? {
+                if let Event::Key(key) = event::read()? {
+                    let mut matched_targets = Vec::new();
+
+                    let active_mode = if *self.view.current.read() == crate::view::ViewKind::File {
+                        crate::actions::keybinds::KeybindMode::View(
+                            crate::actions::keybinds::View::File,
+                        )
+                    } else {
+                        crate::actions::keybinds::KeybindMode::View(
+                            crate::actions::keybinds::View::Tree,
+                        )
+                    };
+
+                    crate::config::ACTIVE_REGISTRY.with(|r| {
+                        let reg = r.borrow();
+                        for (mode, kb, targets) in &reg.bindings {
+                            if (*mode == crate::actions::keybinds::KeybindMode::Global
+                                || *mode == active_mode)
+                                && kb.matches(&key)
+                            {
+                                matched_targets.extend(targets.clone());
+                            }
+                        }
+                    });
+
+                    if !matched_targets.is_empty() {
+                        for target in matched_targets {
+                            match target {
+                                crate::actions::keybinds::ActionTarget::Static(action) => {
+                                    crate::actions::handlers::dispatch_action(&action, &handler);
+
+                                    // Clean abort hook during transition
+                                    if let crate::actions::Action(
+                                        crate::actions::Actions::global(
+                                            crate::actions::GlobalActions::quit,
+                                        ),
+                                    ) = action
+                                    {
+                                        aborted = true;
+                                        break;
+                                    }
+                                }
+                                crate::actions::keybinds::ActionTarget::Dynamic(cb) => {
+                                    tracing::debug!("Matched script keybind, executing callback");
+                                    if let Err(e) = cb.call::<()>(()).into_result() {
+                                        tracing::error!("Script keybind execution error: {}", e);
+                                    }
+                                }
+                            }
+                        }
+                        if aborted {
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if self.should_quit {
+                break;
+            }
+        }
+
+        tracing::debug!("Restoring terminal state");
+        disable_raw_mode()?;
+        execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+        terminal.show_cursor()?;
+
+        tracing::info!("Shutting down background worker...");
+        let _ = self.shutdown().await;
+
+        if aborted {
+            tracing::warn!("Application aborted.");
+            return Err(crate::commands::CommandError::Aborted);
+        }
+
+        Ok(())
+    }
+
     pub fn sync_cache_with_tree(&mut self) {
-        Self::sync_cache_recursive(&self.tree.nodes, &mut self.cache);
+        let tree = self.tree.read();
+        let mut cache = self.cache.write();
+        Self::sync_cache_recursive(&tree.nodes, &mut cache);
     }
 
     fn sync_cache_recursive(nodes: &[TreeNode], cache: &mut DiffCache) {
@@ -86,7 +313,6 @@ impl App {
                             if let crate::diff::DiffResult::Text(diff) = val {
                                 let total_lines: usize =
                                     diff.hunks.iter().map(|h| h.lines.len()).sum();
-                                // Only clone and rewrite if there's actually a desync
                                 let needs_sync = diff.line_selections.len() != total_lines
                                     || diff.line_selections.iter().any(|&v| v != target_val);
 
@@ -116,12 +342,12 @@ impl App {
 
     #[tracing::instrument(skip_all)]
     pub fn toggle_stage_hunk(&mut self, hunk_idx: usize) {
-        let Some(path) = self.view.file_view.current_path.clone() else {
+        let Some(path) = self.view.file_view.read().current_path.clone() else {
             return;
         };
 
         let mut diff_clone = None;
-        if let Some(val) = self.cache.diffs.get(&path).value() {
+        if let Some(val) = self.cache.read().diffs.get(&path).value() {
             diff_clone = Some(val.clone());
         }
 
@@ -129,9 +355,9 @@ impl App {
             if let crate::diff::DiffResult::Text(ref mut diff) = diff_result {
                 let total_lines: usize = diff.hunks.iter().map(|h| h.lines.len()).sum();
 
-                // Inherit the overall file status to apply to uninitialized lines
                 let default_staged = self
                     .tree
+                    .read()
                     .get_file_state(&path)
                     .unwrap_or(crate::tree::StagingState::Unstaged)
                     == crate::tree::StagingState::Staged;
@@ -152,16 +378,15 @@ impl App {
                             line,
                             crate::diff::DiffLine::Addition { .. }
                                 | crate::diff::DiffLine::Deletion { .. }
-                        )
-                            && !diff
-                                .line_selections
-                                .get(start_idx + j)
-                                .copied()
-                                .unwrap_or(default_staged)
-                            {
-                                all_staged = false;
-                                break;
-                            }
+                        ) && !diff
+                            .line_selections
+                            .get(start_idx + j)
+                            .copied()
+                            .unwrap_or(default_staged)
+                        {
+                            all_staged = false;
+                            break;
+                        }
                     }
 
                     let new_state = !all_staged;
@@ -170,10 +395,10 @@ impl App {
                             line,
                             crate::diff::DiffLine::Addition { .. }
                                 | crate::diff::DiffLine::Deletion { .. }
-                        )
-                            && start_idx + j < diff.line_selections.len() {
-                                diff.line_selections[start_idx + j] = new_state;
-                            }
+                        ) && start_idx + j < diff.line_selections.len()
+                        {
+                            diff.line_selections[start_idx + j] = new_state;
+                        }
                     }
                 }
 
@@ -213,7 +438,7 @@ impl App {
                 self.update_file_state(&path, new_staging_state);
             }
 
-            self.cache.diffs.set(path, diff_result);
+            self.cache.write().diffs.set(path, diff_result);
         }
     }
 
@@ -240,23 +465,21 @@ impl App {
             }
             false
         }
-        find_and_update(&mut self.tree.nodes, path, new_state);
+        let mut tree = self.tree.write();
+        find_and_update(&mut tree.nodes, path, new_state);
     }
 
     #[tracing::instrument(skip_all)]
     pub fn confirm_merge(&mut self) -> Result<ExitAction, Box<dyn std::error::Error>> {
-        let right_dir = self.right_path.clone().ok_or("Right path not set")?;
-        merge::confirm_and_write(
-            &mut self.tree,
-            &mut self.should_quit,
-            &right_dir,
-            &self.cache,
-        )
+        let right_dir = self.right_path.clone();
+        let mut tree = self.tree.write();
+        let cache = self.cache.read();
+        merge::confirm_and_write(&mut tree, &mut self.should_quit, &right_dir, &cache)
     }
 
     pub fn get_diff_summary(&self) -> (usize, usize, usize) {
         let (mut a, mut d, mut m) = (0, 0, 0);
-        self.count_recursive(&self.tree.nodes, &mut a, &mut d, &mut m);
+        self.count_recursive(&self.tree.read().nodes, &mut a, &mut d, &mut m);
         (a, d, m)
     }
 

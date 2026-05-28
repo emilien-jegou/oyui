@@ -1,0 +1,8 @@
+[package]
+name = "oyui-rune-actions"
+version = "0.0.0"
+edition = "2021"
+
+[dependencies]
+oyui-rune-actions-derive = { path = "./derive" }
+rune = { workspace = true }

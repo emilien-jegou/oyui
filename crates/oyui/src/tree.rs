@@ -43,17 +43,12 @@ pub enum TreeNode {
     Directory(TreeNodeDirectory),
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct FileTree {
     pub nodes: Vec<TreeNode>,
 }
 
-// ... (leave other imports and structs the same)
 impl FileTree {
-    pub fn new() -> Self {
-        Self { nodes: Vec::new() }
-    }
-
     pub fn is_empty(&self) -> bool {
         self.nodes.iter().all(|node| match node {
             TreeNode::File(_) => false,
@@ -87,7 +82,7 @@ impl FileTree {
         left_dir: &Path,
         right_dir: &Path,
     ) -> (Self, Vec<(PathBuf, PathBuf, PathBuf)>) {
-        let mut tree = Self::new();
+        let mut tree = Self::default();
         let mut files_to_stat = Vec::new();
 
         let mut added_count = 0;

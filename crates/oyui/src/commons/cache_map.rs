@@ -20,7 +20,7 @@ impl<T> CacheMap<T> {
     }
 
     pub fn get(&self, path: &PathBuf) -> &Lazy<T> {
-        self.inner.get(path).unwrap_or(&Lazy::Unstarted)
+        self.inner.get(path).unwrap_or(&Lazy::Uninitialized)
     }
 
     pub fn set(&mut self, path: PathBuf, value: T) {

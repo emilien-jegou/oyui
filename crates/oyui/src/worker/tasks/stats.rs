@@ -1,10 +1,12 @@
+use crate::diff::DiffStats;
+use crate::diff_cache::DiffCache;
 use imara_diff::{Algorithm, Diff, InternedInput};
-use oyui_tasker::WorkerTask;
+use oyui_tasker::{Listener, TaskerContext};
+use parking_lot::RwLock;
 use rayon::prelude::*;
 use std::fs;
 use std::path::{Path, PathBuf};
-
-use crate::diff::DiffStats;
+use std::sync::Arc;
 
 pub struct Stats;
 
@@ -13,12 +15,11 @@ pub struct StatsReq {
     pub files: Vec<(PathBuf, PathBuf, PathBuf)>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct StatsRes {
     pub stats: Vec<(PathBuf, DiffStats)>,
 }
 
-/// Helper to check metadata and binary status on the thread pool
 fn get_file_info(path: &Path) -> (bool, isize, Option<String>) {
     let meta = match fs::metadata(path) {
         Ok(m) => m,
@@ -49,17 +50,20 @@ fn get_file_info(path: &Path) -> (bool, isize, Option<String>) {
     (is_binary || text.is_none(), size, text)
 }
 
-impl WorkerTask for Stats {
-    type Request = StatsReq;
-    type Response = StatsRes;
+impl Listener<StatsReq, crate::worker::EventSender> for Stats {
     type Context = ();
 
     #[tracing::instrument(skip_all)]
-    async fn handle(req: Self::Request, _ctx: Self::Context) -> Self::Response {
-        tracing::debug!("Computing diff stats for {} files", req.files.len());
+    async fn handle(
+        event: StatsReq,
+        _ctx: Self::Context,
+        tx: crate::worker::EventSender,
+    ) -> eyre::Result<()> {
+        tracing::debug!("Computing diff stats for {} files", event.files.len());
 
         let stats = tokio::task::spawn_blocking(move || {
-            req.files
+            event
+                .files
                 .into_par_iter()
                 .map(|(node_path, left_path, right_path)| {
                     let (l_bin, l_size, l_text) = get_file_info(&left_path);
@@ -90,6 +94,31 @@ impl WorkerTask for Stats {
         .expect("spawn_blocking panicked");
 
         tracing::trace!("Batch diff stats computation finished");
-        StatsRes { stats }
+
+        tx.send(StatsRes { stats })?;
+        Ok(())
+    }
+}
+
+#[derive(TaskerContext)]
+pub struct StatsResCtx {
+    pub cache: Arc<RwLock<DiffCache>>,
+}
+
+pub struct StatsResListener;
+impl Listener<StatsRes, crate::worker::EventSender> for StatsResListener {
+    type Context = StatsResCtx;
+
+    async fn handle(
+        event: StatsRes,
+        ctx: Self::Context,
+        _tx: crate::worker::EventSender,
+    ) -> eyre::Result<()> {
+        tracing::debug!("Applied Stats cache");
+        let mut cache = ctx.cache.write();
+        for (node_path, stats) in event.stats {
+            cache.stats.set(node_path, stats);
+        }
+        Ok(())
     }
 }

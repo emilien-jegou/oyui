@@ -1,4 +1,4 @@
-use crate::glob::glob_match;
+use crate::commons::glob::glob_match;
 use crate::view::tree::TreeViewData;
 use crate::diff_cache::DiffCache;
 use crate::tree::{FileTree, StagingState, TreeNode};

@@ -1,22 +1,19 @@
-/// A trait used for Dependency Injection into worker tasks.
-/// 
-/// Types that implement this know how to extract themselves from a given Context `C`.
+/// A trait used for Dependency Injection into listener contexts.
 pub trait ExtractsFrom<C> {
     fn extract(ctx: &C) -> Self;
 }
 
-// Automatically provide `()` for tasks that do not require any context.
 impl<C> ExtractsFrom<C> for () {
     fn extract(_ctx: &C) -> Self {}
 }
 
-pub trait WorkerTask {
-    type Request: Send + Clone + std::fmt::Debug + 'static;
-    type Response: Send + std::fmt::Debug + 'static;
-    type Context: Send + 'static;
+/// A listener trait configured with a specific Event type (`E`) and an EventSender (`S`).
+pub trait Listener<E, S>: Send + Sync + 'static {
+    type Context: Send + Sync + 'static;
 
     fn handle(
-        req: Self::Request,
+        event: E,
         ctx: Self::Context,
-    ) -> impl std::future::Future<Output = Self::Response> + Send;
+        tx: S,
+    ) -> impl std::future::Future<Output = eyre::Result<()>> + Send;
 }

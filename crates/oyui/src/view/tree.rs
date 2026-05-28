@@ -6,7 +6,6 @@ use crate::{
     diff::DiffStats,
     tree::{FileTree, StagingState, TreeNode},
 };
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Style, Stylize},
@@ -15,8 +14,6 @@ use ratatui::{
     Frame,
 };
 use std::path::PathBuf;
-
-use super::ViewAction;
 
 #[derive(Debug, Clone)]
 pub struct TreeRow {
@@ -65,90 +62,6 @@ impl TreeViewData {
         self.flat_rows(tree, cache)
             .into_iter()
             .nth(self.selected_index)
-    }
-
-    #[tracing::instrument(skip_all)]
-    pub fn handle_input(
-        &mut self,
-        key: KeyEvent,
-        tree: &FileTree,
-        cache: &DiffCache,
-    ) -> ViewAction {
-        let len = self.flat_rows(tree, cache).len();
-        let max_idx = len.saturating_sub(1);
-        let mut clear_pending = true;
-        let mut action = ViewAction::None;
-        let is_ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-
-        match (key.code, is_ctrl) {
-            (KeyCode::Char('c'), true) => action = ViewAction::QuitWithAbort,
-            (KeyCode::Char('j'), true) => {
-                self.selected_index = (self.selected_index + 5).min(max_idx)
-            }
-            (KeyCode::Char('k'), true) => {
-                self.selected_index = self.selected_index.saturating_sub(5)
-            }
-            (KeyCode::Char('d'), true) => {
-                self.selected_index = (self.selected_index + 20).min(max_idx)
-            }
-            (KeyCode::Char('u'), true) => {
-                self.selected_index = self.selected_index.saturating_sub(20)
-            }
-
-            (KeyCode::Char('q'), false) => action = ViewAction::QuitWithAbort,
-            (KeyCode::Char('j'), false) | (KeyCode::Down, _) => {
-                self.selected_index = (self.selected_index + 1).min(max_idx)
-            }
-            (KeyCode::Char('k'), false) | (KeyCode::Up, _) => {
-                self.selected_index = self.selected_index.saturating_sub(1)
-            }
-
-            (KeyCode::Char('G'), false) => self.selected_index = max_idx,
-            (KeyCode::Char('g'), false) => {
-                if self.pending_g {
-                    self.selected_index = 0;
-                    self.pending_g = false;
-                    clear_pending = false;
-                } else {
-                    self.pending_g = true;
-                    clear_pending = false;
-                }
-            }
-
-            (KeyCode::Char('l'), _) | (KeyCode::Right, _) => {
-                if let Some(row) = self.selected_row(tree, cache) {
-                    if row.is_dir {
-                        self.ui_state.set_folded(&row.path, false);
-                    } else {
-                        action = ViewAction::OpenFileView {
-                            path: row.path,
-                            left_path: row.left_path,
-                            right_path: row.right_path,
-                        };
-                    }
-                }
-            }
-            (KeyCode::Char('h'), _) | (KeyCode::Left, _) => {
-                if let Some(row) = self.selected_row(tree, cache) {
-                    if row.is_dir {
-                        self.ui_state.set_folded(&row.path, true);
-                    }
-                }
-            }
-
-            (KeyCode::Enter, _) => action = ViewAction::ConfirmMerge,
-            (KeyCode::Char(' '), false) => action = ViewAction::ToggleStageSelected,
-            (KeyCode::Char('i'), false) => action = ViewAction::InvertSelection,
-            (KeyCode::Char(':'), false) => action = ViewAction::OpenCommandMode,
-
-            _ => {}
-        }
-
-        if clear_pending {
-            self.pending_g = false;
-        }
-
-        action
     }
 
     #[tracing::instrument(skip_all)]

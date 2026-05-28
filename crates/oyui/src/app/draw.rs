@@ -28,35 +28,45 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     ])
     .areas(area);
 
-    let diff_summary = app.get_diff_summary();
-    app.view.draw(
-        frame,
-        view_area,
-        &app.tree,
-        &app.cache,
-        app.base_path.as_ref(),
-        diff_summary,
-        &app.theme,
-    );
-
-    draw_hint_bar(
-        frame,
-        hint_area,
-        &app.command_mode,
-        &app.view.current,
-        &app.theme,
-    );
-    draw_command_bar(frame, cmd_area, &app.command_mode, &app.theme);
-
-    if let CommandMode::ConfirmMerge = app.command_mode {
-        let confirm_area = centered_rect(40, 3, frame.area());
-        frame.render_widget(Clear, confirm_area);
-        frame.render_widget(
-            Paragraph::new("Press Enter to Confirm Merge")
-                .block(Block::default().borders(Borders::ALL).title(" Merge "))
-                .style(Style::default().fg(app.theme.partial.into())),
-            confirm_area,
+    if let Some(theme) = app.theme.value() {
+        if let Some(ref err) = *app.config_error.read() {
+            crate::view::config_error::draw(frame, view_area, err, theme);
+        } else if let Some(theme) = app.theme.value() {
+            let diff_summary = app.get_diff_summary();
+            
+            // APPLYING READ LOCKS TO STATE:
+            let tree_guard = app.tree.read();
+            let cache_guard = app.cache.read();
+            
+            app.view.draw(
+                frame,
+                view_area,
+                &tree_guard,
+                &cache_guard,
+                app.base_path.as_ref(),
+                diff_summary,
+                theme,
+            );
+        }
+        draw_hint_bar(
+            frame,
+            hint_area,
+            &app.command_mode,
+            &*app.view.current.read(),
+            theme,
         );
+        draw_command_bar(frame, cmd_area, &app.command_mode, theme);
+
+        if let CommandMode::ConfirmMerge = app.command_mode {
+            let confirm_area = centered_rect(40, 3, frame.area());
+            frame.render_widget(Clear, confirm_area);
+            frame.render_widget(
+                Paragraph::new("Press Enter to Confirm Merge")
+                    .block(Block::default().borders(Borders::ALL).title(" Merge "))
+                    .style(Style::default().fg(theme.partial.into())),
+                confirm_area,
+            );
+        }
     }
 }
 

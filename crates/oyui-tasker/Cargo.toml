@@ -14,4 +14,5 @@ tokio = { version = "1", features = ["macros", "time", "rt-multi-thread"] }
 [dependencies]
 tokio = { workspace = true }
 tracing = { workspace = true }
+eyre = { workspace = true }
 oyui-tasker-derive = { path = "./derive" }

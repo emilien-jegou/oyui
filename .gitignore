@@ -16,6 +16,9 @@
 !crates/oyui-tasker/
 !crates/oyui-tasker/**/*
 
+!crates/oyui-rune-actions/
+!crates/oyui-rune-actions/**/*
+
 !crates/oyui/
 !crates/oyui/**/*
 

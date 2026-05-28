@@ -1,12 +1,15 @@
 use imara_diff::{Algorithm, Diff, InternedInput};
-use oyui_tasker::{TaskerContext, WorkerTask};
+use oyui_tasker::{Listener, TaskerContext};
+use parking_lot::RwLock;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::fs;
 
 use crate::cli::DiffAlgorithm;
+use crate::commons::lazy::Lazy;
 use crate::diff::{DiffLine, DiffResult, FileDiff, Hunk, InlineChange};
+use crate::diff_cache::DiffCache;
 
 const MAX_FILE_SIZE: u64 = 1024 * 1024; // 1 MB limit
 
@@ -19,7 +22,7 @@ pub struct FullDiffReq {
     pub right_path: Option<PathBuf>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FullDiffRes {
     pub node_path: PathBuf,
     pub result: DiffResult,
@@ -68,7 +71,6 @@ async fn load_text_safely(path: &PathBuf) -> Result<String, DiffResult> {
     }
 }
 
-/// Helper to rapidly fetch exact printable byte ranges for lines
 struct LineIndex<'a> {
     text: &'a str,
     starts: Vec<usize>,
@@ -85,7 +87,6 @@ impl<'a> LineIndex<'a> {
         Self { text, starts }
     }
 
-    /// Returns the byte bounds of the given line, strictly excluding \r and \n
     fn printable_byte_range(&self, line_idx: usize) -> Range<usize> {
         let start = self.starts.get(line_idx).copied().unwrap_or(0);
         let mut end = self
@@ -126,7 +127,6 @@ pub fn compute(
     let old_idx = LineIndex::new(left_text);
     let new_idx = LineIndex::new(right_text);
 
-    // 1. Fetch structural AST changes if SyntaxAware is selected
     let syntax_res = if *algo == DiffAlgorithm::SyntaxAware {
         match syndiff::diff_source(left_text, right_text, path, None) {
             Ok(res) => Some(res),
@@ -147,7 +147,6 @@ pub fn compute(
     for hunk in diff.hunks() {
         let mut lines = Vec::new();
 
-        // Helper to generate inline highlights safely
         let get_highlights = |line_range: Range<usize>,
                               struct_ranges: &[Range<usize>],
                               text: &str|
@@ -156,7 +155,7 @@ pub fn compute(
             let trimmed_len = line_text.trim().len();
 
             if trimmed_len == 0 {
-                return Vec::new(); // Empty lines don't get inline highlights
+                return Vec::new(); 
             }
 
             if let Some(_syntax) = &syntax_res {
@@ -174,7 +173,6 @@ pub fn compute(
                     return Vec::new();
                 }
 
-                // Sort and merge overlapping AST nodes to ensure pristine byte boundaries
                 raw_ranges.sort_by_key(|r| r.start);
                 let mut merged = vec![raw_ranges[0].clone()];
                 for r in raw_ranges.into_iter().skip(1) {
@@ -188,8 +186,6 @@ pub fn compute(
 
                 let total_highlighted: usize = merged.iter().map(|r| r.end - r.start).sum();
 
-                // If the structural highlights span all the visible characters on the line,
-                // the whole line changed. Returning empty forces standard line-level background.
                 if total_highlighted >= trimmed_len {
                     return Vec::new();
                 }
@@ -200,10 +196,9 @@ pub fn compute(
                     .collect();
             }
 
-            Vec::new() // Fallback: If syntax failed/disabled, no inline highlights
+            Vec::new()
         };
 
-        // Process Deletions
         for i in (hunk.before.start as usize)..(hunk.before.end as usize) {
             let line_range = old_idx.printable_byte_range(i);
             let inline_highlights = get_highlights(
@@ -220,7 +215,6 @@ pub fn compute(
             });
         }
 
-        // Process Additions
         for i in (hunk.after.start as usize)..(hunk.after.end as usize) {
             let line_range = new_idx.printable_byte_range(i);
             let inline_highlights = get_highlights(
@@ -237,7 +231,6 @@ pub fn compute(
             });
         }
 
-        // We push EVERY hunk regardless of syntax changes, guaranteeing no text modifications are ever hidden.
         hunks.push(Hunk {
             before_lines: (hunk.before.start as usize)..(hunk.before.end as usize),
             after_lines: (hunk.after.start as usize)..(hunk.after.end as usize),
@@ -253,28 +246,33 @@ pub struct FullDiffContext {
     pub algorithm: DiffAlgorithm,
 }
 
-impl WorkerTask for FullDiff {
-    type Request = FullDiffReq;
-    type Response = FullDiffRes;
+impl Listener<FullDiffReq, crate::worker::EventSender> for FullDiff {
     type Context = FullDiffContext;
 
-    #[tracing::instrument(skip_all, fields(node_path = %req.node_path.display()))]
-    async fn handle(req: Self::Request, ctx: Self::Context) -> Self::Response {
+    #[tracing::instrument(skip_all, fields(node_path = %event.node_path.display()))]
+    async fn handle(
+        event: FullDiffReq,
+        ctx: Self::Context,
+        tx: crate::worker::EventSender,
+    ) -> eyre::Result<()> {
         tracing::debug!(
-            left_path = ?req.left_path,
-            right_path = ?req.right_path,
+            left_path = ?event.left_path,
+            right_path = ?event.right_path,
             "Computing full diff"
         );
 
+        let left_path_clone = event.left_path.clone();
+        let right_path_clone = event.right_path.clone();
+
         let left_fut = async {
-            if let Some(p) = &req.left_path {
+            if let Some(p) = &left_path_clone {
                 load_text_safely(p).await
             } else {
                 Ok(String::new())
             }
         };
         let right_fut = async {
-            if let Some(p) = &req.right_path {
+            if let Some(p) = &right_path_clone {
                 load_text_safely(p).await
             } else {
                 Ok(String::new())
@@ -286,15 +284,15 @@ impl WorkerTask for FullDiff {
             (Err(e), _) | (_, Err(e)) => e,
             (Ok(left_text), Ok(right_text)) => {
                 if left_text.is_empty() && right_text.is_empty() {
-                    return FullDiffRes {
-                        node_path: req.node_path,
+                    tx.send(FullDiffRes {
+                        node_path: event.node_path.clone(),
                         result: DiffResult::Empty,
-                        right_path: req.right_path,
-                    };
+                        right_path: event.right_path.clone(),
+                    })?;
+                    return Ok(());
                 }
 
-                match compute(&ctx.algorithm, &left_text, &right_text, &req.node_path)
-                {
+                match compute(&ctx.algorithm, &left_text, &right_text, &event.node_path) {
                     Ok(hunks) => DiffResult::Text(FileDiff {
                         old_text: Arc::from(left_text),
                         new_text: Arc::from(right_text),
@@ -307,10 +305,49 @@ impl WorkerTask for FullDiff {
         };
 
         tracing::trace!("Full diff computation finished");
-        FullDiffRes {
-            node_path: req.node_path,
+        tx.send(FullDiffRes {
+            node_path: event.node_path.clone(),
             result: diff_result,
-            right_path: req.right_path,
+            right_path: event.right_path.clone(),
+        })?;
+        Ok(())
+    }
+}
+
+#[derive(TaskerContext)]
+pub struct FullDiffResCtx {
+    pub cache: Arc<RwLock<DiffCache>>,
+    pub syntax_theme: Arc<RwLock<Lazy<Arc<syntect::highlighting::Theme>>>>,
+}
+
+pub struct FullDiffResListener;
+impl Listener<FullDiffRes, crate::worker::EventSender> for FullDiffResListener {
+    type Context = FullDiffResCtx;
+
+    async fn handle(
+        event: FullDiffRes,
+        ctx: Self::Context,
+        tx: crate::worker::EventSender,
+    ) -> eyre::Result<()> {
+        tracing::debug!(node_path = %event.node_path.display(), "Applied FullDiff cache");
+
+        let mut cache = ctx.cache.write();
+        if let crate::diff::DiffResult::Text(ref file_diff) = event.result {
+            let text = file_diff.new_text.clone();
+            cache.syntax.mark_started(event.node_path.clone());
+
+            tracing::trace!(node_path = %event.node_path.display(), "Queueing Syntax task");
+            if let Some(val) = ctx.syntax_theme.read().value() {
+                let _ = tx.send(crate::worker::tasks::syntax::SyntaxReq {
+                    node_path: event.node_path.clone(),
+                    text,
+                    right_path: event.right_path.clone(),
+                    theme: val.clone(),
+                });
+            }
         }
+
+        cache.diffs.set(event.node_path, event.result);
+        Ok(())
     }
 }

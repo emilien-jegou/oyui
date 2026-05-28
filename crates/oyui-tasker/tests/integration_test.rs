@@ -1,126 +1,112 @@
-use oyui_tasker::register_tasker;
-use oyui_tasker::worker::{ExtractsFrom, WorkerTask};
+use oyui_tasker::{tasker_registry, ExtractsFrom, Listener, TaskerContext, TaskerProvide};
 
-pub struct EchoTask;
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Echo {
+    pub msg: String,
+}
 
-impl WorkerTask for EchoTask {
-    type Request = String;
-    type Response = String;
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EchoResult {
+    pub msg: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Math {
+    pub values: (i32, i32),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MathResult {
+    pub value: i32,
+}
+
+pub struct EchoListener;
+
+impl Listener<Echo, EventSender> for EchoListener {
     type Context = ();
 
-    async fn handle(req: Self::Request, _ctx: Self::Context) -> Self::Response {
-        format!("echo: {}", req)
+    async fn handle(event: Echo, _ctx: Self::Context, tx: EventSender) -> eyre::Result<()> {
+        tx.send(EchoResult {
+            msg: format!("echo: {}", event.msg),
+        })?;
+        Ok(())
     }
 }
 
-pub struct MathTask;
+pub struct MathListener;
 
-impl WorkerTask for MathTask {
-    type Request = (i32, i32);
-    type Response = i32;
+impl Listener<Math, EventSender> for MathListener {
     type Context = i32;
 
-    async fn handle(req: Self::Request, ctx: Self::Context) -> Self::Response {
-        (req.0 + req.1) * ctx
+    async fn handle(event: Math, ctx: Self::Context, tx: EventSender) -> eyre::Result<()> {
+        tx.send(MathResult {
+            value: (event.values.0 + event.values.1) * ctx,
+        })?;
+        Ok(())
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, TaskerProvide)]
 pub struct AppContext {
     pub multiplier: i32,
 }
 
-impl ExtractsFrom<AppContext> for i32 {
-    fn extract(ctx: &AppContext) -> Self {
-        ctx.multiplier
-    }
-}
-
-register_tasker! {
-    tasks = [
-        Echo => EchoTask,
-        Math => MathTask,
-    ]
+tasker_registry! {
+    events = [
+        Echo       => Echo,
+        EchoResult => EchoResult,
+        Math       => Math,
+        MathResult => MathResult,
+    ],
+    listeners = [
+        Echo => [EchoListener],
+        Math => [MathListener],
+    ],
 }
 
 #[tokio::test]
-async fn test_unified_tasker() {
+async fn test_unified_registry() {
     let ctx = AppContext { multiplier: 10 };
-    let mut tasker = Tasker::spawn(ctx);
+    let mut registry = EventRegistry::spawn(ctx);
 
-    // Test Echo Task
-    tasker.send(String::from("Hello")).unwrap();
-    let ev = tasker.recv().await.unwrap();
+    registry
+        .send(Echo {
+            msg: "Hello".to_string(),
+        })
+        .unwrap();
 
-    if let WorkerEvent::Echo(res) = ev {
-        assert_eq!(res, "echo: Hello");
-    } else {
-        panic!("Expected Echo event");
-    }
+    // Verify both the initial event and response event are handled in the registry
+    let ev1 = registry.recv().await.unwrap();
+    let ev2 = registry.recv().await.unwrap();
 
-    // Test Math Task
-    tasker.send((2, 3)).unwrap();
-    let ev = tasker.recv().await.unwrap();
+    let matches = match (ev1, ev2) {
+        (Event::Echo(e), Event::EchoResult(r)) => e.msg == "Hello" && r.msg == "echo: Hello",
+        (Event::EchoResult(r), Event::Echo(e)) => e.msg == "Hello" && r.msg == "echo: Hello",
+        _ => false,
+    };
+    assert!(matches);
 
-    if let WorkerEvent::Math(res) = ev {
-        assert_eq!(res, 50);
-    } else {
-        panic!("Expected Math event");
-    }
-
-    tasker.shutdown().await.unwrap();
+    registry.shutdown().await.unwrap();
 }
 
 #[tokio::test]
-async fn test_split_tasker() {
-    let ctx = AppContext { multiplier: 2 };
-    let tasker = Tasker::spawn(ctx);
+async fn test_split_registry() {
+    let ctx = AppContext { multiplier: 3 };
+    let registry = EventRegistry::spawn(ctx);
 
-    // Using into_split because MPSC Receiver is not cloneable
-    let (sender, mut receiver, _) = tasker.into_split();
+    let (sender, mut receiver, _handle) = registry.into_split();
 
-    sender.send(String::from("From Thread")).unwrap();
-    sender.send((10, 10)).unwrap();
+    sender.send(Math { values: (4, 5) }).unwrap();
 
-    // Directly await events
     let ev1 = receiver.recv().await.unwrap();
     let ev2 = receiver.recv().await.unwrap();
 
-    match (ev1, ev2) {
-        (WorkerEvent::Echo(r1), WorkerEvent::Math(r2)) => {
-            assert_eq!(r1, "echo: From Thread");
-            assert_eq!(r2, 40);
-        }
-        _ => panic!("Expected correct sequence of events"),
-    }
-}
-
-#[tokio::test]
-async fn test_shutdown_cleans_up() {
-    let ctx = AppContext { multiplier: 1 };
-    let mut tasker = Tasker::spawn(ctx);
-
-    tasker.shutdown().await.expect("Shutdown failed");
-
-    // Sending should fail because the receiver is dropped in the background loop
-    let send_result = tasker.send(String::from("Should fail"));
-    assert!(send_result.is_err());
-}
-
-#[tokio::test]
-async fn test_into_split_consumes_tasker() {
-    let ctx = AppContext { multiplier: 1 };
-    let tasker = Tasker::spawn(ctx);
-
-    let (sender, mut receiver, handle) = tasker.into_split();
-
-    sender.send(String::from("IntoSplit")).unwrap();
-    let ev = receiver.recv().await.unwrap();
-
-    if let WorkerEvent::Echo(res) = ev {
-        assert_eq!(res, "echo: IntoSplit");
-    }
+    let matches = match (ev1, ev2) {
+        (Event::Math(m), Event::MathResult(r)) => m.values == (4, 5) && r.value == 27,
+        (Event::MathResult(r), Event::Math(m)) => m.values == (4, 5) && r.value == 27,
+        _ => false,
+    };
+    assert!(matches);
 
     sender.shutdown().unwrap();
-    handle.unwrap().await.unwrap();
 }

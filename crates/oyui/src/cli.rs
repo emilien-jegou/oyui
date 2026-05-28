@@ -1,4 +1,4 @@
-use clap::{Parser, ValueEnum};
+use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -11,51 +11,60 @@ pub enum DiffAlgorithm {
     SyntaxAware,
 }
 
-#[derive(Clone, Debug, Parser)]
-#[command(name = "oyui")]
+#[derive(Parser, Clone, Debug)]
+#[command(name = "oyui", version, about, subcommand_required = true)]
 pub struct Opts {
-    /// Left-hand directory (old)
-    pub left: PathBuf,
+    #[clap(flatten)]
+    pub common: CommonArgs,
 
-    /// Right-hand directory (new)
+    #[command(subcommand)]
+    pub command: Commands,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum Commands {
+    /// Diff two directories
+    Diff(DiffArgs),
+
+    /// Run the LSP
+    LanguageServer,
+}
+
+#[derive(Parser, Debug, Clone)]
+pub struct DiffArgs {
+    pub left: PathBuf,
     pub right: PathBuf,
 
-    #[arg(short = 'c', long = "config")]
-    pub config: Option<PathBuf>,
-
-    /// MERGETOOL ONLY: The common ancestor
     #[arg(short = 'b', long = "base")]
     pub base: Option<PathBuf>,
 
-    /// Enable flamegraph tracing
-    #[arg(long = "flamegraph-enable")]
-    pub flamegraph_enable: bool,
-
-    /// Override the default path to save the flamegraph
-    #[arg(long = "flamegraph-save-path")]
-    pub flamegraph_save_file: Option<PathBuf>,
-
-    /// Enable file logging
-    #[arg(long = "log-enable")]
-    pub log_enable: bool,
-
-    /// Enable file logging and optionally specify the save path
-    #[arg(long = "log-save-path")]
-    pub log_save_path: Option<PathBuf>,
-
-    /// Enable console logging (will automatically suspend while the TUI is drawn)
-    #[arg(long = "log-console")]
-    pub log_console: bool,
-
-    /// Diff algorithm to use for file view
     #[arg(long = "diff-algorithm", default_value = "histogram")]
     pub diff_algorithm: DiffAlgorithm,
 
-    /// Number of lines to keep as padding when scrolling
     #[arg(long = "scrolloff", default_value = "2")]
     pub scrolloff: usize,
 
-     /// Number of context lines to show around hunks in collapsed file view
     #[arg(long = "context-lines", default_value = "4")]
     pub context_lines: usize,
+}
+
+#[derive(Parser, Debug, Clone)]
+pub struct CommonArgs {
+    #[arg(short = 'c', long = "config")]
+    pub config: Option<PathBuf>,
+
+    #[arg(long = "flamegraph-enable")]
+    pub flamegraph_enable: bool,
+
+    #[arg(long = "flamegraph-save-path")]
+    pub flamegraph_save_file: Option<PathBuf>,
+
+    #[arg(long = "log-enable")]
+    pub log_enable: bool,
+
+    #[arg(long = "log-save-path")]
+    pub log_save_path: Option<PathBuf>,
+
+    #[arg(long = "log-console")]
+    pub log_console: bool,
 }
