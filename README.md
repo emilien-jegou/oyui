@@ -100,6 +100,24 @@ program = "oyui"
 edit-args = ["diff", "$left", "$right"]
 ```
 
+### Enabling config LSP with neovim
+
+If you are using the builtin neovim LSP, you can add the following to your lua config:
+
+```lua
+  vim.lsp.config('oyui_ls', {
+    cmd = { "oyui", "language-server" },
+    filetypes = { "rune" },
+    root_markers = { "config.rn" },
+    capabilities = capabilities,
+  })
+
+  -- Add it to your existing list of lsp clients
+  vim.lsp.enable({ ..., 'oyui_ls' })
+```
+
+You can verify it is correctly loaded by using the command `:checkhealth lsp`
+while on the config file.
 
 ## 🗺️ Roadmap & Feedback
 
