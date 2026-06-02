@@ -2,7 +2,7 @@
 name = "oyui-rune-actions-derive"
 description = "Derive crate for oyui-rune-actions"
 license = "MIT OR Apache-2.0"
-version = "0.0.2"
+version = "0.0.3"
 edition = "2021"
 readme = "readme.md"
 homepage = "https://github.com/emilien-jegou/oyui"

@@ -1,6 +1,6 @@
 [package]
 name = "oyui-rune-actions"
-version = "0.0.2"
+version = "0.0.3"
 edition = "2021"
 description = "A declarative framework for defining nested action hierarchies, generating handler traits, and registering bindings automatically for the Rune scripting language."
 license = "MIT OR Apache-2.0"
@@ -11,5 +11,5 @@ homepage = "https://github.com/emilien-jegou/oyui"
 readme = "readme.md"
 
 [dependencies]
-oyui-rune-actions-derive = { path = "./derive", version = "0.0.2" }
+oyui-rune-actions-derive = { path = "./derive", version = "0.0.3" }
 rune = { workspace = true }
