@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.7] - 2026-06-02
+
+### Bug Fixes
+
+- Broken command mode — [`eb09ae4`](https://github.com/emilien-jegou/oyui/commit/eb09ae412ef6437c6ba0535ae47ce6947ac1bf60) by Emilien, 2026-06-02
+
 ## [0.0.3] - 2026-06-02
 
 ### Bug Fixes
