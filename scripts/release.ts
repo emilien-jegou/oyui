@@ -5,6 +5,7 @@
 //   bun release.ts major          # 0.0.2 → 1.0.0
 //   bun release.ts 0.1.0          # explicit version
 //   bun release.ts patch --dry-run
+//   bun release.ts patch --skip-crates-publish
 
 import { join } from "path";
 import { writeFileSync, appendFileSync, existsSync, readFileSync, readdirSync, statSync } from "fs";
@@ -20,28 +21,31 @@ try {
 
 // ── colours ───────────────────────────────────────────────────────────────────
 const c = {
-  red: (s: string) => `\x1b[31m${s}\x1b[0m`,
-  green: (s: string) => `\x1b[32m${s}\x1b[0m`,
+  red:    (s: string) => `\x1b[31m${s}\x1b[0m`,
+  green:  (s: string) => `\x1b[32m${s}\x1b[0m`,
   yellow: (s: string) => `\x1b[33m${s}\x1b[0m`,
-  blue: (s: string) => `\x1b[34m${s}\x1b[0m`,
-  bold: (s: string) => `\x1b[1m${s}\x1b[0m`,
-  gray: (s: string) => `\x1b[90m${s}\x1b[0m`,
+  blue:   (s: string) => `\x1b[34m${s}\x1b[0m`,
+  bold:   (s: string) => `\x1b[1m${s}\x1b[0m`,
+  gray:   (s: string) => `\x1b[90m${s}\x1b[0m`,
 };
 
 const step = (msg: string) => console.log(`\n${c.bold(c.blue(`▶ ${msg}`))}`);
-const ok = (msg: string) => console.log(`  ${c.green("✓")} ${msg}`);
+const ok   = (msg: string) => console.log(`  ${c.green("✓")} ${msg}`);
 const warn = (msg: string) => console.log(`  ${c.yellow("⚠")} ${msg}`);
-const die = (msg: string): never => { console.error(`\n${c.red(`✗ ${msg}`)}`); process.exit(1); };
+const die  = (msg: string): never => { console.error(`\n${c.red(`✗ ${msg}`)}`); process.exit(1); };
 
 // ── args ──────────────────────────────────────────────────────────────────────
 const args = process.argv.slice(2);
-if (args.length === 0) die("Usage: bun release.ts <patch|minor|major|X.Y.Z> [--dry-run]");
+const flags = ["--dry-run", "--skip-crates-publish"];
+const bump = args.filter(a => !flags.includes(a))[0];
 
-const bump = args.filter(a => a !== "--dry-run")[0];
-const dryRun = args.includes("--dry-run");
-const root = join(import.meta.dir, ".."); // script lives in scripts/, root is one level up
+const dryRun      = args.includes("--dry-run");
+const skipPublish = args.includes("--skip-crates-publish");
+const root        = join(import.meta.dir, ".."); // script lives in scripts/, root is one level up
 
-if (!bump) die("Usage: bun release.ts <patch|minor|major|X.Y.Z> [--dry-run]");
+if (!bump) {
+  die("Usage: bun release.ts <patch|minor|major|X.Y.Z> [--dry-run] [--skip-crates-publish]");
+}
 
 // ── config ────────────────────────────────────────────────────────────────────
 const tomls = [
@@ -95,11 +99,11 @@ async function run(cmd: string[], opts: { cwd?: string; allowFailure?: boolean }
 }
 
 async function which(bin: string): Promise<boolean> {
-  try {
-    await run(["which", bin], { allowFailure: true });
-    return true;
-  } catch {
-    return false;
+  try { 
+    await run(["which", bin], { allowFailure: true }); 
+    return true; 
+  } catch { 
+    return false; 
   }
 }
 
@@ -130,13 +134,23 @@ function hasCargoToken(): boolean {
           return true;
         }
       }
-    } catch { }
+    } catch {}
   }
   return false;
 }
 
-function getReleaseBinaries(): string[] {
-  const dir = join(root, "target/release");
+async function getHostTarget(): Promise<string> {
+  try {
+    const output = await run(["rustc", "-vV"]);
+    const match = output.match(/^host:\s+(.+)$/m);
+    return match ? match[1] : "unknown-target";
+  } catch {
+    return "unknown-target";
+  }
+}
+
+function getTargetBinaries(target: string): string[] {
+  const dir = join(root, "target", target, "release");
   if (!existsSync(dir)) return [];
   const files = readdirSync(dir);
   const bins: string[] = [];
@@ -146,17 +160,31 @@ function getReleaseBinaries(): string[] {
     try {
       const stat = statSync(path);
       if (stat.isFile()) {
-        const isExe = process.platform === "win32" ? f.endsWith(".exe") : (stat.mode & 0o111) !== 0;
+        const isExe = target.includes("windows") ? f.endsWith(".exe") : (stat.mode & 0o111) !== 0;
         const stem = f.replace(/\.exe$/i, "");
-
-        // Match only executable workspace output names to avoid third-party build artifacts
+        
         if (isExe && workspaceCrates.includes(stem)) {
           bins.push(path);
         }
       }
-    } catch { }
+    } catch {}
   }
   return bins;
+}
+
+async function createArchive(sourceDir: string, archivePath: string) {
+  const parentDir = join(sourceDir, "..");
+  const dirName = sourceDir.replace(/\\/g, "/").split("/").pop()!;
+
+  if (archivePath.endsWith(".zip")) {
+    if (process.platform === "win32") {
+      await run(["powershell", "-Command", `Compress-Archive -Path "${sourceDir}" -DestinationPath "${archivePath}" -Force`]);
+    } else {
+      await run(["zip", "-r", archivePath, dirName], { cwd: parentDir });
+    }
+  } else {
+    await run(["tar", "-czf", archivePath, "-C", parentDir, dirName]);
+  }
 }
 
 // ── preflight ─────────────────────────────────────────────────────────────────
@@ -196,11 +224,15 @@ if (repoView === null) {
   }
 }
 
-// Verify crates.io token
-if (hasCargoToken()) {
-  ok("crates.io registry token found");
+// Verify crates.io token (skip checks if publishing is disabled)
+if (skipPublish) {
+  ok("crates.io registry token check skipped (publish bypassed)");
 } else {
-  fail("No crates.io token found. Run 'cargo login' or set CARGO_REGISTRY_TOKEN.");
+  if (hasCargoToken()) {
+    ok("crates.io registry token found");
+  } else {
+    fail("No crates.io token found. Run 'cargo login' or set CARGO_REGISTRY_TOKEN.");
+  }
 }
 
 // In jj, @ may be ahead of main — check that main bookmark is a reachable ancestor
@@ -223,7 +255,7 @@ else ok("Working copy clean");
 step("Version");
 
 const mainToml = await Bun.file(join(root, "crates/oyui/Cargo.toml")).text();
-const current = mainToml.match(/^version = "(.+?)"/m)?.[1] ?? die("Could not read current version");
+const current  = mainToml.match(/^version = "(.+?)"/m)?.[1] ?? die("Could not read current version");
 
 const isExplicit = /^\d+\.\d+\.\d+$/.test(bump);
 if (!isExplicit && !["patch", "minor", "major"].includes(bump)) die(`Invalid bump '${bump}'`);
@@ -303,20 +335,74 @@ if (liveRun) {
   warn(`[dry-run] would: git push origin v${next}`);
 }
 
-// ── build binaries ────────────────────────────────────────────────────────────
-step("Building release binaries");
+// ── build & package archives ──────────────────────────────────────────────────
+step("Building and packaging binaries per architecture");
+
+const hostTarget = await getHostTarget();
+// Add additional targets here if cross-compilers are configured on your host environment
+const TARGETS = [hostTarget];
+
+const distDir = join(root, "dist");
+const archiveAssets: string[] = [];
 
 if (liveRun) {
-  await run(["cargo", "build", "--release"]);
-  ok("Workspace binaries built in release mode");
+  // Reset the distribution output folder
+  if (existsSync(distDir)) {
+    await run(["rm", "-rf", distDir]);
+  }
+  await run(["mkdir", "-p", distDir]);
+
+  for (const target of TARGETS) {
+    console.log(`\n  Compiling for target: ${c.bold(target)}...`);
+    await run(["cargo", "build", "--release", "--target", target]);
+
+    const binaries = getTargetBinaries(target);
+    if (binaries.length === 0) {
+      warn(`No workspace binaries found for target ${target}, skipping packaging`);
+      continue;
+    }
+
+    for (const binPath of binaries) {
+      const binName = binPath.split("/").pop()!;
+      const stemName = binName.replace(/\.exe$/i, "");
+      
+      // Directory name layout: syndiff-v0.1.0-x86_64-apple-darwin
+      const pkgName = `${stemName}-v${next}-${target}`;
+      const pkgDir = join(distDir, pkgName);
+      await run(["mkdir", "-p", pkgDir]);
+
+      // Copy executable binary into directory
+      await run(["cp", binPath, join(pkgDir, binName)]);
+      
+      // Copy accompanying documents into directory if present
+      for (const doc of ["README.md", "LICENSE", "LICENSE-MIT", "LICENSE-APACHE", "CHANGELOG.md"]) {
+        const docPath = join(root, doc);
+        if (existsSync(docPath)) {
+          await run(["cp", docPath, join(pkgDir, doc)]);
+        }
+      }
+
+      const isWin = target.includes("windows");
+      const ext = isWin ? ".zip" : ".tar.gz";
+      const archivePath = join(distDir, `${pkgName}${ext}`);
+      
+      console.log(`    Creating package: ${c.gray(`${pkgName}${ext}`)}`);
+      await createArchive(pkgDir, archivePath);
+      archiveAssets.push(archivePath);
+    }
+  }
+  ok(`Packaged ${archiveAssets.length} artifacts in dist/`);
 } else {
-  warn("[dry-run] would: cargo build --release");
+  warn(`[dry-run] would: cross-compile for targets: [ ${TARGETS.join(", ")} ]`);
+  warn(`[dry-run] would: arrange binaries inside dist/ and package as .tar.gz / .zip archives`);
 }
 
 // ── publish to crates.io ──────────────────────────────────────────────────────
 step("Publishing to crates.io");
 
-if (liveRun) {
+if (skipPublish) {
+  warn("Skipping crates.io publishing as requested via the --skip-crates-publish flag.");
+} else if (liveRun) {
   await run(["cargo", "publish", "--workspace"]);
   ok("All workspace crates published");
 } else {
@@ -333,24 +419,15 @@ if (await which("gh")) {
     notes = await run(["git-cliff", "--config", join(root, "cliff.toml"), "--latest", "--strip", "all"]).catch(() => "");
   }
 
-  const assets: string[] = [];
   if (liveRun) {
-    const binaries = getReleaseBinaries();
-    assets.push(...binaries);
-
-    const changelogPath = join(root, "CHANGELOG.md");
-    if (existsSync(changelogPath)) {
-      assets.push(changelogPath);
+    if (archiveAssets.length > 0) {
+      console.log(`  Uploading archives: ${archiveAssets.map(a => a.split("/").pop()).join(", ")}`);
     }
 
-    if (assets.length > 0) {
-      console.log(`  Uploading assets: ${assets.map(a => a.split("/").pop()).join(", ")}`);
-    }
-
-    await run(["gh", "release", "create", `v${next}`, ...assets, "--title", `v${next}`, "--notes", notes || `Release v${next}`]);
-    ok(`GitHub release v${next} created with ${assets.length} assets`);
+    await run(["gh", "release", "create", `v${next}`, ...archiveAssets, "--title", `v${next}`, "--notes", notes || `Release v${next}`]);
+    ok(`GitHub release v${next} created with ${archiveAssets.length} target archives`);
   } else {
-    warn(`[dry-run] would: gh release create v${next} [binaries...] --title v${next}`);
+    warn(`[dry-run] would: gh release create v${next} [packaged archives...] --title v${next}`);
   }
 } else {
   warn("gh CLI not found — install from https://cli.github.com");
