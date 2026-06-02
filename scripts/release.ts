@@ -7,7 +7,7 @@
 //   bun release.ts patch --dry-run
 
 import { join } from "path";
-import { writeFileSync, appendFileSync, existsSync, readFileSync } from "fs";
+import { writeFileSync, appendFileSync, existsSync, readFileSync, readdirSync, statSync } from "fs";
 import { homedir } from "os";
 
 const logPath = "/tmp/oyui-release.log";
@@ -20,28 +20,48 @@ try {
 
 // ── colours ───────────────────────────────────────────────────────────────────
 const c = {
-  red:    (s: string) => `\x1b[31m${s}\x1b[0m`,
-  green:  (s: string) => `\x1b[32m${s}\x1b[0m`,
+  red: (s: string) => `\x1b[31m${s}\x1b[0m`,
+  green: (s: string) => `\x1b[32m${s}\x1b[0m`,
   yellow: (s: string) => `\x1b[33m${s}\x1b[0m`,
-  blue:   (s: string) => `\x1b[34m${s}\x1b[0m`,
-  bold:   (s: string) => `\x1b[1m${s}\x1b[0m`,
-  gray:   (s: string) => `\x1b[90m${s}\x1b[0m`,
+  blue: (s: string) => `\x1b[34m${s}\x1b[0m`,
+  bold: (s: string) => `\x1b[1m${s}\x1b[0m`,
+  gray: (s: string) => `\x1b[90m${s}\x1b[0m`,
 };
 
 const step = (msg: string) => console.log(`\n${c.bold(c.blue(`▶ ${msg}`))}`);
-const ok   = (msg: string) => console.log(`  ${c.green("✓")} ${msg}`);
+const ok = (msg: string) => console.log(`  ${c.green("✓")} ${msg}`);
 const warn = (msg: string) => console.log(`  ${c.yellow("⚠")} ${msg}`);
-const die  = (msg: string): never => { console.error(`\n${c.red(`✗ ${msg}`)}`); process.exit(1); };
+const die = (msg: string): never => { console.error(`\n${c.red(`✗ ${msg}`)}`); process.exit(1); };
 
 // ── args ──────────────────────────────────────────────────────────────────────
 const args = process.argv.slice(2);
 if (args.length === 0) die("Usage: bun release.ts <patch|minor|major|X.Y.Z> [--dry-run]");
 
-const bump   = args.filter(a => a !== "--dry-run")[0];
+const bump = args.filter(a => a !== "--dry-run")[0];
 const dryRun = args.includes("--dry-run");
-const root   = join(import.meta.dir, ".."); // script lives in scripts/, root is one level up
+const root = join(import.meta.dir, ".."); // script lives in scripts/, root is one level up
 
 if (!bump) die("Usage: bun release.ts <patch|minor|major|X.Y.Z> [--dry-run]");
+
+// ── config ────────────────────────────────────────────────────────────────────
+const tomls = [
+  "Cargo.toml",
+  "crates/oyui/Cargo.toml",
+  "crates/oyui-rune-actions/Cargo.toml",
+  "crates/oyui-rune-actions/derive/Cargo.toml",
+  "crates/oyui-tasker/Cargo.toml",
+  "crates/oyui-tasker/derive/Cargo.toml",
+  "crates/syndiff/Cargo.toml",
+  "flake.nix",
+];
+
+// Derive potential binary output names from workspace folders (e.g. "oyui", "syndiff")
+const workspaceCrates = tomls
+  .map(t => {
+    const parts = t.split("/");
+    return parts.length > 1 ? parts[parts.length - 2] : null;
+  })
+  .filter((n): n is string => !!n);
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 async function run(cmd: string[], opts: { cwd?: string; allowFailure?: boolean } = {}) {
@@ -75,11 +95,11 @@ async function run(cmd: string[], opts: { cwd?: string; allowFailure?: boolean }
 }
 
 async function which(bin: string): Promise<boolean> {
-  try { 
-    await run(["which", bin], { allowFailure: true }); 
-    return true; 
-  } catch { 
-    return false; 
+  try {
+    await run(["which", bin], { allowFailure: true });
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -110,9 +130,33 @@ function hasCargoToken(): boolean {
           return true;
         }
       }
-    } catch {}
+    } catch { }
   }
   return false;
+}
+
+function getReleaseBinaries(): string[] {
+  const dir = join(root, "target/release");
+  if (!existsSync(dir)) return [];
+  const files = readdirSync(dir);
+  const bins: string[] = [];
+
+  for (const f of files) {
+    const path = join(dir, f);
+    try {
+      const stat = statSync(path);
+      if (stat.isFile()) {
+        const isExe = process.platform === "win32" ? f.endsWith(".exe") : (stat.mode & 0o111) !== 0;
+        const stem = f.replace(/\.exe$/i, "");
+
+        // Match only executable workspace output names to avoid third-party build artifacts
+        if (isExe && workspaceCrates.includes(stem)) {
+          bins.push(path);
+        }
+      }
+    } catch { }
+  }
+  return bins;
 }
 
 // ── preflight ─────────────────────────────────────────────────────────────────
@@ -179,7 +223,7 @@ else ok("Working copy clean");
 step("Version");
 
 const mainToml = await Bun.file(join(root, "crates/oyui/Cargo.toml")).text();
-const current  = mainToml.match(/^version = "(.+?)"/m)?.[1] ?? die("Could not read current version");
+const current = mainToml.match(/^version = "(.+?)"/m)?.[1] ?? die("Could not read current version");
 
 const isExplicit = /^\d+\.\d+\.\d+$/.test(bump);
 if (!isExplicit && !["patch", "minor", "major"].includes(bump)) die(`Invalid bump '${bump}'`);
@@ -200,17 +244,6 @@ if (liveRun) {
 
 // ── update Cargo.toml files ───────────────────────────────────────────────────
 step("Bumping versions in Cargo.toml files");
-
-const tomls = [
-  "Cargo.toml",
-  "crates/oyui/Cargo.toml",
-  "crates/oyui-rune-actions/Cargo.toml",
-  "crates/oyui-rune-actions/derive/Cargo.toml",
-  "crates/oyui-tasker/Cargo.toml",
-  "crates/oyui-tasker/derive/Cargo.toml",
-  "crates/syndiff/Cargo.toml",
-  "flake.nix",
-];
 
 for (const rel of tomls) {
   const path = join(root, rel);
@@ -270,6 +303,16 @@ if (liveRun) {
   warn(`[dry-run] would: git push origin v${next}`);
 }
 
+// ── build binaries ────────────────────────────────────────────────────────────
+step("Building release binaries");
+
+if (liveRun) {
+  await run(["cargo", "build", "--release"]);
+  ok("Workspace binaries built in release mode");
+} else {
+  warn("[dry-run] would: cargo build --release");
+}
+
 // ── publish to crates.io ──────────────────────────────────────────────────────
 step("Publishing to crates.io");
 
@@ -286,13 +329,28 @@ step("GitHub release");
 if (await which("gh")) {
   let notes = "";
   if (await which("git-cliff")) {
-    notes = await run(["git-cliff", "--config", join(root, "cliff.toml"), "--tag", `v${next}`, "--strip", "all", "--unreleased"]).catch(() => "");
+    // Extract changelog for the latest tag (v${next}) since tag is set
+    notes = await run(["git-cliff", "--config", join(root, "cliff.toml"), "--latest", "--strip", "all"]).catch(() => "");
   }
+
+  const assets: string[] = [];
   if (liveRun) {
-    await run(["gh", "release", "create", `v${next}`, "--title", `v${next}`, "--notes", notes || `Release v${next}`]);
-    ok(`GitHub release v${next} created`);
+    const binaries = getReleaseBinaries();
+    assets.push(...binaries);
+
+    const changelogPath = join(root, "CHANGELOG.md");
+    if (existsSync(changelogPath)) {
+      assets.push(changelogPath);
+    }
+
+    if (assets.length > 0) {
+      console.log(`  Uploading assets: ${assets.map(a => a.split("/").pop()).join(", ")}`);
+    }
+
+    await run(["gh", "release", "create", `v${next}`, ...assets, "--title", `v${next}`, "--notes", notes || `Release v${next}`]);
+    ok(`GitHub release v${next} created with ${assets.length} assets`);
   } else {
-    warn(`[dry-run] would: gh release create v${next}`);
+    warn(`[dry-run] would: gh release create v${next} [binaries...] --title v${next}`);
   }
 } else {
   warn("gh CLI not found — install from https://cli.github.com");
