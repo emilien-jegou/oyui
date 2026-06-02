@@ -1,13 +1,20 @@
 [package]
 name = "oyui"
-version = "0.0.0"
+version = "0.0.2"
 edition = "2021"
-publish = false
+publish = true
+description = "A modern TUI merge tool and staging interface for jujutsu and git"
+license = "GPL-3.0"
+keywords = ["diff", "merge-editor", "git", "jujutsu"]
+categories = ["development-tools"]
+homepage = "https://github.com/emilien-jegou/oyui"
+repository = "https://github.com/emilien-jegou/oyui"
+readme = "readme.md"
 
 [dependencies]
-oyui-tasker = { path = "../oyui-tasker" }
-oyui-rune-actions = { path = "../oyui-rune-actions" }
-syndiff = { path = "../syndiff" }
+oyui-tasker = { workspace = true }
+oyui-rune-actions = { workspace = true }
+oyui-syndiff = { workspace = true }
 rayon = { workspace = true }
 tokio = { workspace = true }
 ratatui = { workspace = true }

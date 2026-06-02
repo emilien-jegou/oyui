@@ -1,14 +1,13 @@
 [package]
-name = "syndiff"
-version = "0.2.0"
+name = "oyui-syndiff"
+version = "0.0.2"
 edition = "2021"
-authors = ["Marco Mihai Condrache"]
+publish = true
 license = "MIT"
-description = "Standalone library that implements a structural diff algorithm inspired by Difftastic"
-keywords = ["diff", "tree-sitter", "syntax", "structural", "ast"]
-categories = ["algorithms", "text-processing", "development-tools"]
-readme = "README.md"
-documentation = "https://docs.rs/syndiff/"
+description = "A re-export of the syndiff crate for oyui"
+readme = "readme.md"
+homepage = "https://github.com/emilien-jegou/oyui"
+repository = "https://github.com/emilien-jegou/oyui"
 
 [features]
 default = ["all-languages"]

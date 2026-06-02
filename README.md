@@ -1,5 +1,11 @@
 # Oyui
 
+[![Crates.io](https://img.shields.io/crates/v/oyui.svg)](https://crates.io/crates/oyui)
+![Cargo Downloads](https://img.shields.io/crates/d/oyui?label=cargo)
+![GitHub Downloads](https://img.shields.io/github/downloads/emilien-jegou/oyui/total?label=github)
+[![Nix Flake](https://img.shields.io/badge/nix-flake-5277C3?logo=nixos&logoColor=white)](https://github.com/emilien-jegou/oyui)
+[![dependency status](https://deps.rs/repo/github/emilien-jegou/oyui/status.svg)](https://deps.rs/repo/github/emilien-jegou/oyui)
+
 **Oyui** is a modern TUI merge tool and staging interface for [Jujutsu](https://github.com/martinvonz/jj) and Git.
 
 ![Simple merge edition](./docs/assets/output.gif)
@@ -28,7 +34,15 @@ I built **Oyui** to bridge this gap, focusing on a friction-free experience with
 *   ⚡ **Efficient Workflow:** Perform bulk actions (like staging by folder) instantly via the command palette. see feature section.
 
 
-## 📦 Installation (Nix Flakes)
+## 📦 Installation
+
+### Cargo
+
+```sh
+cargo install oyui
+```
+
+### Nix Flakes
 
 Add `oyui` to your `flake.nix` inputs:
 
@@ -46,7 +60,6 @@ environment.systemPackages = [
   inputs.oyui.packages.${pkgs.system}.default
 ];
 ```
-
 
 ## ⚙️ Configuration
 

@@ -1,7 +1,12 @@
 [package]
 name = "oyui-rune-actions-derive"
-version = "0.0.0"
+description = "Derive crate for oyui-rune-actions"
+license = "MIT OR Apache-2.0"
+version = "0.0.2"
 edition = "2021"
+readme = "readme.md"
+homepage = "https://github.com/emilien-jegou/oyui"
+repository = "https://github.com/emilien-jegou/oyui"
 
 [lib]
 proc-macro = true

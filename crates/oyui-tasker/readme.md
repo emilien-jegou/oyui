@@ -1,133 +1,149 @@
-# Oyui tasker
+# oyui-tasker
 
-A way to manage async work in oyui via threaded background workers. Tasks are executed concurrently on Tokio's worker pool, and communication is handled seamlessly via asynchronous `mpsc` channels.
+`oyui-tasker` is a macro-driven event distribution and background task execution library for Rust. It helps orchestrate asynchronous event loops, route events to registered listeners, and manage context sharing across those listeners using `tokio` tasks.
+
+[Check the official repository for more information](https://github.com/emilien-jegou/oyui)
+
+## Features
+
+* **Macro-Driven Registry**: Define your events and associate them with listeners in a declarative way using the `tasker_registry!` macro.
+* **Context Extraction**: Share application context with listeners safely. Implement context extraction automatically using `#[derive(TaskerProvide)]` and `#[derive(TaskerContext)]`.
+* **Flexible Dispatching**: Use `EventRegistry` in a unified manner or split it into an `EventSender` and `EventReceiver` pair for separate storage and thread-safety.
+* **Tracing Support**: Out-of-the-box integration with `tracing` to instrument listener execution and trace failures.
+
+---
 
 ## Usage
 
-### 0. Setup your App Context
-Your global application state can use `TaskerProvide` to automatically implement extraction rules for its fields.
+Below is an overview of how to define events, create listeners, manage context, and spin up the registry.
+
+### 1. Define Events
+
+Events can be any type that implements `Clone`, `Send`, `Sync`, and `'static`.
+
+```rust
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Echo {
+    pub msg: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EchoResult {
+    pub msg: String,
+}
+```
+
+### 2. Implement the `Listener` Trait
+
+Implement the `Listener` trait for your handlers. Each listener defines its expected `Context` and performs asynchronous work inside the `handle` function.
+
+```rust
+use oyui_tasker::{Listener, EventSender};
+
+pub struct EchoListener;
+
+impl Listener<Echo, EventSender> for EchoListener {
+    // The specific context type this listener requires.
+    type Context = ();
+
+    async fn handle(event: Echo, _ctx: Self::Context, tx: EventSender) -> eyre::Result<()> {
+        // Send a result back into the system if needed
+        tx.send(EchoResult {
+            msg: format!("echo: {}", event.msg),
+        })?;
+        Ok(())
+    }
+}
+```
+
+### 3. Setup Context Extraction
+
+The context required by listeners is extracted from a global application context. You can derive `TaskerProvide` on your application context to allow individual fields to be extracted.
 
 ```rust
 use oyui_tasker::TaskerProvide;
 
-#[derive(Clone, Debug)]
-pub struct MyName(String);
-
-// `TaskerProvide` automatically implements `ExtractsFrom<AppContext>` for the `MyName` type.
-#[derive(TaskerProvide, Clone)]
+#[derive(Clone, TaskerProvide)]
 pub struct AppContext {
-    name: MyName
+    pub multiplier: i32,
 }
 ```
 
-### 1. Define your tasks
-Implement `WorkerTask`. A task defines what it needs as a Request, what it returns as a Response, and exactly what it needs from the context.
-
-```rust
-use oyui_tasker::WorkerTask;
-
-pub struct StatsTask;
-
-#[derive(Clone, Debug)]
-pub struct StatsReq { pub path: String }
-pub struct StatsRes { pub name: String, pub path: String, pub size: u64 }
-
-impl WorkerTask for StatsTask {
-    type Request = StatsReq;
-    type Response = StatsRes;
-    type Context = MyName;
-
-    async fn handle(req: Self::Request, ctx: Self::Context) -> Self::Response {
-        StatsRes { name: ctx.0.clone(), path: req.path, size: 42 }
-    }
-}
-```
-
-### 2. Register the worker
-Use the `register_tasker!` macro to generate the required background worker, channels, and enums.
-
-```rust
-use oyui_tasker::register_tasker;
-
-register_tasker! {
-    tasks = [
-        Stats => StatsTask,
-    ]
-}
-```
-
-### 3. Spawn and Interact!
-Everything runs through the unified `Tasker` object. Because the channels are now asynchronous, you `await` responses.
-
-```rust
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let ctx = AppContext {
-        name: MyName("John".into())
-    };
-
-    // 1. Spawn the worker pool
-    let mut worker = Tasker::spawn(ctx);
-
-    // 2. Send a request
-    worker.send(StatsReq { path: "/tmp".to_string() }).unwrap();
-
-    // 3. Receive a response (non-blocking await)
-    if let Some(event) = worker.recv().await {
-        match event {
-            WorkerEvent::Stats(res) => {
-                println!("Got stats for {}: {}", res.path, res.size);
-            }
-        }
-    }
-
-    // 4. Shutdown gracefully
-    worker.shutdown().await?;
-    
-    Ok(())
-}
-```
-
----
-
-## Advanced Usage
-
-### Tasks with Multiple Dependencies (`TaskerContext`)
-If a task requires multiple pieces of context, define a local struct using `#[derive(TaskerContext)]`. It will automatically assemble itself from the global context at runtime!
+If a listener requires a subset of fields packed into a specific struct, you can use `#[derive(TaskerContext)]` to construct that struct from the global context automatically:
 
 ```rust
 use oyui_tasker::TaskerContext;
 
 #[derive(TaskerContext)]
-pub struct StatContext {
-    firstname: MyFirstName,
-    lastname: MyLastName,
-}
-
-impl WorkerTask for StatsTask {
-    // ... define Request/Response ...
-    type Context = StatContext;
-
-    async fn handle(req: Self::Request, ctx: Self::Context) -> Self::Response {
-        let full_name = format!("{} {}", ctx.firstname.0, ctx.lastname.0);
-        StatsRes { name: full_name, path: req.path, size: 42 }
-    }
+pub struct SubContext {
+    pub multiplier: i32,
 }
 ```
 
-### Splitting the Tasker
-If you need to move the request-sending capability to another thread, use `into_split()` to consume the `Tasker` and extract the sender.
+### 4. Declare the Registry
+
+Use the `tasker_registry!` macro to bind everything together. This macro generates:
+- An `Event` enum wrapping all specified variants plus a `Shutdown` variant.
+- An `EventSender` and an `EventReceiver`.
+- An `EventRegistry` coordinator.
 
 ```rust
-// Consumes the tasker to get a standalone sender
-let (sender, mut receiver, handle) = worker.into_split();
+use oyui_tasker::tasker_registry;
 
-tokio::spawn(async move {
-    sender.send(StatsReq { path: "/usr".into() }).unwrap();
-});
+tasker_registry! {
+    events = [
+        Echo       => Echo,
+        EchoResult => EchoResult,
+    ],
+    listeners = [
+        Echo => [EchoListener],
+    ],
+}
+```
 
-// The receiver remains in your main loop
-while let Some(event) = receiver.recv().await {
-    // ... process events ...
+### 5. Running the Registry
+
+You can run the registry in a unified loop or split it into a sender and receiver.
+
+#### Unified Usage
+
+```rust
+#[tokio::main]
+async fn main() {
+    let ctx = AppContext { multiplier: 10 };
+    let mut registry = EventRegistry::spawn(ctx);
+
+    // Send an event
+    registry.send(Echo { msg: "Hello".to_string() }).unwrap();
+
+    // Read events coming out of the loop
+    if let Some(event) = registry.recv().await {
+        println!("Received event: {:?}", event);
+    }
+
+    // Cleanly shutdown
+    registry.shutdown().await.unwrap();
+}
+```
+
+#### Split Usage
+
+If you need to move the sender and receiver to different contexts or threads, split the registry:
+
+```rust
+#[tokio::main]
+async fn main() {
+    let ctx = AppContext { multiplier: 10 };
+    let registry = EventRegistry::spawn(ctx);
+
+    let (sender, mut receiver, _join_handle) = registry.into_split();
+
+    // Send asynchronously from elsewhere
+    sender.send(Echo { msg: "Hello".to_string() }).unwrap();
+
+    // Receive events
+    while let Some(event) = receiver.recv().await {
+        println!("Received event: {:?}", event);
+    }
 }
 ```

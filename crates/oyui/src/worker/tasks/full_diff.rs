@@ -128,7 +128,7 @@ pub fn compute(
     let new_idx = LineIndex::new(right_text);
 
     let syntax_res = if *algo == DiffAlgorithm::SyntaxAware {
-        match syndiff::diff_source(left_text, right_text, path, None) {
+        match oyui_syndiff::diff_source(left_text, right_text, path, None) {
             Ok(res) => Some(res),
             Err(e) => {
                 tracing::debug!(

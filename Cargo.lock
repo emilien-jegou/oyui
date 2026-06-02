@@ -1421,7 +1421,7 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "oyui"
-version = "0.0.0"
+version = "0.0.2"
 dependencies = [
  "clap",
  "crossterm",
@@ -1431,6 +1431,7 @@ dependencies = [
  "infer",
  "once_cell",
  "oyui-rune-actions",
+ "oyui-syndiff",
  "oyui-tasker",
  "parking_lot",
  "ratatui",
@@ -1438,7 +1439,6 @@ dependencies = [
  "rune",
  "serde",
  "serde_json",
- "syndiff",
  "syntect",
  "tokio",
  "toml 1.1.2+spec-1.1.0",
@@ -1454,7 +1454,7 @@ dependencies = [
 
 [[package]]
 name = "oyui-rune-actions"
-version = "0.0.0"
+version = "0.0.2"
 dependencies = [
  "oyui-rune-actions-derive",
  "rune",
@@ -1462,7 +1462,7 @@ dependencies = [
 
 [[package]]
 name = "oyui-rune-actions-derive"
-version = "0.0.0"
+version = "0.0.2"
 dependencies = [
  "heck",
  "proc-macro2",
@@ -1471,8 +1471,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "oyui-syndiff"
+version = "0.0.2"
+dependencies = [
+ "arrayvec",
+ "imara-diff",
+ "indoc",
+ "rstest",
+ "rustc-hash",
+ "smallvec",
+ "strsim",
+ "tree-sitter",
+ "tree-sitter-bash",
+ "tree-sitter-c",
+ "tree-sitter-c-sharp",
+ "tree-sitter-cpp",
+ "tree-sitter-css",
+ "tree-sitter-go",
+ "tree-sitter-html",
+ "tree-sitter-java",
+ "tree-sitter-javascript",
+ "tree-sitter-json",
+ "tree-sitter-php",
+ "tree-sitter-python",
+ "tree-sitter-ruby",
+ "tree-sitter-rust",
+ "tree-sitter-toml-ng",
+ "tree-sitter-typescript",
+ "tree-sitter-yaml",
+]
+
+[[package]]
 name = "oyui-tasker"
-version = "0.0.0"
+version = "0.0.2"
 dependencies = [
  "eyre",
  "oyui-tasker-derive",
@@ -1482,7 +1513,7 @@ dependencies = [
 
 [[package]]
 name = "oyui-tasker-derive"
-version = "0.0.0"
+version = "0.0.2"
 dependencies = [
  "quote",
  "syn",
@@ -2381,37 +2412,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
-]
-
-[[package]]
-name = "syndiff"
-version = "0.2.0"
-dependencies = [
- "arrayvec",
- "imara-diff",
- "indoc",
- "rstest",
- "rustc-hash",
- "smallvec",
- "strsim",
- "tree-sitter",
- "tree-sitter-bash",
- "tree-sitter-c",
- "tree-sitter-c-sharp",
- "tree-sitter-cpp",
- "tree-sitter-css",
- "tree-sitter-go",
- "tree-sitter-html",
- "tree-sitter-java",
- "tree-sitter-javascript",
- "tree-sitter-json",
- "tree-sitter-php",
- "tree-sitter-python",
- "tree-sitter-ruby",
- "tree-sitter-rust",
- "tree-sitter-toml-ng",
- "tree-sitter-typescript",
- "tree-sitter-yaml",
 ]
 
 [[package]]

@@ -1,8 +1,13 @@
-# syndiff
+# oyui-syndiff
 
-**syndiff** is a lightweight, standalone library that implements a structural diff algorithm inspired by **Difftastic**, designed to be embedded inside other tools and applications.
+Re-export of the **syndiff** crate for oyui.
+
+[Check the official repository for more information](https://github.com/emilien-jegou/oyui)
 
 ### ✦ Philosophy
+
+syndiff is a lightweight, standalone library that implements a structural diff algorithm inspired by **Difftastic**, designed to be embedded inside other tools and applications.
+
 
 Traditional diffs treat code as text. Syndiff treats code as having *shape*.
 
