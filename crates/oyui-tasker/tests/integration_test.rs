@@ -1,4 +1,4 @@
-use oyui_tasker::{tasker_registry, ExtractsFrom, Listener, TaskerContext, TaskerProvide};
+use oyui_tasker::{tasker_registry, Listener, TaskerProvide};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Echo {

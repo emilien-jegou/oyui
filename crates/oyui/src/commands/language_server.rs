@@ -6,6 +6,7 @@ use crate::diff_cache::DiffCache;
 use crate::tree::FileTree;
 use crate::view::View;
 use crate::{commands::CommandError, config::script};
+use crate::actions::handlers;
 
 pub async fn run_lsp() -> Result<(), CommandError> {
     tracing::info!("Starting language server...");
@@ -17,7 +18,8 @@ pub async fn run_lsp() -> Result<(), CommandError> {
     let cache = Arc::new(parking_lot::RwLock::new(DiffCache::default()));
     let view = View::default();
 
-    let context = script::build_context(state, tree, cache, view)
+    let handler = handlers::generate(state, tree, cache, view);
+    let context = script::build_context(handler)
         .map_err(|e| CommandError::Runtime(Box::new(e)))?;
 
     let options = Options::from_default_env().map_err(|e| CommandError::Runtime(Box::new(e)))?;

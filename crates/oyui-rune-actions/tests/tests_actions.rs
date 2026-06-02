@@ -1,14 +1,10 @@
-use oyui_rune_actions::define_actions; // Handler and BoxedHandler are generated locally by the macro
+use oyui_rune_actions::define_actions;
 use rune::{Context, Diagnostics, Source, Sources, Vm};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
 
-static EXECUTED: AtomicU32 = AtomicU32::new(0);
-static CURSOR_UP_CALLED: AtomicBool = AtomicBool::new(false);
-static CURSOR_DOWN_VAL: AtomicU32 = AtomicU32::new(0);
-
-// Invoke the macro to generate structures and split traits for testing
+// Invoke the macro to generate structures, split traits, and the dispatch method
 define_actions! {
   view {
      file {
@@ -305,4 +301,40 @@ fn test_rune_all_in_one_module_execution() -> Result<(), Box<dyn std::error::Err
     assert_eq!(cursor_down_val.load(Ordering::SeqCst), 88);
 
     Ok(())
+}
+
+#[test]
+fn test_boxed_handler_dispatch() {
+    let executed = Arc::new(AtomicU32::new(0));
+    let cursor_up_called = Arc::new(AtomicBool::new(false));
+    let cursor_down_val = Arc::new(AtomicU32::new(0));
+
+    let all_in_one = Arc::new(AllInOneHandler {
+        fg: Mutex::new(String::from("initial")),
+        executed: executed.clone(),
+        cursor_up_called: cursor_up_called.clone(),
+        cursor_down_val: cursor_down_val.clone(),
+    });
+
+    let boxed_handler = Handler {
+        view_file_scroll: all_in_one.clone(),
+        view_file_cursor: all_in_one.clone(),
+        system: all_in_one.clone(),
+        system_fg: all_in_one,
+    }.build();
+
+    // Verify dispatch with nested inner action constructed via automatic `.into()` trait
+    let action_left: Action = ViewFileScrollActions::left(123).into();
+    boxed_handler.dispatch(&action_left);
+    assert_eq!(executed.load(Ordering::SeqCst), 123);
+
+    // Verify dispatch of alternative nested branch action
+    let action_down: Action = ViewFileCursorActions::down(456).into();
+    boxed_handler.dispatch(&action_down);
+    assert_eq!(cursor_down_val.load(Ordering::SeqCst), 456);
+
+    // Verify parameter-less method dispatch
+    let action_up: Action = ViewFileCursorActions::up.into();
+    boxed_handler.dispatch(&action_up);
+    assert!(cursor_up_called.load(Ordering::SeqCst));
 }

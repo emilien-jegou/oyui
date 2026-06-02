@@ -6,6 +6,8 @@ pub mod merge;
 pub use events::{CommandMode, ExitAction};
 use typed_builder::TypedBuilder;
 
+use crate::actions::state::TuiState;
+use crate::actions::{handlers, BoxedHandler};
 use crate::commands::CommandError;
 use crate::commons::lazy::Lazy;
 use crate::config::UiTheme;
@@ -28,7 +30,8 @@ use std::io;
 use std::time::Duration;
 
 #[derive(TypedBuilder)]
-pub struct App {
+#[builder(build_method(into = App))]
+pub struct AppReq {
     #[builder(default = Arc::new(RwLock::new(FileTree::default())))]
     pub tree: Arc<RwLock<FileTree>>,
     #[builder(default = Arc::new(RwLock::new(DiffCache::default())))]
@@ -39,29 +42,75 @@ pub struct App {
     pub theme: Lazy<UiTheme>,
     #[builder(default = Arc::new(RwLock::new(Lazy::Uninitialized)))]
     pub syntax_theme: Arc<RwLock<Lazy<Arc<Theme>>>>,
-    pub config_path: PathBuf,
     #[builder(default = Arc::new(RwLock::new(None)))]
     pub config_error: Arc<RwLock<Option<String>>>,
     #[builder(default = Arc::new(RwLock::new(None)))]
     pub current_path: Arc<RwLock<Option<PathBuf>>>,
 
-    #[builder(default = CommandMode::Normal)]
-    pub command_mode: CommandMode,
-
-    #[builder(default = false)]
-    pub should_quit: bool,
-
+    pub config_path: PathBuf,
     pub worker: EventRegistry,
+    pub left_path: PathBuf,
+    pub right_path: PathBuf,
+    pub base_path: Option<PathBuf>,
+}
 
+pub struct App {
+    pub tree: Arc<RwLock<FileTree>>,
+    pub cache: Arc<RwLock<DiffCache>>,
+    pub view: View,
+    pub theme: Lazy<UiTheme>,
+    pub syntax_theme: Arc<RwLock<Lazy<Arc<Theme>>>>,
+    pub config_path: PathBuf,
+    pub config_error: Arc<RwLock<Option<String>>>,
+    pub current_path: Arc<RwLock<Option<PathBuf>>>,
+    pub worker: EventRegistry,
     pub left_path: PathBuf,
     pub right_path: PathBuf,
     pub base_path: Option<PathBuf>,
 
-    #[builder(default = Arc::new(RwLock::new(crate::actions::state::TuiState::new("weywot"))))]
+    pub handler: BoxedHandler,
+    pub should_quit: bool,
+    pub command_mode: CommandMode,
     pub state: Arc<RwLock<crate::actions::state::TuiState>>,
 }
 
+impl From<AppReq> for App {
+    fn from(value: AppReq) -> Self {
+        let state = Arc::new(RwLock::new(TuiState::new("weywot")));
+        let handler = handlers::generate(
+            state.clone(),
+            value.tree.clone(),
+            value.cache.clone(),
+            value.view.clone(),
+        );
+
+        Self {
+            tree: value.tree,
+            cache: value.cache,
+            view: value.view,
+            theme: value.theme,
+            syntax_theme: value.syntax_theme,
+            config_path: value.config_path,
+            config_error: value.config_error,
+            current_path: value.current_path,
+            worker: value.worker,
+            left_path: value.left_path,
+            right_path: value.right_path,
+            base_path: value.base_path,
+
+            handler,
+            state,
+            should_quit: false,
+            command_mode: CommandMode::Normal,
+        }
+    }
+}
+
 impl App {
+    pub fn builder() -> AppReqBuilder {
+        AppReq::builder()
+    }
+
     pub async fn start(&mut self) -> Result<(), CommandError> {
         self.start_tree_calculation()?;
         self.start_config_watching(self.config_path.clone())?;
@@ -70,17 +119,11 @@ impl App {
     }
 
     pub async fn tick(&mut self) {
-        // Process Main-Thread Events (Like Script Reloads)
         while let Ok(event) = self.worker.try_recv() {
             if let crate::worker::Event::WatchConfigRes(res) = event {
                 tracing::info!("Reloading config on main thread...");
-                if let Err(e) = crate::config::load_config(
-                    &res.path,
-                    self.state.clone(),
-                    self.tree.clone(),
-                    self.cache.clone(),
-                    self.view.clone(),
-                ) {
+
+                if let Err(e) = crate::config::load_config(&res.path, self.handler.clone()) {
                     tracing::error!("Config compilation error: {}", e);
                     *self.config_error.write() = Some(e.to_string());
                 } else {
@@ -201,13 +244,6 @@ impl App {
         let backend = CrosstermBackend::new(stdout);
         let mut terminal = Terminal::new(backend)?;
 
-        let handler = crate::actions::handlers::AppActionsHandler {
-            state: self.state.clone(),
-            tree: self.tree.clone(),
-            cache: self.cache.clone(),
-            view: self.view.clone(),
-        };
-
         tracing::info!("Entering main event loop");
         let mut aborted = false;
         loop {
@@ -244,7 +280,7 @@ impl App {
                         for target in matched_targets {
                             match target {
                                 crate::actions::keybinds::ActionTarget::Static(action) => {
-                                    crate::actions::handlers::dispatch_action(&action, &handler);
+                                    self.handler.dispatch(&action);
 
                                     // Clean abort hook during transition
                                     if let crate::actions::Action(

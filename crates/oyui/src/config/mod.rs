@@ -1,6 +1,6 @@
+use std::cell::RefCell;
 use std::path::Path;
 use tracing::{info, info_span};
-use std::cell::RefCell;
 
 pub mod builtin;
 pub mod define_default_theme;
@@ -11,8 +11,10 @@ pub use builtin::{fallback_theme, get_embedded_themes};
 pub use define_default_theme::derive_ui_theme;
 pub use theme::{LineHighlightMode, UiTheme};
 
+use crate::actions::BoxedHandler;
+
 thread_local! {
-    pub static ACTIVE_REGISTRY: RefCell<crate::actions::keybinds::KeybindRegistry> = 
+    pub static ACTIVE_REGISTRY: RefCell<crate::actions::keybinds::KeybindRegistry> =
         RefCell::new(crate::actions::keybinds::default_keybinds());
 }
 
@@ -27,13 +29,7 @@ impl From<theme::Color> for ratatui::style::Color {
 }
 
 /// Load and execute a `.rn` config script.
-pub fn load_config(
-    path: &Path,
-    tui_state: std::sync::Arc<parking_lot::RwLock<crate::actions::state::TuiState>>,
-    tree: std::sync::Arc<parking_lot::RwLock<crate::tree::FileTree>>,
-    cache: std::sync::Arc<parking_lot::RwLock<crate::diff_cache::DiffCache>>,
-    view: crate::view::View,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub fn load_config(path: &Path, handler: BoxedHandler) -> Result<(), Box<dyn std::error::Error>> {
     let span = info_span!("load_config", path = %path.display());
     let _enter = span.enter();
 
@@ -46,7 +42,7 @@ pub fn load_config(
 
     ACTIVE_REGISTRY.with(|r| *r.borrow_mut() = crate::actions::keybinds::default_keybinds());
 
-    let mut vm = script::build_vm(path, tui_state, tree, cache, view)?;
+    let mut vm = script::build_vm(path, handler)?;
     script::run_config_script(&mut vm)?;
 
     info!("Config loaded successfully");

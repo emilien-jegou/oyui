@@ -1,11 +1,11 @@
-use crate::{actions::handlers::generate_handler, config::LineHighlightMode};
+use crate::{actions::BoxedHandler, config::LineHighlightMode};
 use rune::{termcolor, Context, ContextError, Module, Vm};
 use std::rc::Rc;
 use std::sync::Arc;
 use tracing::{debug, error, info, info_span};
 
 thread_local! {
-    pub static CURRENT_COMPILING_MODE: std::cell::RefCell<Option<crate::actions::keybinds::KeybindMode>> = 
+    pub static CURRENT_COMPILING_MODE: std::cell::RefCell<Option<crate::actions::keybinds::KeybindMode>> =
         std::cell::RefCell::new(None);
 }
 
@@ -15,12 +15,7 @@ pub fn base_module() -> Result<Module, ContextError> {
     Ok(m)
 }
 
-pub fn build_context(
-    state: Arc<parking_lot::RwLock<crate::actions::state::TuiState>>,
-    tree: Arc<parking_lot::RwLock<crate::tree::FileTree>>,
-    cache: Arc<parking_lot::RwLock<crate::diff_cache::DiffCache>>,
-    view: crate::view::View,
-) -> Result<Context, ContextError> {
+pub fn build_context(handler: BoxedHandler) -> Result<Context, ContextError> {
     let mut context = rune::Context::with_default_modules()?;
     context.install(base_module()?)?;
 
@@ -29,13 +24,14 @@ pub fn build_context(
     // Register the global `keybind` function that accepts a string + closure
     m.function("keybind", |kb_str: String, cb: rune::runtime::Function| {
         let kb = crate::commons::input::Keybind::parse(&kb_str);
-        
+
         let mode_opt = CURRENT_COMPILING_MODE.with(|m| m.borrow().clone());
-        
+
         crate::config::ACTIVE_REGISTRY.with(|r| {
             let mut reg = r.borrow_mut();
-            let owned_reg = std::mem::replace(&mut *reg, crate::actions::keybinds::KeybindRegistry::new());
-            
+            let owned_reg =
+                std::mem::replace(&mut *reg, crate::actions::keybinds::KeybindRegistry::new());
+
             if let Some(mode) = mode_opt {
                 *reg = owned_reg.register_fn_mode(mode, kb, Rc::new(cb));
             } else {
@@ -46,25 +42,30 @@ pub fn build_context(
     .build()?;
 
     // Register the dynamic `on_mode` function to contextually nest keybinds
-    m.function("on_mode", |mode_str: String, cb: rune::runtime::Function| {
-        let mode = match mode_str.to_lowercase().as_str() {
-            "file" => crate::actions::keybinds::KeybindMode::View(crate::actions::keybinds::View::File),
-            "tree" => crate::actions::keybinds::KeybindMode::View(crate::actions::keybinds::View::Tree),
-            _ => {
-                return rune::runtime::VmResult::Ok(());
-            }
-        };
+    m.function(
+        "on_mode",
+        |mode_str: String, cb: rune::runtime::Function| {
+            let mode = match mode_str.to_lowercase().as_str() {
+                "file" => crate::actions::keybinds::KeybindMode::View(
+                    crate::actions::keybinds::View::File,
+                ),
+                "tree" => crate::actions::keybinds::KeybindMode::View(
+                    crate::actions::keybinds::View::Tree,
+                ),
+                _ => {
+                    return rune::runtime::VmResult::Ok(());
+                }
+            };
 
-        CURRENT_COMPILING_MODE.with(|m| *m.borrow_mut() = Some(mode));
-        let result = cb.call::<()>(());
-        CURRENT_COMPILING_MODE.with(|m| *m.borrow_mut() = None);
-        result
-    })
+            CURRENT_COMPILING_MODE.with(|m| *m.borrow_mut() = Some(mode));
+            let result = cb.call::<()>(());
+            CURRENT_COMPILING_MODE.with(|m| *m.borrow_mut() = None);
+            result
+        },
+    )
     .build()?;
 
     context.install(m)?;
-
-    let handler = generate_handler(state, tree, cache, view);
     crate::actions::register_actions(&mut context, handler)?;
     Ok(context)
 }
@@ -72,16 +73,14 @@ pub fn build_context(
 /// Compile and return a ready [`Vm`] from a `.rn` source file.
 pub fn build_vm(
     path: &std::path::Path,
-    state: Arc<parking_lot::RwLock<crate::actions::state::TuiState>>,
-    tree: Arc<parking_lot::RwLock<crate::tree::FileTree>>,
-    cache: Arc<parking_lot::RwLock<crate::diff_cache::DiffCache>>,
-    view: crate::view::View,
+    handler: BoxedHandler,
 ) -> Result<Vm, Box<dyn std::error::Error>> {
     let span = info_span!("build_vm", path = %path.display());
     let _enter = span.enter();
 
     debug!("Registering runtime context and modules");
-    let context = build_context(state, tree, cache, view)?;
+
+    let context = build_context(handler)?;
 
     let runtime = Arc::new(context.runtime()?);
 

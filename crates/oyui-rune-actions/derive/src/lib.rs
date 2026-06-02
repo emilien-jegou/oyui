@@ -122,14 +122,14 @@ impl Parse for ActionNode {
 pub fn define_actions(input: TokenStream) -> TokenStream {
     let tree = syn::parse_macro_input!(input as ActionTree);
 
-    // 1. Identify active branches (those containing direct leaf actions or getsets)
+    // Identify active branches (those containing direct leaf actions or getsets)
     let mut active_branches = Vec::new();
     for node in &tree.root_nodes {
         let mut path = vec![node.ident().clone()];
         find_active_branches(node, &mut path, &mut active_branches);
     }
 
-    // 2. Generate pure structural Rust Enums
+    // Generate pure structural Rust Enums
     let mut enum_definitions = Vec::new();
     let root_variants: Vec<TokenStream2> = tree
         .root_nodes
@@ -154,14 +154,14 @@ pub fn define_actions(input: TokenStream) -> TokenStream {
         generate_nodes_grouped(node, &mut path_idents, &mut enum_definitions);
     }
 
-    // 3. Generate automatic `From` traits mappings into Action wrapper
+    // Generate automatic `From` traits mappings into Action wrapper
     let mut from_impls = Vec::new();
     for node in &tree.root_nodes {
         let mut path_idents = vec![node.ident().clone()];
         generate_from_impls(node, &mut path_idents, &mut from_impls);
     }
 
-    // 4. Generate leaf Traits (including Arc delegation implementation)
+    // Generate leaf Traits (including Arc delegation implementation)
     let mut traits = Vec::new();
     for (path, getset, leaves) in &active_branches {
         let trait_name = path_to_trait_name(path);
@@ -173,7 +173,7 @@ pub fn define_actions(input: TokenStream) -> TokenStream {
             let args = &leaf.args;
             let ret_type = &leaf.ret_type;
             let arg_names: Vec<Ident> = (0..args.len()).map(|i| format_ident!("a{}", i)).collect();
-            
+
             trait_methods.push(quote! {
                 fn #leaf_ident(&self, #(#arg_names: #args),*) -> #ret_type;
             });
@@ -212,7 +212,7 @@ pub fn define_actions(input: TokenStream) -> TokenStream {
         });
     }
 
-    // 5. Generate the flat Handler and non-generic BoxedHandler structs
+    // Generate the flat Handler and non-generic BoxedHandler structs
     let mut fields = Vec::new();
     let mut field_names = Vec::new();
     let mut generic_params = Vec::new();
@@ -241,6 +241,44 @@ pub fn define_actions(input: TokenStream) -> TokenStream {
         });
     }
 
+    // 5.5 Generate dispatch method implementation arms for BoxedHandler
+    let mut dispatch_arms = Vec::new();
+    for (path, _getset, leaves) in &active_branches {
+        let field_name = path_to_field_name(path);
+        let deepest_enum_name = build_enum_name(path);
+
+        for leaf in leaves {
+            let leaf_ident = &leaf.ident;
+            let args = &leaf.args;
+            let arg_names: Vec<Ident> = (0..args.len()).map(|i| format_ident!("a{}", i)).collect();
+
+            // Setup the inner variant matcher
+            let mut pattern = if args.is_empty() {
+                quote! { #deepest_enum_name::#leaf_ident }
+            } else {
+                quote! { #deepest_enum_name::#leaf_ident(#(#arg_names),*) }
+            };
+
+            // Recursively construct the pattern up to the root enum
+            for j in (0..path.len()).rev() {
+                let variant = &path[j];
+                let enum_name = if j == 0 {
+                    quote! { Actions }
+                } else {
+                    let name = build_enum_name(&path[0..j]);
+                    quote! { #name }
+                };
+                pattern = quote! { #enum_name::#variant(#pattern) };
+            }
+
+            dispatch_arms.push(quote! {
+                #pattern => {
+                    let _ = self.0.#field_name.#leaf_ident(#(#arg_names.clone()),*);
+                }
+            });
+        }
+    }
+
     let handler_struct = quote! {
         #[derive(Clone, Debug)]
         pub struct Handler<#(#generic_params),*> {
@@ -252,6 +290,15 @@ pub fn define_actions(input: TokenStream) -> TokenStream {
         pub struct BoxedHandler(
             pub ::std::sync::Arc<Handler<#(#erased_types),*>>
         );
+
+        impl BoxedHandler {
+            pub fn dispatch(&self, action: &Action) {
+                match &action.0 {
+                    #(#dispatch_arms,)*
+                    _ => {} // Covers Unhandled __GetSet variants
+                }
+            }
+        }
 
         impl<#(#generic_params),*> Handler<#(#generic_params),*>
         where
@@ -265,11 +312,15 @@ pub fn define_actions(input: TokenStream) -> TokenStream {
         }
     };
 
-    // 6. Generate registrations grouped by namespace path
-    let mut module_registrations = std::collections::HashMap::<Vec<String>, Vec<TokenStream2>>::new();
+    // Generate registrations grouped by namespace path
+    let mut module_registrations =
+        std::collections::HashMap::<Vec<String>, Vec<TokenStream2>>::new();
 
     for (path, getset, leaves) in &active_branches {
-        let string_path: Vec<String> = path.iter().map(|id| id.to_string().to_lowercase()).collect();
+        let string_path: Vec<String> = path
+            .iter()
+            .map(|id| id.to_string().to_lowercase())
+            .collect();
         let field_name = path_to_field_name(path);
 
         module_registrations.entry(string_path.clone()).or_default();
@@ -291,7 +342,10 @@ pub fn define_actions(input: TokenStream) -> TokenStream {
                 }
             };
 
-            module_registrations.get_mut(&string_path).unwrap().push(reg);
+            module_registrations
+                .get_mut(&string_path)
+                .unwrap()
+                .push(reg);
         }
 
         if let Some(ty) = getset {
@@ -372,12 +426,18 @@ fn find_active_branches(
     active: &mut Vec<(Vec<Ident>, Option<Type>, Vec<LeafInfo>)>,
 ) {
     match node {
-        ActionNode::Branch { getset, children, .. } => {
+        ActionNode::Branch {
+            getset, children, ..
+        } => {
             let mut leaves = Vec::new();
             let mut branches = Vec::new();
             for child in children {
                 match child {
-                    ActionNode::Leaf { ident, args, ret_type } => {
+                    ActionNode::Leaf {
+                        ident,
+                        args,
+                        ret_type,
+                    } => {
                         leaves.push(LeafInfo {
                             ident: ident.clone(),
                             args: args.clone(),
@@ -463,7 +523,6 @@ fn generate_nodes_grouped(
     }
 }
 
-// Generates `From` implementations allowing branch enums to cleanly unroll directly to Action
 fn generate_from_impls(
     node: &ActionNode,
     current_path: &mut Vec<Ident>,
@@ -506,7 +565,10 @@ fn generate_from_impls(
 }
 
 fn path_to_field_name(path: &[Ident]) -> Ident {
-    let parts: Vec<String> = path.iter().map(|id| id.to_string().to_lowercase()).collect();
+    let parts: Vec<String> = path
+        .iter()
+        .map(|id| id.to_string().to_lowercase())
+        .collect();
     format_ident!("{}", parts.join("_"))
 }
 
