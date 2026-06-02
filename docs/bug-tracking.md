@@ -5,6 +5,6 @@ Bug should still be reported in github issues.
 
 ## List
 
-- Horizontal scroll does not work
+- Horizontal scroll icon does not show on the right
 - Solid/Gradient highlight on change differ in logic when hunk is staged
 ...
