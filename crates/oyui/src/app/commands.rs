@@ -1,7 +1,7 @@
 use crate::commons::glob::glob_match;
-use crate::view::tree::TreeViewData;
 use crate::diff_cache::DiffCache;
 use crate::tree::{FileTree, StagingState, TreeNode};
+use crate::view::tree::TreeViewData;
 use std::path::PathBuf;
 
 #[tracing::instrument(skip_all, fields(cmd = cmd))]
@@ -44,11 +44,7 @@ pub fn set_state_for_path(tree: &mut FileTree, path: &PathBuf, new_state: Stagin
     }
 }
 
-fn apply_state_recursive(
-    node: &mut TreeNode,
-    target: &PathBuf,
-    new_state: StagingState,
-) -> bool {
+fn apply_state_recursive(node: &mut TreeNode, target: &PathBuf, new_state: StagingState) -> bool {
     match node {
         TreeNode::File(f) => {
             if &f.path == target {

@@ -21,7 +21,7 @@ use std::sync::Arc;
 use syntect::highlighting::Theme;
 
 use crossterm::{
-    event::{self, Event},
+    event::{self, Event, KeyCode},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -252,57 +252,85 @@ impl App {
 
             if event::poll(Duration::from_millis(16))? {
                 if let Event::Key(key) = event::read()? {
-                    let mut matched_targets = Vec::new();
-
-                    let active_mode = if *self.view.current.read() == crate::view::ViewKind::File {
-                        crate::actions::keybinds::KeybindMode::View(
-                            crate::actions::keybinds::View::File,
-                        )
+                    // If we are in active command mode, capture input instead of running keybinds
+                    if let CommandMode::Active(ref mut buf) = self.command_mode {
+                        match key.code {
+                            KeyCode::Enter => {
+                                let cmd = buf.clone();
+                                self.execute_command(&cmd);
+                                self.command_mode = CommandMode::Normal;
+                            }
+                            KeyCode::Esc => {
+                                self.command_mode = CommandMode::Normal;
+                            }
+                            KeyCode::Backspace => {
+                                buf.pop();
+                            }
+                            KeyCode::Char(c) => {
+                                buf.push(c);
+                            }
+                            _ => {}
+                        }
                     } else {
-                        crate::actions::keybinds::KeybindMode::View(
-                            crate::actions::keybinds::View::Tree,
-                        )
-                    };
+                        // Standard keybind handling
+                        let mut matched_targets = Vec::new();
 
-                    crate::config::ACTIVE_REGISTRY.with(|r| {
-                        let reg = r.borrow();
-                        for (mode, kb, targets) in &reg.bindings {
-                            if (*mode == crate::actions::keybinds::KeybindMode::Global
-                                || *mode == active_mode)
-                                && kb.matches(&key)
-                            {
-                                matched_targets.extend(targets.clone());
-                            }
-                        }
-                    });
+                        let active_mode =
+                            if *self.view.current.read() == crate::view::ViewKind::File {
+                                crate::actions::keybinds::KeybindMode::View(
+                                    crate::actions::keybinds::View::File,
+                                )
+                            } else {
+                                crate::actions::keybinds::KeybindMode::View(
+                                    crate::actions::keybinds::View::Tree,
+                                )
+                            };
 
-                    if !matched_targets.is_empty() {
-                        for target in matched_targets {
-                            match target {
-                                crate::actions::keybinds::ActionTarget::Static(action) => {
-                                    self.handler.dispatch(&action);
-
-                                    // Clean abort hook during transition
-                                    if let crate::actions::Action(
-                                        crate::actions::Actions::global(
-                                            crate::actions::GlobalActions::quit,
-                                        ),
-                                    ) = action
-                                    {
-                                        aborted = true;
-                                        break;
-                                    }
-                                }
-                                crate::actions::keybinds::ActionTarget::Dynamic(cb) => {
-                                    tracing::debug!("Matched script keybind, executing callback");
-                                    if let Err(e) = cb.call::<()>(()).into_result() {
-                                        tracing::error!("Script keybind execution error: {}", e);
-                                    }
+                        crate::config::ACTIVE_REGISTRY.with(|r| {
+                            let reg = r.borrow();
+                            for (mode, kb, targets) in &reg.bindings {
+                                if (*mode == crate::actions::keybinds::KeybindMode::Global
+                                    || *mode == active_mode)
+                                    && kb.matches(&key)
+                                {
+                                    matched_targets.extend(targets.clone());
                                 }
                             }
-                        }
-                        if aborted {
-                            break;
+                        });
+
+                        if !matched_targets.is_empty() {
+                            for target in matched_targets {
+                                match target {
+                                    crate::actions::keybinds::ActionTarget::Static(action) => {
+                                        self.handler.dispatch(&action);
+
+                                        // Clean abort hook during transition
+                                        if let crate::actions::Action(
+                                            crate::actions::Actions::global(
+                                                crate::actions::GlobalActions::quit,
+                                            ),
+                                        ) = action
+                                        {
+                                            aborted = true;
+                                            break;
+                                        }
+                                    }
+                                    crate::actions::keybinds::ActionTarget::Dynamic(cb) => {
+                                        tracing::debug!(
+                                            "Matched script keybind, executing callback"
+                                        );
+                                        if let Err(e) = cb.call::<()>(()).into_result() {
+                                            tracing::error!(
+                                                "Script keybind execution error: {}",
+                                                e
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                            if aborted {
+                                break;
+                            }
                         }
                     }
                 }
