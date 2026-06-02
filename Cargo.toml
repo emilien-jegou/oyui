@@ -3,9 +3,9 @@ resolver = "2"
 members = ["crates/oyui-tasker", "crates/oyui-rune-actions", "crates/syndiff", "crates/oyui" ]
 
 [workspace.dependencies]
-oyui-tasker = { path = "crates/oyui-tasker", version = "0.0.3" }
-oyui-rune-actions = { path = "crates/oyui-rune-actions", version = "0.0.3" }
-oyui-syndiff = { path = "crates/syndiff", version = "0.0.3" }
+oyui-tasker = { path = "crates/oyui-tasker", version = "0.0.4" }
+oyui-rune-actions = { path = "crates/oyui-rune-actions", version = "0.0.4" }
+oyui-syndiff = { path = "crates/syndiff", version = "0.0.4" }
 
 ratatui = { version = "0.30", default-features = false, features = ["crossterm"] }
 crossterm = "0.29"
