@@ -71,31 +71,107 @@ const workspaceCrates = tomls
 async function run(cmd: string[], opts: { cwd?: string; allowFailure?: boolean } = {}) {
   console.log(`  ${c.gray(`$ ${cmd.join(" ")}`)}`);
 
+  try {
+    appendFileSync(logPath, `\n[${new Date().toISOString()}] Command: ${cmd.join(" ")}\n`);
+  } catch {
+    // Ignore logging write failures
+  }
+
   const proc = Bun.spawn(cmd, { cwd: opts.cwd ?? root, stdout: "pipe", stderr: "pipe" });
-  const [out, err, code] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
+
+  const history: string[] = [];
+  let linesPrinted = 0;
+  let fullStdout = "";
+  let fullStderr = "";
+
+  const cols = process.stdout.columns || 80;
+
+  function updatePreview(newLines: string[]) {
+    // Move cursor back up and clear down to overwrite previous frame
+    if (linesPrinted > 0) {
+      process.stdout.write(`\x1b[${linesPrinted}A\x1b[J`);
+    }
+    for (const line of newLines) {
+      const cleanLine = line.replace(/[\r\n]/g, "");
+      // Truncate based on terminal columns to avoid unexpected terminal line-wraps breaking offsets
+      const truncated = cleanLine.length > cols - 4 ? cleanLine.substring(0, cols - 7) + "..." : cleanLine;
+      process.stdout.write(`> ${c.gray(truncated)}\n`);
+    }
+    linesPrinted = newLines.length;
+  }
+
+  function clearPreview() {
+    if (linesPrinted > 0) {
+      process.stdout.write(`\x1b[${linesPrinted}A\x1b[J`);
+      linesPrinted = 0;
+    }
+  }
+
+  const handleLine = (line: string, isError: boolean) => {
+    if (isError) {
+      fullStderr += line + "\n";
+    } else {
+      fullStdout += line + "\n";
+    }
+
+    try {
+      appendFileSync(logPath, `  ${isError ? "[ERR]" : "[OUT]"} ${line}\n`);
+    } catch {
+      // Ignore logging write failures
+    }
+
+    history.push(line);
+    if (history.length > 4) {
+      history.shift();
+    }
+    updatePreview(history);
+  };
+
+  const stdoutReader = proc.stdout.getReader();
+  const stderrReader = proc.stderr.getReader();
+
+  async function streamRead(reader: ReadableStreamDefaultReader<Uint8Array>, isError: boolean) {
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        if (buffer.trim()) {
+          handleLine(buffer, isError);
+        }
+        break;
+      }
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        handleLine(line, isError);
+      }
+    }
+  }
+
+  await Promise.all([
+    streamRead(stdoutReader, false),
+    streamRead(stderrReader, true),
     proc.exited,
   ]);
 
+  const code = proc.exitCode;
+  clearPreview();
+
   try {
-    let logEntry = `[${new Date().toISOString()}] Command: ${cmd.join(" ")}\n`;
-    logEntry += `Exit Code: ${code}\n`;
-    if (out.trim()) logEntry += `Stdout:\n${out.trim()}\n`;
-    if (err.trim()) logEntry += `Stderr:\n${err.trim()}\n`;
-    logEntry += `----------------------------------------\n`;
-    appendFileSync(logPath, logEntry);
+    appendFileSync(logPath, `Exit Code: ${code}\n----------------------------------------\n`);
   } catch {
     // Ignore logging write failures
   }
 
   if (code !== 0) {
     if (opts.allowFailure) {
-      throw new Error(err.trim());
+      throw new Error(fullStderr.trim() || fullStdout.trim());
     }
-    die(`Command failed: ${cmd.join(" ")}\n${err.trim()}`);
+    die(`Command failed: ${cmd.join(" ")}\n${fullStderr.trim()}`);
   }
-  return out.trim();
+  return fullStdout.trim();
 }
 
 async function which(bin: string): Promise<boolean> {
@@ -409,11 +485,13 @@ if (skipPublish) {
   warn("[dry-run] would: cargo publish --workspace");
 }
 
+// ── github release ────────────────────────────────────────────────────────────
 step("GitHub release");
 
 if (await which("gh")) {
   let notes = "";
   if (await which("git-cliff")) {
+    // Extract the changelog segment ONLY for the latest tag (v${next})
     notes = await run(["git-cliff", "--config", join(root, "cliff.toml"), "--latest", "--strip", "all"]).catch(() => "");
   }
 
@@ -422,6 +500,8 @@ if (await which("gh")) {
       console.log(`  Uploading archives: ${archiveAssets.map(a => a.split("/").pop()).join(", ")}`);
     }
 
+    // Pass target archives only; CHANGELOG.md is no longer appended as an asset.
+    // The specific changelog notes for this version populate the description.
     await run(["gh", "release", "create", `v${next}`, ...archiveAssets, "--title", `v${next}`, "--notes", notes || `Release v${next}`]);
     ok(`GitHub release v${next} created with ${archiveAssets.length} target archives`);
   } else {
@@ -432,5 +512,6 @@ if (await which("gh")) {
   warn(`Create the release manually at: https://github.com/emilien-jegou/oyui/releases/new`);
 }
 
+// ── done ──────────────────────────────────────────────────────────────────────
 const doneMsg = liveRun ? `✓ Released v${next}` : `✓ Dry run complete — rerun without --dry-run to release v${next}`;
 console.log(`\n${c.bold(c.green(doneMsg))}\n`);
