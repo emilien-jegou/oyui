@@ -2,7 +2,7 @@
 name = "oyui-tasker-derive"
 description = "Derive crate for oyui-tasker"
 license = "MIT OR Apache-2.0"
-version = "0.0.5"
+version = "0.0.6"
 edition = "2021"
 readme = "readme.md"
 homepage = "https://github.com/emilien-jegou/oyui"

@@ -1,6 +1,6 @@
 [package]
 name = "oyui-tasker"
-version = "0.0.5"
+version = "0.0.6"
 edition = "2021"
 description = "A macro-driven event loop and background task orchestration framework for asynchronous Rust applications."
 repository = "https://github.com/emilien-jegou/oyui"
@@ -19,7 +19,7 @@ path = "./src/lib.rs"
 tokio = { version = "1", features = ["macros", "time", "rt-multi-thread"] }
 
 [dependencies]
-oyui-tasker-derive = { path = "./derive", version = "0.0.5" }
+oyui-tasker-derive = { path = "./derive", version = "0.0.6" }
 tokio = { workspace = true }
 tracing = { workspace = true }
 eyre = { workspace = true }
