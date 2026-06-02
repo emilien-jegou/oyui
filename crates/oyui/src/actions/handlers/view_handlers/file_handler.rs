@@ -81,6 +81,72 @@ fn handle_hscroll(
     *hs = (*hs as isize + delta).clamp(0, max_hscroll as isize) as usize;
 }
 
+fn update_tree_staging_state(
+    tree_rw: &Arc<RwLock<FileTree>>,
+    path: &std::path::PathBuf,
+    diff: &crate::diff::FileDiff,
+    default_staged: bool,
+) {
+    let mut has_staged = false;
+    let mut has_unstaged = false;
+    let mut current_idx = 0;
+
+    for h in &diff.hunks {
+        for line in &h.lines {
+            if matches!(
+                line,
+                crate::diff::DiffLine::Addition { .. } | crate::diff::DiffLine::Deletion { .. }
+            ) {
+                let is_staged = diff
+                    .line_selections
+                    .get(current_idx)
+                    .copied()
+                    .unwrap_or(default_staged);
+                if is_staged {
+                    has_staged = true;
+                } else {
+                    has_unstaged = true;
+                }
+            }
+            current_idx += 1;
+        }
+    }
+
+    let new_staging_state = if has_staged && has_unstaged {
+        crate::tree::StagingState::PartiallyStaged
+    } else if has_staged {
+        crate::tree::StagingState::Staged
+    } else {
+        crate::tree::StagingState::Unstaged
+    };
+
+    fn find_and_update(
+        nodes: &mut [crate::tree::TreeNode],
+        path: &std::path::PathBuf,
+        new_state: crate::tree::StagingState,
+    ) -> bool {
+        for node in nodes {
+            match node {
+                crate::tree::TreeNode::File(f) => {
+                    if f.path == *path {
+                        f.state = new_state;
+                        return true;
+                    }
+                }
+                crate::tree::TreeNode::Directory(d) => {
+                    if find_and_update(&mut d.children, path, new_state) {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    let mut tree = tree_rw.write();
+    find_and_update(&mut tree.nodes, path, new_staging_state);
+}
+
 fn toggle_stage_hunk_handler(
     tree_rw: &Arc<RwLock<FileTree>>,
     cache_rw: &Arc<RwLock<DiffCache>>,
@@ -142,66 +208,150 @@ fn toggle_stage_hunk_handler(
                 }
             }
 
-            let mut has_staged = false;
-            let mut has_unstaged = false;
-            let mut current_idx = 0;
-            for h in &diff.hunks {
-                for line in &h.lines {
-                    if matches!(
-                        line,
-                        crate::diff::DiffLine::Addition { .. }
-                            | crate::diff::DiffLine::Deletion { .. }
-                    ) {
-                        let is_staged = diff
-                            .line_selections
-                            .get(current_idx)
-                            .copied()
-                            .unwrap_or(default_staged);
-                        if is_staged {
-                            has_staged = true;
-                        } else {
-                            has_unstaged = true;
-                        }
-                    }
-                    current_idx += 1;
-                }
-            }
-
-            let new_staging_state = if has_staged && has_unstaged {
-                crate::tree::StagingState::PartiallyStaged
-            } else if has_staged {
-                crate::tree::StagingState::Staged
-            } else {
-                crate::tree::StagingState::Unstaged
-            };
-
-            // Update file state in tree
-            fn find_and_update(
-                nodes: &mut [crate::tree::TreeNode],
-                path: &std::path::PathBuf,
-                new_state: crate::tree::StagingState,
-            ) -> bool {
-                for node in nodes {
-                    match node {
-                        crate::tree::TreeNode::File(f) => {
-                            if f.path == *path {
-                                f.state = new_state;
-                                return true;
-                            }
-                        }
-                        crate::tree::TreeNode::Directory(d) => {
-                            if find_and_update(&mut d.children, path, new_state) {
-                                return true;
-                            }
-                        }
-                    }
-                }
-                false
-            }
-            let mut tree = tree_rw.write();
-            find_and_update(&mut tree.nodes, path, new_staging_state);
+            update_tree_staging_state(tree_rw, path, diff, default_staged);
         }
 
+        cache_rw.write().diffs.set(path.clone(), diff_result);
+    }
+}
+
+fn split_hunk_handler(
+    cache_rw: &Arc<RwLock<DiffCache>>,
+    path: &std::path::PathBuf,
+    hunk_idx: usize,
+    split_idx: usize,
+) {
+    let mut diff_clone = None;
+    if let Some(val) = cache_rw.read().diffs.get(path).value() {
+        diff_clone = Some(val.clone());
+    }
+
+    if let Some(mut diff_result) = diff_clone {
+        if let crate::diff::DiffResult::Text(ref mut diff) = diff_result {
+            if hunk_idx < diff.hunks.len() {
+                let hunk = &diff.hunks[hunk_idx];
+                if split_idx > 0 && split_idx < hunk.lines.len() {
+                    let mut hunk_a = hunk.clone();
+                    let mut hunk_b = hunk.clone();
+
+                    hunk_a.lines = hunk.lines[..split_idx].to_vec();
+                    hunk_b.lines = hunk.lines[split_idx..].to_vec();
+
+                    let mut old_idx = hunk.before_lines.start;
+                    let mut new_idx = hunk.after_lines.start;
+                    for line in &hunk_a.lines {
+                        match line {
+                            crate::diff::DiffLine::Context { .. } => {
+                                old_idx += 1;
+                                new_idx += 1;
+                            }
+                            crate::diff::DiffLine::Deletion { .. } => {
+                                old_idx += 1;
+                            }
+                            crate::diff::DiffLine::Addition { .. } => {
+                                new_idx += 1;
+                            }
+                        }
+                    }
+                    hunk_a.after_lines = hunk.after_lines.start..new_idx;
+                    hunk_a.before_lines = hunk.before_lines.start..old_idx;
+
+                    hunk_b.after_lines = new_idx..hunk.after_lines.end;
+                    hunk_b.before_lines = old_idx..hunk.before_lines.end;
+
+                    diff.hunks.remove(hunk_idx);
+                    diff.hunks.insert(hunk_idx, hunk_b);
+                    diff.hunks.insert(hunk_idx, hunk_a);
+                }
+            }
+        }
+        cache_rw.write().diffs.set(path.clone(), diff_result);
+    }
+}
+
+fn join_hunk_handler(
+    tree_rw: &Arc<RwLock<FileTree>>,
+    cache_rw: &Arc<RwLock<DiffCache>>,
+    path: &std::path::PathBuf,
+    hunk_idx: usize,
+) {
+    let mut diff_clone = None;
+    if let Some(val) = cache_rw.read().diffs.get(path).value() {
+        diff_clone = Some(val.clone());
+    }
+
+    if let Some(mut diff_result) = diff_clone {
+        if let crate::diff::DiffResult::Text(ref mut diff) = diff_result {
+            if hunk_idx > 0 && hunk_idx < diff.hunks.len() {
+                let prev_hunk = diff.hunks[hunk_idx - 1].clone();
+                let curr_hunk = diff.hunks[hunk_idx].clone();
+
+                // If they are contiguous, merge them back
+                if prev_hunk.after_lines.end == curr_hunk.after_lines.start {
+                    // 1. Synchronize sizing to avoid out of bounds
+                    let total_lines: usize = diff.hunks.iter().map(|h| h.lines.len()).sum();
+                    let default_staged = tree_rw
+                        .read()
+                        .get_file_state(path)
+                        .unwrap_or(crate::tree::StagingState::Unstaged)
+                        == crate::tree::StagingState::Staged;
+
+                    if diff.line_selections.len() != total_lines {
+                        diff.line_selections.resize(total_lines, default_staged);
+                    }
+
+                    // 2. Compute indexes in line_selections to fetch upper hunk state
+                    let mut current_line_idx = 0;
+                    for h in diff.hunks.iter().take(hunk_idx - 1) {
+                        current_line_idx += h.lines.len();
+                    }
+
+                    let prev_hunk_start = current_line_idx;
+                    let curr_hunk_start = prev_hunk_start + prev_hunk.lines.len();
+
+                    // Find the state of the first modified line in the upper hunk
+                    let mut prev_is_staged = default_staged;
+                    for (i, line) in prev_hunk.lines.iter().enumerate() {
+                        if matches!(
+                            line,
+                            crate::diff::DiffLine::Addition { .. }
+                                | crate::diff::DiffLine::Deletion { .. }
+                        ) {
+                            if let Some(&staged) = diff.line_selections.get(prev_hunk_start + i) {
+                                prev_is_staged = staged;
+                                break;
+                            }
+                        }
+                    }
+
+                    // Apply this state to all modified lines in the lower hunk
+                    for (i, line) in curr_hunk.lines.iter().enumerate() {
+                        if matches!(
+                            line,
+                            crate::diff::DiffLine::Addition { .. }
+                                | crate::diff::DiffLine::Deletion { .. }
+                        ) {
+                            if curr_hunk_start + i < diff.line_selections.len() {
+                                diff.line_selections[curr_hunk_start + i] = prev_is_staged;
+                            }
+                        }
+                    }
+
+                    // 3. Complete the merge
+                    let mut merged = prev_hunk.clone();
+                    merged.lines.extend(curr_hunk.lines);
+                    merged.before_lines = prev_hunk.before_lines.start..curr_hunk.before_lines.end;
+                    merged.after_lines = prev_hunk.after_lines.start..curr_hunk.after_lines.end;
+
+                    diff.hunks.remove(hunk_idx);
+                    diff.hunks.remove(hunk_idx - 1);
+                    diff.hunks.insert(hunk_idx - 1, merged);
+
+                    // Update the global tree node state in case lines flipping changed file completion state
+                    update_tree_staging_state(tree_rw, path, diff, default_staged);
+                }
+            }
+        }
         cache_rw.write().diffs.set(path.clone(), diff_result);
     }
 }
@@ -367,6 +517,45 @@ impl ViewFileStagingActionsHandler for AppActionsHandler {
         if let Some(ctx) = get_file_context(&view) {
             drop(view);
             toggle_stage_hunk_handler(&self.tree, &self.cache, &ctx.path, val as usize);
+        }
+    }
+
+    fn split(&self) {
+        let view = self.view.file_view.read();
+        if let Some(ctx) = get_file_context(&view) {
+            if let Some(mappings) = view.row_to_hunk.get(&ctx.path) {
+                if let Some(Some(hunk_idx)) = mappings.get(ctx.current_row_idx) {
+                    let hidx = *hunk_idx;
+                    if let Some(hunk_visual_start) = mappings.iter().position(|&h| h == Some(hidx))
+                    {
+                        drop(view);
+                        let split_idx = ctx.current_row_idx.saturating_sub(hunk_visual_start);
+
+                        if split_idx == 0 && hidx > 0 {
+                            let mut is_contiguous = false;
+                            if let Some(crate::diff::DiffResult::Text(diff)) =
+                                self.cache.read().diffs.get(&ctx.path).value()
+                            {
+                                if hidx < diff.hunks.len() {
+                                    if diff.hunks[hidx - 1].after_lines.end
+                                        == diff.hunks[hidx].after_lines.start
+                                    {
+                                        is_contiguous = true;
+                                    }
+                                }
+                            }
+                            if is_contiguous {
+                                join_hunk_handler(&self.tree, &self.cache, &ctx.path, hidx);
+                                return;
+                            }
+                        }
+
+                        if split_idx > 0 {
+                            split_hunk_handler(&self.cache, &ctx.path, hidx, split_idx);
+                        }
+                    }
+                }
+            }
         }
     }
 }

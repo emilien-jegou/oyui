@@ -34,7 +34,6 @@ impl ThemeActionsHandler for AppActionsHandler {
     }
 }
 
-// Macro to implement repetitive Color setters and getters cleanly
 macro_rules! impl_color_getset {
     ($trait_name:ident, $field:ident) => {
         impl $trait_name for AppActionsHandler {
@@ -47,6 +46,42 @@ macro_rules! impl_color_getset {
                 if let Some(c) = crate::actions::parse_hex_color(&val) {
                     self.state.write().theme.ui.$field = c;
                 }
+            }
+        }
+    };
+}
+
+macro_rules! impl_opt_color_getset {
+    ($trait_name:ident, $field:ident) => {
+        impl $trait_name for AppActionsHandler {
+            fn get(&self) -> String {
+                if let Some(color) = self.state.read().theme.ui.$field {
+                    color_to_hex(color)
+                } else {
+                    String::new()
+                }
+            }
+
+            fn set(&self, val: String) {
+                if val.is_empty() || val == "none" {
+                    self.state.write().theme.ui.$field = None;
+                } else if let Some(c) = crate::actions::parse_hex_color(&val) {
+                    self.state.write().theme.ui.$field = Some(c);
+                }
+            }
+        }
+    };
+}
+
+macro_rules! impl_string_getset {
+    ($trait_name:ident, $field:ident) => {
+        impl $trait_name for AppActionsHandler {
+            fn get(&self) -> String {
+                self.state.read().theme.ui.$field.clone()
+            }
+
+            fn set(&self, val: String) {
+                self.state.write().theme.ui.$field = val;
             }
         }
     };
@@ -65,6 +100,11 @@ impl_color_getset!(ThemeAddBgActionsHandler, add_bg);
 impl_color_getset!(ThemeDelBgActionsHandler, del_bg);
 impl_color_getset!(ThemeAddFgActionsHandler, add_fg);
 impl_color_getset!(ThemeDelFgActionsHandler, del_fg);
+impl_string_getset!(ThemeCharHunkSplitActionsHandler, char_hunk_split);
+impl_opt_color_getset!(ThemeCharHunkSplitColorActionsHandler, char_hunk_split_color);
+impl_string_getset!(ThemeCharIndicatorActionsHandler, char_indicator);
+impl_string_getset!(ThemeCharAddSignActionsHandler, char_add_sign);
+impl_string_getset!(ThemeCharDelSignActionsHandler, char_del_sign);
 
 impl ThemeFileStagedHighlightActionsHandler for AppActionsHandler {
     fn get(&self) -> LineHighlightMode {

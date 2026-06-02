@@ -54,4 +54,15 @@ pub struct UiTheme {
     pub file_change_highlight: LineHighlightMode,
     #[builder(default = 0.1)]
     pub file_change_highlight_opacity: f64,
+
+    #[builder(default = "◣".to_string())]
+    pub char_hunk_split: String,
+    #[builder(default = None)]
+    pub char_hunk_split_color: Option<Color>,
+    #[builder(default = "▎".to_string())]
+    pub char_indicator: String,
+    #[builder(default = "+ ".to_string())]
+    pub char_add_sign: String,
+    #[builder(default = "- ".to_string())]
+    pub char_del_sign: String,
 }

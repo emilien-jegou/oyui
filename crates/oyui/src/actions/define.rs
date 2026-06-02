@@ -29,6 +29,12 @@ define_actions! {
         file_staged_highlight_opacity { @getset(f64) }
         file_change_highlight { @getset(LineHighlightMode) }
         file_change_highlight_opacity { @getset(f64) }
+
+        char_hunk_split { @getset(String) }
+        char_hunk_split_color { @getset(String) }
+        char_indicator { @getset(String) }
+        char_add_sign { @getset(String) }
+        char_del_sign { @getset(String) }
     },
     view {
         file {
@@ -51,6 +57,7 @@ define_actions! {
             staging {
                 toggle(),
                 toggle_hunk(u32),
+                split(),
             },
             fold {
                 toggle(),

@@ -11,6 +11,8 @@ pub struct GutterIndicator<'a> {
     pub is_add: bool,
     pub is_del: bool,
     pub is_staged: bool,
+    #[builder(default)]
+    pub is_hunk_split: bool,
     pub bg_color: Option<Color>,
     pub theme: &'a UiTheme,
     #[builder(default)]
@@ -19,11 +21,18 @@ pub struct GutterIndicator<'a> {
 
 impl<'a> GutterIndicator<'a> {
     pub fn compute_style(&self) -> Style {
-        let fg: Color = if self.is_staged {
+        let mut fg: Color = if self.is_staged {
             self.theme.partial.into()
         } else {
             self.theme.dim.into()
         };
+
+        // Apply fallback logic: Use the specified color, otherwise defaults to the bar's staging color
+        if self.is_hunk_split {
+            if let Some(custom_color) = self.theme.char_hunk_split_color {
+                fg = custom_color.into();
+            }
+        }
 
         let mut sign_style = Style::default()
             .fg(fg)
@@ -37,8 +46,10 @@ impl<'a> GutterIndicator<'a> {
     }
 
     pub fn render(&self) -> Cell<'a> {
-        let sign_char = if self.is_add || self.is_del {
-            "▎"
+        let sign_char = if self.is_hunk_split {
+            self.theme.char_hunk_split.as_str()
+        } else if self.is_add || self.is_del {
+            self.theme.char_indicator.as_str()
         } else {
             " "
         };

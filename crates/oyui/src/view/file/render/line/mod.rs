@@ -5,7 +5,9 @@ use super::style::get_line_style;
 use crate::{config::UiTheme, diff::InlineChange};
 use gutter::{GutterConfig, GutterRenderer};
 use ratatui::{
-    layout::Constraint, style::Stylize, widgets::{Block, Borders, Row, Table}
+    layout::Constraint,
+    style::Stylize,
+    widgets::{Block, Borders, Row, Table},
 };
 use text::{TextConfig, TextRenderer};
 
@@ -30,13 +32,14 @@ pub struct LineRenderer<'a> {
     pub is_del: bool,
     pub is_selected: bool,
     pub is_staged: bool,
+    pub is_hunk_split: bool,
     pub inline_highlights: &'a [InlineChange],
     pub syntax_opt: Option<&'a Vec<Vec<(syntect::highlighting::Style, String)>>>,
     pub area_width: u16,
     pub use_gradient: bool,
     pub theme: &'a UiTheme,
     pub hscroll: usize,
-    
+
     pub gutter_config: GutterConfig,
     pub text_config: TextConfig,
 }
@@ -59,6 +62,7 @@ impl<'a> LineRenderer<'a> {
             is_del: self.is_del,
             is_selected: self.is_selected,
             is_staged: self.is_staged,
+            is_hunk_split: self.is_hunk_split,
             use_gradient: self.use_gradient,
             area_width: self.area_width,
             row_style,

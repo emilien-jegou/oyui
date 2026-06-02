@@ -31,14 +31,22 @@ impl<'a> GutterSign<'a> {
             let mut col = self.theme.add_fg.into();
             if !self.is_staged {
                 col = desaturate_color(col, 0.60);
-                col = if is_theme_dark { darken_color(col, 0.30) } else { lighten_color(col, 0.30) };
+                col = if is_theme_dark {
+                    darken_color(col, 0.30)
+                } else {
+                    lighten_color(col, 0.30)
+                };
             }
             prefix_style = prefix_style.fg(col);
         } else if self.is_del {
             let mut col = self.theme.del_fg.into();
             if !self.is_staged {
                 col = desaturate_color(col, 0.60);
-                col = if is_theme_dark { darken_color(col, 0.30) } else { lighten_color(col, 0.30) };
+                col = if is_theme_dark {
+                    darken_color(col, 0.30)
+                } else {
+                    lighten_color(col, 0.30)
+                };
             }
             prefix_style = prefix_style.fg(col);
         }
@@ -51,7 +59,13 @@ impl<'a> GutterSign<'a> {
     }
 
     pub fn render(&self) -> Cell<'a> {
-        let prefix = if self.is_add { "+ " } else if self.is_del { "- " } else { "  " };
+        let prefix = if self.is_add {
+            self.theme.char_add_sign.as_str()
+        } else if self.is_del {
+            self.theme.char_del_sign.as_str()
+        } else {
+            "  "
+        };
         let prefix_style = self.compute_base_style();
 
         let bg_calc = LineBgCalculator::new(

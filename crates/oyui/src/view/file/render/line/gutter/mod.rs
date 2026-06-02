@@ -35,6 +35,7 @@ pub struct GutterRenderer<'a> {
     pub is_del: bool,
     pub is_selected: bool,
     pub is_staged: bool,
+    pub is_hunk_split: bool,
     pub use_gradient: bool,
     pub area_width: u16,
     pub row_style: Style,
@@ -64,6 +65,7 @@ impl<'a> GutterRenderer<'a> {
                     .is_add(self.is_add)
                     .is_del(self.is_del)
                     .is_staged(self.is_staged)
+                    .is_hunk_split(self.is_hunk_split)
                     .bg_color(computed_number_style.bg)
                     .theme(self.theme)
                     .custom_style(self.config.indicator_style)
