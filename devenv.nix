@@ -8,6 +8,8 @@ in {
     pkgs.bacon
     pkgs.bun
     pkgs.wtype
+    pkgs.git-cliff
+    pkgs.gh
   ];
 
   languages.rust = {

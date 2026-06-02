@@ -18,6 +18,11 @@
       exec = "bacon";
     }
     {
+      cmd = "release";
+      desc = "Run release script";
+      exec = "bun ./scripts/release";
+    }
+    {
       cmd = "theme-screen";
       desc = "Generate the theme.md file";
       exec = "./scripts/theme-screen/script.ts";

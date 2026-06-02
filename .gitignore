@@ -1,5 +1,6 @@
 *
 !.envrc
+!cliff.toml
 !.gitignore
 !Cargo.lock
 !Cargo.toml

@@ -10,7 +10,7 @@
           ${builtins.concatStringsSep "\n" (map (s: ''
             "${s.cmd}")
               shift # removes $1 so we can pass "$@" to the underlying command if needed
-              ${s.exec}
+              ${s.exec} "$@"
               ;;
           '') scripts)}
           *) 
