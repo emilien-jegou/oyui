@@ -21,27 +21,27 @@ try {
 
 // ── colours ───────────────────────────────────────────────────────────────────
 const c = {
-  red:    (s: string) => `\x1b[31m${s}\x1b[0m`,
-  green:  (s: string) => `\x1b[32m${s}\x1b[0m`,
+  red: (s: string) => `\x1b[31m${s}\x1b[0m`,
+  green: (s: string) => `\x1b[32m${s}\x1b[0m`,
   yellow: (s: string) => `\x1b[33m${s}\x1b[0m`,
-  blue:   (s: string) => `\x1b[34m${s}\x1b[0m`,
-  bold:   (s: string) => `\x1b[1m${s}\x1b[0m`,
-  gray:   (s: string) => `\x1b[90m${s}\x1b[0m`,
+  blue: (s: string) => `\x1b[34m${s}\x1b[0m`,
+  bold: (s: string) => `\x1b[1m${s}\x1b[0m`,
+  gray: (s: string) => `\x1b[90m${s}\x1b[0m`,
 };
 
 const step = (msg: string) => console.log(`\n${c.bold(c.blue(`▶ ${msg}`))}`);
-const ok   = (msg: string) => console.log(`  ${c.green("✓")} ${msg}`);
+const ok = (msg: string) => console.log(`  ${c.green("✓")} ${msg}`);
 const warn = (msg: string) => console.log(`  ${c.yellow("⚠")} ${msg}`);
-const die  = (msg: string): never => { console.error(`\n${c.red(`✗ ${msg}`)}`); process.exit(1); };
+const die = (msg: string): never => { console.error(`\n${c.red(`✗ ${msg}`)}`); process.exit(1); };
 
 // ── args ──────────────────────────────────────────────────────────────────────
 const args = process.argv.slice(2);
 const flags = ["--dry-run", "--skip-crates-publish"];
 const bump = args.filter(a => !flags.includes(a))[0];
 
-const dryRun      = args.includes("--dry-run");
+const dryRun = args.includes("--dry-run");
 const skipPublish = args.includes("--skip-crates-publish");
-const root        = join(import.meta.dir, ".."); // script lives in scripts/, root is one level up
+const root = join(import.meta.dir, ".."); // script lives in scripts/, root is one level up
 
 if (!bump) {
   die("Usage: bun release.ts <patch|minor|major|X.Y.Z> [--dry-run] [--skip-crates-publish]");
@@ -99,11 +99,11 @@ async function run(cmd: string[], opts: { cwd?: string; allowFailure?: boolean }
 }
 
 async function which(bin: string): Promise<boolean> {
-  try { 
-    await run(["which", bin], { allowFailure: true }); 
-    return true; 
-  } catch { 
-    return false; 
+  try {
+    await run(["which", bin], { allowFailure: true });
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -134,7 +134,7 @@ function hasCargoToken(): boolean {
           return true;
         }
       }
-    } catch {}
+    } catch { }
   }
   return false;
 }
@@ -162,12 +162,12 @@ function getTargetBinaries(target: string): string[] {
       if (stat.isFile()) {
         const isExe = target.includes("windows") ? f.endsWith(".exe") : (stat.mode & 0o111) !== 0;
         const stem = f.replace(/\.exe$/i, "");
-        
+
         if (isExe && workspaceCrates.includes(stem)) {
           bins.push(path);
         }
       }
-    } catch {}
+    } catch { }
   }
   return bins;
 }
@@ -255,7 +255,7 @@ else ok("Working copy clean");
 step("Version");
 
 const mainToml = await Bun.file(join(root, "crates/oyui/Cargo.toml")).text();
-const current  = mainToml.match(/^version = "(.+?)"/m)?.[1] ?? die("Could not read current version");
+const current = mainToml.match(/^version = "(.+?)"/m)?.[1] ?? die("Could not read current version");
 
 const isExplicit = /^\d+\.\d+\.\d+$/.test(bump);
 if (!isExplicit && !["patch", "minor", "major"].includes(bump)) die(`Invalid bump '${bump}'`);
@@ -365,7 +365,7 @@ if (liveRun) {
     for (const binPath of binaries) {
       const binName = binPath.split("/").pop()!;
       const stemName = binName.replace(/\.exe$/i, "");
-      
+
       // Directory name layout: syndiff-v0.1.0-x86_64-apple-darwin
       const pkgName = `${stemName}-v${next}-${target}`;
       const pkgDir = join(distDir, pkgName);
@@ -373,7 +373,7 @@ if (liveRun) {
 
       // Copy executable binary into directory
       await run(["cp", binPath, join(pkgDir, binName)]);
-      
+
       // Copy accompanying documents into directory if present
       for (const doc of ["README.md", "LICENSE", "LICENSE-MIT", "LICENSE-APACHE", "CHANGELOG.md"]) {
         const docPath = join(root, doc);
@@ -385,7 +385,7 @@ if (liveRun) {
       const isWin = target.includes("windows");
       const ext = isWin ? ".zip" : ".tar.gz";
       const archivePath = join(distDir, `${pkgName}${ext}`);
-      
+
       console.log(`    Creating package: ${c.gray(`${pkgName}${ext}`)}`);
       await createArchive(pkgDir, archivePath);
       archiveAssets.push(archivePath);
@@ -409,13 +409,11 @@ if (skipPublish) {
   warn("[dry-run] would: cargo publish --workspace");
 }
 
-// ── github release ────────────────────────────────────────────────────────────
 step("GitHub release");
 
 if (await which("gh")) {
   let notes = "";
   if (await which("git-cliff")) {
-    // Extract changelog for the latest tag (v${next}) since tag is set
     notes = await run(["git-cliff", "--config", join(root, "cliff.toml"), "--latest", "--strip", "all"]).catch(() => "");
   }
 
@@ -434,6 +432,5 @@ if (await which("gh")) {
   warn(`Create the release manually at: https://github.com/emilien-jegou/oyui/releases/new`);
 }
 
-// ── done ──────────────────────────────────────────────────────────────────────
 const doneMsg = liveRun ? `✓ Released v${next}` : `✓ Dry run complete — rerun without --dry-run to release v${next}`;
 console.log(`\n${c.bold(c.green(doneMsg))}\n`);
