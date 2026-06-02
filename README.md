@@ -1,9 +1,8 @@
 # Oyui
 
-**Oyui** is the most advanced TUI merge tool and staging interface for [Jujutsu](https://github.com/martinvonz/jj) and Git.
+**Oyui** is a modern TUI merge tool and staging interface for [Jujutsu](https://github.com/martinvonz/jj) and Git.
 
-![Redesign screenshot](./docs/assets/themes/weywot-1.png)
-
+![Simple merge edition](./docs/assets/output.gif)
 
 ## Features
 
