@@ -7,6 +7,16 @@
 //   bun release.ts patch --dry-run
 
 import { join } from "path";
+import { writeFileSync, appendFileSync, existsSync, readFileSync } from "fs";
+import { homedir } from "os";
+
+const logPath = "/tmp/oyui-release.log";
+
+try {
+  writeFileSync(logPath, `=== Release Session: ${new Date().toISOString()} ===\n\n`);
+} catch (e) {
+  // Graceful fallback if /tmp is not writable
+}
 
 // ── colours ───────────────────────────────────────────────────────────────────
 const c = {
@@ -15,6 +25,7 @@ const c = {
   yellow: (s: string) => `\x1b[33m${s}\x1b[0m`,
   blue:   (s: string) => `\x1b[34m${s}\x1b[0m`,
   bold:   (s: string) => `\x1b[1m${s}\x1b[0m`,
+  gray:   (s: string) => `\x1b[90m${s}\x1b[0m`,
 };
 
 const step = (msg: string) => console.log(`\n${c.bold(c.blue(`▶ ${msg}`))}`);
@@ -34,12 +45,26 @@ if (!bump) die("Usage: bun release.ts <patch|minor|major|X.Y.Z> [--dry-run]");
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 async function run(cmd: string[], opts: { cwd?: string; allowFailure?: boolean } = {}) {
+  console.log(`  ${c.gray(`$ ${cmd.join(" ")}`)}`);
+
   const proc = Bun.spawn(cmd, { cwd: opts.cwd ?? root, stdout: "pipe", stderr: "pipe" });
   const [out, err, code] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
     proc.exited,
   ]);
+
+  try {
+    let logEntry = `[${new Date().toISOString()}] Command: ${cmd.join(" ")}\n`;
+    logEntry += `Exit Code: ${code}\n`;
+    if (out.trim()) logEntry += `Stdout:\n${out.trim()}\n`;
+    if (err.trim()) logEntry += `Stderr:\n${err.trim()}\n`;
+    logEntry += `----------------------------------------\n`;
+    appendFileSync(logPath, logEntry);
+  } catch {
+    // Ignore logging write failures
+  }
+
   if (code !== 0) {
     if (opts.allowFailure) {
       throw new Error(err.trim());
@@ -71,6 +96,25 @@ function confirm(msg: string): boolean {
   return ans?.trim().toLowerCase() === "y";
 }
 
+function hasCargoToken(): boolean {
+  if (process.env.CARGO_REGISTRY_TOKEN) return true;
+  const paths = [
+    join(homedir(), ".cargo/credentials.toml"),
+    join(homedir(), ".cargo/credentials")
+  ];
+  for (const p of paths) {
+    try {
+      if (existsSync(p)) {
+        const content = readFileSync(p, "utf-8");
+        if (/token\s*=/i.test(content)) {
+          return true;
+        }
+      }
+    } catch {}
+  }
+  return false;
+}
+
 // ── preflight ─────────────────────────────────────────────────────────────────
 step("Preflight checks");
 
@@ -78,8 +122,44 @@ const fail = dryRun
   ? (msg: string) => warn(`[ignored in dry-run] ${msg}`)
   : die;
 
+for (const bin of ["cargo", "jj", "gh"]) {
+  if (!await which(bin)) die(`${bin} not found`);
+}
+ok("Required tools present");
+
+// Verify GitHub authentication
+const ghAuth = await run(["gh", "auth", "status"], { allowFailure: true }).catch(() => null);
+if (ghAuth === null) {
+  fail("GitHub CLI (gh) is not authenticated. Run 'gh auth login' first.");
+} else {
+  ok("GitHub authenticated");
+}
+
+// Verify repository permissions on GitHub
+const repoView = await run(["gh", "repo", "view", "--json", "viewerPermission"], { allowFailure: true }).catch(() => null);
+if (repoView === null) {
+  fail("Could not verify GitHub repository permissions. Ensure a remote exists and is reachable.");
+} else {
+  try {
+    const { viewerPermission } = JSON.parse(repoView);
+    if (viewerPermission === "ADMIN" || viewerPermission === "WRITE") {
+      ok(`GitHub repository permissions verified (${viewerPermission})`);
+    } else {
+      fail(`Insufficient GitHub permissions: ${viewerPermission}. WRITE or ADMIN access is required.`);
+    }
+  } catch {
+    fail("Failed to parse GitHub repository permissions payload.");
+  }
+}
+
+// Verify crates.io token
+if (hasCargoToken()) {
+  ok("crates.io registry token found");
+} else {
+  fail("No crates.io token found. Run 'cargo login' or set CARGO_REGISTRY_TOKEN.");
+}
+
 // In jj, @ may be ahead of main — check that main bookmark is a reachable ancestor
-// main::@ checks for descendants of main that are also ancestors of @
 const ancestorCheck = await run(["jj", "log", "-r", "main::@", "--no-graph", "-T", "change_id"], { allowFailure: true })
   .catch(() => null);
 
@@ -94,11 +174,6 @@ if (ancestorCheck === null) {
 const dirty = await run(["jj", "diff"]);
 if (dirty) fail(`Working copy has uncommitted changes — stash or describe them first.\n${dirty}`);
 else ok("Working copy clean");
-
-for (const bin of ["cargo", "jj"]) {
-  if (!await which(bin)) die(`${bin} not found`);
-}
-ok("Required tools present");
 
 // ── version ───────────────────────────────────────────────────────────────────
 step("Version");
@@ -180,7 +255,7 @@ if (liveRun) {
   await run(["jj", "bookmark", "set", "main", "-r", "@-"]);
   // Tag the release commit
   await run(["jj", "tag", "set", `v${next}`, "-r", "@-"]);
-  // Force a git sync so downstream tools see it (highly recommended for non-colocated setups)
+  // Force a git sync so downstream tools see it
   await run(["jj", "git", "export"]);
   // Push both the main bookmark and the tag to remote
   await run(["jj", "git", "push", "--bookmark", "main"]);
@@ -199,7 +274,6 @@ if (liveRun) {
 step("Publishing to crates.io");
 
 if (liveRun) {
-  // Cargo natively supports workspace-wide publishes in dependency topological order
   await run(["cargo", "publish", "--workspace"]);
   ok("All workspace crates published");
 } else {
