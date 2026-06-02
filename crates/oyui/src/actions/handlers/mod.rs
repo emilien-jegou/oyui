@@ -153,6 +153,9 @@ pub fn dispatch_action(action: &Action, handler: &AppActionsHandler) {
                         ViewFileStagingActionsHandler::toggle_hunk(handler, *val)
                     }
                     ViewFileStagingActions::split => ViewFileStagingActionsHandler::split(handler),
+                    ViewFileStagingActions::invert => {
+                        ViewFileStagingActionsHandler::invert(handler)
+                    }
                 },
                 ViewFileActions::fold(fold_act) => match fold_act {
                     ViewFileFoldActions::toggle => ViewFileFoldActionsHandler::toggle(handler),

@@ -558,6 +558,67 @@ impl ViewFileStagingActionsHandler for AppActionsHandler {
             }
         }
     }
+
+    fn invert(&self) {
+        let view = self.view.file_view.read();
+        if let Some(ctx) = get_file_context(&view) {
+            drop(view);
+
+            let mut diff_clone = None;
+            if let Some(val) = self.cache.read().diffs.get(&ctx.path).value() {
+                diff_clone = Some(val.clone());
+            }
+
+            if let Some(mut diff_result) = diff_clone {
+                if let crate::diff::DiffResult::Text(ref mut diff) = diff_result {
+                    let total_lines: usize = diff.hunks.iter().map(|h| h.lines.len()).sum();
+
+                    let default_staged = self
+                        .tree
+                        .read()
+                        .get_file_state(&ctx.path)
+                        .unwrap_or(crate::tree::StagingState::Unstaged)
+                        == crate::tree::StagingState::Staged;
+
+                    if diff.line_selections.len() != total_lines {
+                        diff.line_selections.resize(total_lines, default_staged);
+                    }
+
+                    for b in &mut diff.line_selections {
+                        *b = !*b;
+                    }
+
+                    update_tree_staging_state(&self.tree, &ctx.path, diff, !default_staged);
+                } else {
+                    // For non-text diffs, we simply toggle the file tree state directly.
+                    let mut tree = self.tree.write();
+                    fn find_and_toggle(
+                        nodes: &mut [crate::tree::TreeNode],
+                        path: &std::path::PathBuf,
+                    ) -> bool {
+                        for node in nodes {
+                            match node {
+                                crate::tree::TreeNode::File(f) => {
+                                    if f.path == *path {
+                                        f.state = f.state.toggle();
+                                        return true;
+                                    }
+                                }
+                                crate::tree::TreeNode::Directory(d) => {
+                                    if find_and_toggle(&mut d.children, path) {
+                                        return true;
+                                    }
+                                }
+                            }
+                        }
+                        false
+                    }
+                    find_and_toggle(&mut tree.nodes, &ctx.path);
+                }
+                self.cache.write().diffs.set(ctx.path.clone(), diff_result);
+            }
+        }
+    }
 }
 
 impl ViewFileFoldActionsHandler for AppActionsHandler {
@@ -591,3 +652,4 @@ impl ViewFileFoldActionsHandler for AppActionsHandler {
         }
     }
 }
+

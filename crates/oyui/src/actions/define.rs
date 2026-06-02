@@ -58,6 +58,7 @@ define_actions! {
                 toggle(),
                 toggle_hunk(u32),
                 split(),
+                invert(),
             },
             fold {
                 toggle(),
