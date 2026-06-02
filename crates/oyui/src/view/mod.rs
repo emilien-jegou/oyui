@@ -2,6 +2,7 @@ pub mod config_error;
 pub mod file;
 pub mod tree;
 
+use crate::commons::file_icon::DevIconProvider;
 use crate::config::UiTheme;
 use crate::diff_cache::DiffCache;
 use crate::tree::FileTree;
@@ -44,6 +45,7 @@ impl View {
         let current = *self.current.read();
         match current {
             ViewKind::Tree => self.tree_view.write().draw(
+                Box::new(DevIconProvider),
                 frame,
                 area,
                 tree,

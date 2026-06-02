@@ -1,3 +1,4 @@
+use crate::commons::file_icon::FileIconProvider;
 use crate::commons::lazy;
 use crate::config::UiTheme;
 use crate::diff_cache::DiffCache;
@@ -66,6 +67,7 @@ impl TreeViewData {
     #[tracing::instrument(skip_all)]
     pub fn draw(
         &mut self,
+        icon_provider: Box<dyn FileIconProvider>,
         frame: &mut Frame,
         area: Rect,
         tree: &FileTree,
@@ -77,7 +79,7 @@ impl TreeViewData {
         let [header, body] =
             Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(area);
         self.draw_header(frame, header, cache, base_path, diff_summary, theme);
-        self.draw_tree_body(frame, body, tree, cache, theme);
+        self.draw_tree_body(icon_provider, frame, body, tree, cache, theme);
     }
 
     fn draw_header(
@@ -149,6 +151,7 @@ impl TreeViewData {
 
     fn draw_tree_body(
         &mut self,
+        icon_provider: Box<dyn FileIconProvider>,
         frame: &mut Frame,
         area: Rect,
         tree: &FileTree,
@@ -156,7 +159,10 @@ impl TreeViewData {
         theme: &UiTheme,
     ) {
         let rows = self.flat_rows(tree, cache);
-        let items: Vec<ListItem> = rows.iter().map(|r| render_tree_row(r, theme)).collect();
+        let items: Vec<ListItem> = rows
+            .iter()
+            .map(|r| render_tree_row(&icon_provider, r, theme))
+            .collect();
         self.list_state.select(Some(self.selected_index));
 
         let height = area.height as usize;
@@ -288,7 +294,11 @@ fn flatten_recursive(
     }
 }
 
-fn render_tree_row<'a>(row: &'a TreeRow, theme: &'a UiTheme) -> ListItem<'a> {
+fn render_tree_row<'a>(
+    icon_provider: &Box<dyn FileIconProvider>,
+    row: &'a TreeRow,
+    theme: &'a UiTheme,
+) -> ListItem<'a> {
     let mut spans = Vec::new();
 
     // 1. Determine the base color for the entire row based on status
@@ -339,9 +349,9 @@ fn render_tree_row<'a>(row: &'a TreeRow, theme: &'a UiTheme) -> ListItem<'a> {
             Style::default().fg(theme.dir.into()).bold(),
         ));
     } else {
-        let icon = get_file_icon(&row.name, theme);
-        // Using base_fg for the icon and filename to color the whole row
-        spans.push(Span::styled(icon.0, Style::default().fg(base_fg)));
+        let icon = icon_provider.get_file_icon(&row.name);
+
+        spans.push(Span::styled(icon.to_string(), Style::default().fg(base_fg)));
         spans.push(Span::raw(" "));
         spans.push(Span::styled(
             row.name.as_str(),
@@ -389,16 +399,4 @@ fn render_tree_row<'a>(row: &'a TreeRow, theme: &'a UiTheme) -> ListItem<'a> {
     }
 
     ListItem::new(Line::from(spans))
-}
-
-fn get_file_icon(name: &str, theme: &UiTheme) -> (&'static str, Color) {
-    let ext = name.split('.').next_back().unwrap_or("");
-    match ext {
-        "tsx" | "jsx" => ("", theme.dir.into()),
-        "ts" | "js" => ("", theme.partial.into()),
-        "svg" => ("󰕙", theme.partial.into()),
-        "md" => ("", theme.fg.into()),
-        "json" => ("", theme.partial.into()),
-        _ => ("󰈚", theme.dim.into()),
-    }
 }

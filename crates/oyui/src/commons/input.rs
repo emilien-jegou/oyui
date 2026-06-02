@@ -148,9 +148,11 @@ impl Keybinds {
     pub fn char(c: char) -> Self {
         Self(vec![Keybind::Char(c.to_string())])
     }
+
     pub fn code(c: KeyCode) -> Self {
         Self(vec![Keybind::Code(Self::code_to_string(c))])
     }
+
     pub fn with_char(mut self, c: char) -> Self {
         self.0.push(Keybind::Char(c.to_string()));
         self
@@ -166,11 +168,13 @@ impl Keybinds {
         self.0.push(Keybind::Code(Self::code_to_string(c)));
         self
     }
+
     pub fn with_ctrl(mut self, c: char) -> Self {
         self.0
             .push(Keybind::Combination(Modifier::Ctrl, c.to_string()));
         self
     }
+
     pub fn with_ctrl_code(mut self, c: KeyCode) -> Self {
         self.0.push(Keybind::CodeCombination(
             Modifier::Ctrl,
