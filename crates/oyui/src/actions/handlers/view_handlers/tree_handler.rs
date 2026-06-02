@@ -115,12 +115,87 @@ impl ViewTreeStagingActionsHandler for AppActionsHandler {
     fn invert(&self) {
         tracing::debug!("Inverting all staging selections");
         let mut tree_write = self.tree.write();
-        for node in &mut tree_write.nodes {
-            node.invert_state_recursive();
+        let mut cache_write = self.cache.write();
+
+        fn invert_recursive(
+            nodes: &mut [crate::tree::TreeNode],
+            cache: &mut crate::diff_cache::DiffCache,
+        ) {
+            for node in nodes {
+                match node {
+                    crate::tree::TreeNode::File(f) => {
+                        let mut diff_clone = None;
+                        if let Some(val) = cache.diffs.get(&f.path).value() {
+                            diff_clone = Some(val.clone());
+                        }
+
+                        if let Some(mut diff_result) = diff_clone {
+                            if let crate::diff::DiffResult::Text(ref mut diff) = diff_result {
+                                let total_lines: usize =
+                                    diff.hunks.iter().map(|h| h.lines.len()).sum();
+                                let default_staged = f.state == crate::tree::StagingState::Staged;
+
+                                // Sync boolean array length first
+                                if diff.line_selections.len() != total_lines {
+                                    diff.line_selections.resize(total_lines, default_staged);
+                                }
+
+                                // Invert every item individually, preserving sub-hunk boundaries
+                                for b in &mut diff.line_selections {
+                                    *b = !*b;
+                                }
+
+                                // Evaluate new StagingState based on inverted line_selections
+                                let mut has_staged = false;
+                                let mut has_unstaged = false;
+                                let mut current_idx = 0;
+                                for h in &diff.hunks {
+                                    for line in &h.lines {
+                                        if matches!(
+                                            line,
+                                            crate::diff::DiffLine::Addition { .. }
+                                                | crate::diff::DiffLine::Deletion { .. }
+                                        ) {
+                                            let is_staged = diff
+                                                .line_selections
+                                                .get(current_idx)
+                                                .copied()
+                                                .unwrap_or(!default_staged);
+                                            if is_staged {
+                                                has_staged = true;
+                                            } else {
+                                                has_unstaged = true;
+                                            }
+                                        }
+                                        current_idx += 1;
+                                    }
+                                }
+
+                                f.state = if has_staged && has_unstaged {
+                                    crate::tree::StagingState::PartiallyStaged
+                                } else if has_staged {
+                                    crate::tree::StagingState::Staged
+                                } else {
+                                    crate::tree::StagingState::Unstaged
+                                };
+                            } else {
+                                // For non-text diffs, typical fallback to simple toggle
+                                f.state = f.state.toggle();
+                            }
+                            cache.diffs.set(f.path.clone(), diff_result);
+                        } else {
+                            // If diff isn't cached yet, fallback to a simple toggle
+                            f.state = f.state.toggle();
+                        }
+                    }
+                    crate::tree::TreeNode::Directory(d) => {
+                        invert_recursive(&mut d.children, cache);
+                    }
+                }
+            }
         }
 
-        let mut cache_write = self.cache.write();
-        sync_cache(&tree_write, &mut cache_write);
+        invert_recursive(&mut tree_write.nodes, &mut cache_write);
     }
 }
 
