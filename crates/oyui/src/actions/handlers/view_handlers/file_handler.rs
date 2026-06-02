@@ -1,9 +1,9 @@
-use crate::actions::*;
 use crate::actions::handlers::AppActionsHandler;
-use crate::tree::FileTree;
+use crate::actions::*;
 use crate::diff_cache::DiffCache;
-use std::sync::Arc;
+use crate::tree::FileTree;
 use parking_lot::RwLock;
+use std::sync::Arc;
 
 struct FileContext {
     path: std::path::PathBuf,
@@ -28,7 +28,7 @@ fn get_file_context(view: &crate::view::file::FileViewData) -> Option<FileContex
         )
     };
     let cursor_screen_offset = current_row_idx.saturating_sub(current_offset);
-    
+
     Some(FileContext {
         path,
         max_idx,
@@ -234,24 +234,6 @@ fn get_target_stage_action(
     target_hunk
 }
 
-fn toggle_file_staging(
-    tree_rw: &Arc<RwLock<FileTree>>,
-    cache_rw: &Arc<RwLock<DiffCache>>,
-    path: &std::path::PathBuf,
-) {
-    let new_state = {
-        let tree_guard = tree_rw.read();
-        let current_state = tree_guard.get_file_state(path).unwrap_or(crate::tree::StagingState::Unstaged);
-        current_state.toggle()
-    };
-    
-    let mut tree_write = tree_rw.write();
-    crate::app::commands::set_state_for_path(&mut tree_write, path, new_state);
-    
-    let mut cache_write = cache_rw.write();
-    super::tree_handler::sync_cache(&tree_write, &mut cache_write);
-}
-
 impl ViewFileActionsHandler for AppActionsHandler {
     fn close(&self) {
         *self.view.current.write() = crate::view::ViewKind::Tree;
@@ -281,7 +263,8 @@ impl ViewFileCursorActionsHandler for AppActionsHandler {
     fn up(&self, val: u32) {
         let mut view = self.view.file_view.write();
         if let Some(ctx) = get_file_context(&view) {
-            let target_row = (ctx.current_row_idx as isize - val as isize).clamp(0, ctx.max_idx as isize) as usize;
+            let target_row = (ctx.current_row_idx as isize - val as isize)
+                .clamp(0, ctx.max_idx as isize) as usize;
             update_scroll_state(&mut view, &ctx.path, target_row, None);
         }
     }
@@ -289,7 +272,8 @@ impl ViewFileCursorActionsHandler for AppActionsHandler {
     fn down(&self, val: u32) {
         let mut view = self.view.file_view.write();
         if let Some(ctx) = get_file_context(&view) {
-            let target_row = (ctx.current_row_idx as isize + val as isize).clamp(0, ctx.max_idx as isize) as usize;
+            let target_row = (ctx.current_row_idx as isize + val as isize)
+                .clamp(0, ctx.max_idx as isize) as usize;
             update_scroll_state(&mut view, &ctx.path, target_row, None);
         }
     }
@@ -369,12 +353,11 @@ impl ViewFileStagingActionsHandler for AppActionsHandler {
         if let Some(ctx) = get_file_context(&view) {
             drop(view);
             let view_read = self.view.file_view.read();
-            if let Some(hunk_idx) = get_target_stage_action(&view_read, &ctx.path, ctx.current_row_idx) {
-                drop(view_read);
+
+            let hidx = get_target_stage_action(&view_read, &ctx.path, ctx.current_row_idx);
+            drop(view_read);
+            if let Some(hunk_idx) = hidx {
                 toggle_stage_hunk_handler(&self.tree, &self.cache, &ctx.path, hunk_idx);
-            } else {
-                drop(view_read);
-                toggle_file_staging(&self.tree, &self.cache, &ctx.path);
             }
         }
     }
@@ -400,7 +383,9 @@ impl ViewFileFoldActionsHandler for AppActionsHandler {
 
             view.is_folded = !view.is_folded;
 
-            let next_selected = if let Some(crate::diff::DiffResult::Text(diff)) = cache.diffs.get(&ctx.path).value() {
+            let next_selected = if let Some(crate::diff::DiffResult::Text(diff)) =
+                cache.diffs.get(&ctx.path).value()
+            {
                 let new_lines_len = diff.new_text.lines().count();
                 let new_map = view.get_line_map(diff, new_lines_len);
 
