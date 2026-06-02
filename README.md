@@ -1,5 +1,6 @@
 # Oyui
 
+![GitHub top language](https://img.shields.io/github/languages/top/emilien-jegou/oyui)
 [![Crates.io](https://img.shields.io/crates/v/oyui.svg)](https://crates.io/crates/oyui)
 ![Cargo Downloads](https://img.shields.io/crates/d/oyui?label=cargo)
 ![GitHub Downloads](https://img.shields.io/github/downloads/emilien-jegou/oyui/total?label=github)
