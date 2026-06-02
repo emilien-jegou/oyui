@@ -439,12 +439,7 @@ impl ViewFileCursorActionsHandler for AppActionsHandler {
     fn top(&self) {
         let mut view = self.view.file_view.write();
         if let Some(ctx) = get_file_context(&view) {
-            if view.pending_g {
-                update_scroll_state(&mut view, &ctx.path, 0, None);
-                view.pending_g = false;
-            } else {
-                view.pending_g = true;
-            }
+            update_scroll_state(&mut view, &ctx.path, 0, None);
         }
     }
 
@@ -652,4 +647,3 @@ impl ViewFileFoldActionsHandler for AppActionsHandler {
         }
     }
 }
-

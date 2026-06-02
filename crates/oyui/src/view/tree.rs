@@ -34,7 +34,6 @@ pub struct TreeRow {
 pub struct TreeViewData {
     pub selected_index: usize,
     pub ui_state: TreeUiState,
-    pub pending_g: bool,
     pub scrolloff: usize,
     pub list_state: ListState,
 }

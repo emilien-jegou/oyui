@@ -155,6 +155,13 @@ impl Keybinds {
         self.0.push(Keybind::Char(c.to_string()));
         self
     }
+
+    pub fn with_shift(mut self, c: char) -> Self {
+        self.0
+            .push(Keybind::Combination(Modifier::Shift, c.to_string()));
+        self
+    }
+
     pub fn with_code(mut self, c: KeyCode) -> Self {
         self.0.push(Keybind::Code(Self::code_to_string(c)));
         self
