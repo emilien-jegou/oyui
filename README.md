@@ -74,7 +74,7 @@ pub fn config() {
   // Overwritting theme specific config.
 
   // 50+ actions and settings to configure, check the documentation:
-  // https://github.com/emilien-jegou/oyui/blob/main/docs/actions-api.md
+  // https://github.com/emilien-jegou/oyui/wiki/Actions-API
   theme::bg::set("#000000");
   file_staged_highlight::set(LineHighlightMode::Gradient(0.05));
 
@@ -127,7 +127,7 @@ while on the config file.
 
 ## 🗺️ Roadmap & Feedback
 
-Follow the progress of new features on the [Feature Tracking page](./docs/feature-tracking.md). Have an idea? [Open an issue](https://github.com/emilien-jegou/oyui/issues/new)!
+Follow the progress of new features on the [Feature Tracking page](https://github.com/emilien-jegou/oyui/wiki/Feature-tracking). Have an idea? [Open an issue](https://github.com/emilien-jegou/oyui/issues/new)!
 
 
 ## 🙏 Credits
