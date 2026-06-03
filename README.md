@@ -15,8 +15,8 @@
 
 *   🔧 **Scriptable config with hot reload:** Your config is a script much like how vim use lua or emacs use lisp, oyui use rune! modify it and see changes live.
 *   🖥️ **Command Palette:** Perform bulk operations with simple commands.
-    *   `:add ./icons/*` (or `:a`) to stage files.
-    *   `:unstage ./icons/*` (or `:u`) to unstage files.
+    *   `:add **/*md` -- to stage all markdown files in diff.
+    *   `:unstage **/*md` -- to unstage them.
 *   🔢 **Binary support:** Infer binary files format using their [magic number signature](https://en.wikipedia.org/wiki/Magic_number_(programming)).
 *   🧠 **Config LSP:** Oyui come with a complex type-safe LSP builtin, set it up and avoid configuration error.
 *   🎨 **Theming:** 40+ builtin themes, check [full list](./docs/themes.md).
@@ -26,14 +26,7 @@
 
 ## Why Another merge editor?
 
-While Jujutsu is a powerful VCS, I found the built-in diff-editing experience (via `scm-record`) to be limited. It lacked syntax highlighting, was mostly monochromatic, and made it difficult to visualize the impact of changes across full files. Although some more polished solution like `lightjj` exist (web based), we were missing a modern TUI merge editor.
-
-I built **Oyui** to bridge this gap, focusing on a friction-free experience with:
-*   🗂 **Intuitive:** One view, natural navigation, simple UX.
-*   👁️ **Visual Clarity:** Balanced, and color-coded tree-view that is easy on the eyes.
-*   ⌨️ **Keyboard-First:** Simple keybinds, hjkl (following vim tradition) or arrow key.
-*   ⚡ **Efficient Workflow:** Perform bulk actions (like staging by folder) instantly via the command palette. see feature section.
-
+While Jujutsu is a powerful VCS, the built-in diff-editing experience (via `scm-record`) is quite limited. It lack syntax highlighting, is mostly monochromatic, and made it difficult to visualize the impact of changes across full files. Although some more polished solution like `lightjj` exist (web based), we were missing a modern TUI merge editor.
 
 ## 📦 Installation
 
@@ -75,7 +68,7 @@ pub fn config() {
   // one-dark, everforest-light...
   //
   // Full list at:
-  // https://github.com/emilien-jegou/oyui/tree/main/docs/themes
+  // https://github.com/emilien-jegou/oyui/tree/main/docs/themes.md
   theme::set("weywot");
 
   // Overwritting theme specific config.

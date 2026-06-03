@@ -10,3 +10,4 @@ Bug should still be reported in github issues.
 ## Weird behavior
 - Solid/Gradient highlight on change differ in logic when hunk is staged
 - `invert` command doesn't specify whether it's inverting the file or the tree
+- live-reloading doesn't take into account theme reset, if I remove a theme::set it's still stay active
