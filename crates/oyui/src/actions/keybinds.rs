@@ -200,6 +200,22 @@ pub fn default_keybinds() -> KeybindRegistry {
                 Keybinds::new().with_ctrl('u'),
                 ViewFileCursorActions::half_page_up,
             )
+            .register(
+                Keybinds::new().with_ctrl('b'),
+                ViewFileCursorActions::page_up,
+            )
+            .register(
+                Keybinds::new().with_ctrl('f'),
+                ViewFileCursorActions::page_down,
+            )
+            .register(
+                Keybinds::code(KeyCode::PageUp),
+                ViewFileCursorActions::page_up,
+            )
+            .register(
+                Keybinds::code(KeyCode::PageDown),
+                ViewFileCursorActions::page_down,
+            )
             .register(Keybinds::new().with_shift('G'), ViewFileCursorActions::bottom)
             .register(Keybinds::char('g'), ViewFileCursorActions::top)
             .register(Keybinds::char('n'), ViewFileNavActions::next_hunk)
@@ -217,6 +233,22 @@ pub fn default_keybinds() -> KeybindRegistry {
             .register(
                 Keybinds::new().with_ctrl('u'),
                 ViewTreeCursorActions::up(20),
+            )
+            .register(
+                Keybinds::new().with_ctrl('b'),
+                ViewTreeCursorActions::page_up,
+            )
+            .register(
+                Keybinds::new().with_ctrl('f'),
+                ViewTreeCursorActions::page_down,
+            )
+            .register(
+                Keybinds::code(KeyCode::PageUp),
+                ViewTreeCursorActions::page_up,
+            )
+            .register(
+                Keybinds::code(KeyCode::PageDown),
+                ViewTreeCursorActions::page_down,
             )
             .register(
                 Keybinds::char('j').with_code(KeyCode::Down),
