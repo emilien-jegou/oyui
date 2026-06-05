@@ -59,6 +59,7 @@ define_actions! {
             staging {
                 toggle(),
                 toggle_hunk(u32),
+                toggle_line(),
                 split(),
                 invert(),
             },
