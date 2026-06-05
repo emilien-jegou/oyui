@@ -205,6 +205,7 @@ pub fn default_keybinds() -> KeybindRegistry {
             .register(Keybinds::char('n'), ViewFileNavActions::next_hunk)
             .register(Keybinds::char('N'), ViewFileNavActions::prev_hunk)
             .register(Keybinds::char(' '), ViewFileStagingActions::toggle)
+            .register(Keybinds::char('t'), ViewFileStagingActions::toggle_line)
             .register(Keybinds::char('s'), ViewFileStagingActions::split)
             .register(Keybinds::char('i'), ViewFileStagingActions::invert)
             .register(Keybinds::char('z'), ViewFileFoldActions::toggle)

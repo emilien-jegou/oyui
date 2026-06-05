@@ -515,6 +515,72 @@ impl ViewFileStagingActionsHandler for AppActionsHandler {
         }
     }
 
+    fn toggle_line(&self) {
+        let view = self.view.file_view.read();
+        if let Some(ctx) = get_file_context(&view) {
+            if let Some(mappings) = view.row_to_hunk.get(&ctx.path) {
+                if let Some(Some(hunk_idx)) = mappings.get(ctx.current_row_idx) {
+                    let hidx = *hunk_idx;
+                    if let Some(hunk_visual_start) = mappings.iter().position(|&h| h == Some(hidx))
+                    {
+                        drop(view);
+                        let line_within_hunk =
+                            ctx.current_row_idx.saturating_sub(hunk_visual_start);
+
+                        let mut diff_clone = None;
+                        if let Some(val) = self.cache.read().diffs.get(&ctx.path).value() {
+                            diff_clone = Some(val.clone());
+                        }
+
+                        if let Some(mut diff_result) = diff_clone {
+                            if let crate::diff::DiffResult::Text(ref mut diff) = diff_result {
+                                let total_lines: usize =
+                                    diff.hunks.iter().map(|h| h.lines.len()).sum();
+                                let default_staged = self
+                                    .tree
+                                    .read()
+                                    .get_file_state(&ctx.path)
+                                    .unwrap_or(crate::tree::StagingState::Unstaged)
+                                    == crate::tree::StagingState::Staged;
+
+                                if diff.line_selections.len() != total_lines {
+                                    diff.line_selections.resize(total_lines, default_staged);
+                                }
+
+                                let mut start_idx = 0;
+                                for hunk in diff.hunks.iter().take(hidx) {
+                                    start_idx += hunk.lines.len();
+                                }
+
+                                let global_idx = start_idx + line_within_hunk;
+
+                                if let Some(line) = diff.hunks[hidx].lines.get(line_within_hunk) {
+                                    if matches!(
+                                        line,
+                                        crate::diff::DiffLine::Addition { .. }
+                                            | crate::diff::DiffLine::Deletion { .. }
+                                    ) && global_idx < diff.line_selections.len()
+                                    {
+                                        diff.line_selections[global_idx] =
+                                            !diff.line_selections[global_idx];
+                                    }
+                                }
+
+                                update_tree_staging_state(
+                                    &self.tree,
+                                    &ctx.path,
+                                    diff,
+                                    default_staged,
+                                );
+                            }
+                            self.cache.write().diffs.set(ctx.path.clone(), diff_result);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     fn split(&self) {
         let view = self.view.file_view.read();
         if let Some(ctx) = get_file_context(&view) {
