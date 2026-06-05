@@ -68,6 +68,10 @@ define_actions! {
             fold {
                 toggle(),
             },
+            inline_diff {
+                toggle(),
+                set(bool),
+            },
             close(),
         },
         tree {

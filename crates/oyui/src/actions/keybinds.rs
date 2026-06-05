@@ -4,8 +4,9 @@ use std::rc::Rc;
 
 use crate::actions::{
     Action, GlobalActions, ViewFileActions, ViewFileCursorActions, ViewFileFoldActions,
-    ViewFileNavActions, ViewFileScrollActions, ViewFileStagingActions, ViewTreeActions,
-    ViewTreeCursorActions, ViewTreeDirectoryActions, ViewTreeStagingActions,
+    ViewFileInlineDiffActions, ViewFileNavActions, ViewFileScrollActions,
+    ViewFileStagingActions, ViewTreeActions, ViewTreeCursorActions, ViewTreeDirectoryActions,
+    ViewTreeStagingActions,
 };
 use crate::commons::input::{Keybind, Keybinds};
 
@@ -231,6 +232,7 @@ pub fn default_keybinds() -> KeybindRegistry {
             .register(Keybinds::char('s'), ViewFileStagingActions::split)
             .register(Keybinds::char('i'), ViewFileStagingActions::invert)
             .register(Keybinds::char('z'), ViewFileFoldActions::toggle)
+            .register(Keybinds::char('d'), ViewFileInlineDiffActions::toggle)
         })
         .on_mode(KeybindMode::View(View::Tree), |r| {
             r.register(

@@ -15,6 +15,7 @@ pub struct AppWorkerContext {
     pub syntax_engine: SyntaxEngine,
     pub config: Opts,
     pub algorithm: DiffAlgorithm,
+    pub inline_diff: Arc<RwLock<bool>>,
 
     pub tree: Arc<RwLock<FileTree>>,
     pub cache: Arc<RwLock<DiffCache>>,

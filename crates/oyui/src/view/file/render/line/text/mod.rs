@@ -106,22 +106,10 @@ impl<'a> TextRenderer<'a> {
             }
         };
 
-        let inline_bg: Color = if !self.is_staged {
-            if self.is_selected {
-                self.theme.cursor_bg.into()
-            } else {
-                self.theme.bg.into()
-            }
-        } else if self.is_selected {
-            if self.is_add {
-                lerp_color(self.theme.add_bg.into(), self.theme.add_fg.into(), 0.4)
-            } else {
-                lerp_color(self.theme.del_bg.into(), self.theme.del_fg.into(), 0.4)
-            }
-        } else if self.is_add {
-            lerp_color(self.theme.add_bg.into(), self.theme.add_fg.into(), 0.2)
+        let inline_bg: Color = if self.is_add {
+            lerp_color(self.theme.add_bg.into(), self.theme.bg.into(), 0.65)
         } else {
-            lerp_color(self.theme.del_bg.into(), self.theme.del_fg.into(), 0.2)
+            lerp_color(self.theme.del_bg.into(), self.theme.bg.into(), 0.65)
         };
 
         let crate::config::theme::Color::Rgb(fg_r, fg_g, fg_b) = self.theme.fg;
@@ -169,7 +157,12 @@ impl<'a> TextRenderer<'a> {
                 if let Some(hl) = active_hl {
                     let hl_end_in_token = (hl.byte_range.end.saturating_sub(text_start)).min(text.len());
                     if let Some(slice) = text.get(token_offset..hl_end_in_token) {
-                        push_slice(slice, base_style.bg(inline_bg), true);
+                        let hl_style = if self.is_selected {
+                            base_style.fg(self.theme.fg.into()).bg(inline_bg)
+                        } else {
+                            base_style.bg(inline_bg)
+                        };
+                        push_slice(slice, hl_style, true);
                     } else {
                         push_slice(&text[token_offset..], base_style, false);
                         break;
