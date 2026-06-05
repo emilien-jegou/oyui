@@ -45,6 +45,8 @@ define_actions! {
             cursor {
                 up(u32),
                 down(u32),
+                page_up(),
+                page_down(),
                 half_page_up(),
                 half_page_down(),
                 top(),
@@ -69,6 +71,8 @@ define_actions! {
             cursor {
                 up(u32),
                 down(u32),
+                page_up(),
+                page_down(),
                 half_page_up(),
                 half_page_down(),
                 top(),

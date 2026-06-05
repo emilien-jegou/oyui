@@ -37,6 +37,7 @@ pub struct TreeViewData {
     pub ui_state: TreeUiState,
     pub scrolloff: usize,
     pub list_state: ListState,
+    pub last_height: usize,
 }
 
 impl TreeViewData {
@@ -166,6 +167,7 @@ impl TreeViewData {
         self.list_state.select(Some(self.selected_index));
 
         let height = area.height as usize;
+        self.last_height = height;
         if height > 0 {
             let selected = self.selected_index;
             let mut offset = self.list_state.offset();

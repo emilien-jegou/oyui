@@ -48,6 +48,22 @@ impl ViewTreeCursorActionsHandler for AppActionsHandler {
         ViewTreeCursorActionsHandler::down(self, 20);
     }
 
+    fn page_up(&self) {
+        let mut view = self.view.tree_view.write();
+        let page_size = view.last_height.saturating_sub(2).max(1);
+        view.selected_index = view.selected_index.saturating_sub(page_size);
+    }
+
+    fn page_down(&self) {
+        let tree = self.tree.read();
+        let cache = self.cache.read();
+        let mut view = self.view.tree_view.write();
+        let len = view.flat_rows(&tree, &cache).len();
+        let max_idx = len.saturating_sub(1);
+        let page_size = view.last_height.saturating_sub(2).max(1);
+        view.selected_index = (view.selected_index + page_size).min(max_idx);
+    }
+
     fn top(&self) {
         let mut view = self.view.tree_view.write();
         view.selected_index = 0;

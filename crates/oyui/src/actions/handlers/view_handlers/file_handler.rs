@@ -436,6 +436,26 @@ impl ViewFileCursorActionsHandler for AppActionsHandler {
         ViewFileCursorActionsHandler::down(self, 20);
     }
 
+    fn page_up(&self) {
+        let mut view = self.view.file_view.write();
+        if let Some(ctx) = get_file_context(&view) {
+            let page_size = view.last_height.saturating_sub(2);
+            let target_row = (ctx.current_row_idx as isize - page_size as isize)
+                .clamp(0, ctx.max_idx as isize) as usize;
+            update_scroll_state(&mut view, &ctx.path, target_row, None);
+        }
+    }
+
+    fn page_down(&self) {
+        let mut view = self.view.file_view.write();
+        if let Some(ctx) = get_file_context(&view) {
+            let page_size = view.last_height.saturating_sub(2);
+            let target_row = (ctx.current_row_idx as isize + page_size as isize)
+                .clamp(0, ctx.max_idx as isize) as usize;
+            update_scroll_state(&mut view, &ctx.path, target_row, None);
+        }
+    }
+
     fn top(&self) {
         let mut view = self.view.file_view.write();
         if let Some(ctx) = get_file_context(&view) {
