@@ -33,11 +33,10 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             crate::view::config_error::draw(frame, view_area, err, theme);
         } else if let Some(theme) = app.theme.value() {
             let diff_summary = app.get_diff_summary();
-            
-            // APPLYING READ LOCKS TO STATE:
+
             let tree_guard = app.tree.read();
             let cache_guard = app.cache.read();
-            
+
             app.view.draw(
                 frame,
                 view_area,
@@ -93,6 +92,8 @@ fn draw_hint_bar(
                 ("n/N", "hunks"),
                 ("space", "stage"),
                 ("z", "unfold"),
+                ("s", "split"),
+                ("t", "line"),
                 ("h/esc", "back"),
                 ("enter", "merge"),
                 ("q", "quit"),
