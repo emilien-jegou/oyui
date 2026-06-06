@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::actions::handlers::AppActionsHandler;
 use crate::actions::*;
 use crate::diff_cache::DiffCache;
@@ -38,11 +40,11 @@ fn get_file_context(view: &crate::view::file::FileViewData) -> Option<FileContex
 
 fn update_scroll_state(
     view: &mut crate::view::file::FileViewData,
-    path: &std::path::PathBuf,
+    path: &Path,
     target_row: usize,
     target_offset: Option<usize>,
 ) {
-    let state = view.scroll_states.entry(path.clone()).or_default();
+    let state = view.scroll_states.entry(path.to_path_buf()).or_default();
     state.select(Some(target_row));
     if let Some(off) = target_offset {
         *state.offset_mut() = off;

@@ -1,5 +1,3 @@
-use crate::actions::handlers::AppActionsHandler;
-use crate::actions::*;
 use crate::diff::FileDiff;
 use crate::diff_cache::DiffCache;
 use crate::tree::FileTree;
@@ -59,7 +57,7 @@ impl StagingSession {
         F: FnOnce(&mut FileDiff, &RwLock<FileTree>),
     {
         let mut cache_guard = self.cache.write();
-        if let Some(mut diff_result) = cache_guard.diffs.get(&self.path).value().map(|v| v.clone())
+        if let Some(mut diff_result) = cache_guard.diffs.get(&self.path).value().cloned()
         {
             if let crate::diff::DiffResult::Text(ref mut diff) = diff_result {
                 f(diff, &self.tree);

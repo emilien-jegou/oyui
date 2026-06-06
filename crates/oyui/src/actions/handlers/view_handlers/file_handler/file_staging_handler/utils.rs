@@ -1,13 +1,13 @@
 use crate::diff::{DiffLine, FileDiff, HunkMarker};
 use crate::tree::FileTree;
 use parking_lot::RwLock;
-use std::path::PathBuf;
+use std::path::Path;
 
 pub fn is_modifiable(line: &DiffLine) -> bool {
     matches!(line, DiffLine::Addition { .. } | DiffLine::Deletion { .. })
 }
 
-pub fn is_file_staged_default(tree_rw: &RwLock<FileTree>, path: &PathBuf) -> bool {
+pub fn is_file_staged_default(tree_rw: &RwLock<FileTree>, path: &Path) -> bool {
     tree_rw
         .read()
         .get_file_state(path)
