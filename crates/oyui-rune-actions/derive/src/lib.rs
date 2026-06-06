@@ -577,7 +577,7 @@ fn path_to_generic_param(path: &[Ident]) -> Ident {
     for id in path {
         name.push_str(&pascal_case(id));
     }
-    name.push_str("T");
+    name.push('T');
     format_ident!("{}", name)
 }
 

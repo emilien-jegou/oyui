@@ -1,7 +1,7 @@
-use std::path::PathBuf;
+use std::path::Path;
 
 /// Minimal glob: supports `*` (any chars in segment) and `**` (any path segment)
-pub fn glob_match(pattern: &str, path: &PathBuf) -> bool {
+pub fn glob_match(pattern: &str, path: &Path) -> bool {
     let path_str = path.to_string_lossy();
     glob_match_str(pattern, &path_str)
 }

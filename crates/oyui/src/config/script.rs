@@ -6,7 +6,7 @@ use tracing::{debug, error, info, info_span};
 
 thread_local! {
     pub static CURRENT_COMPILING_MODE: std::cell::RefCell<Option<crate::actions::keybinds::KeybindMode>> =
-        std::cell::RefCell::new(None);
+        const { std::cell::RefCell::new(None) };
 }
 
 pub fn base_module() -> Result<Module, ContextError> {
@@ -30,7 +30,7 @@ pub fn build_context(handler: BoxedHandler) -> Result<Context, ContextError> {
         crate::config::ACTIVE_REGISTRY.with(|r| {
             let mut reg = r.borrow_mut();
             let owned_reg =
-                std::mem::replace(&mut *reg, crate::actions::keybinds::KeybindRegistry::new());
+                std::mem::take(&mut *reg);
 
             if let Some(mode) = mode_opt {
                 *reg = owned_reg.register_fn_mode(mode, kb, Rc::new(cb));

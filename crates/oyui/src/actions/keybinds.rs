@@ -59,6 +59,12 @@ pub struct KeybindRegistry {
     pub bindings: Vec<(KeybindMode, KeySource, Vec<ActionTarget>)>,
 }
 
+impl Default for KeybindRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl KeybindRegistry {
     pub fn new() -> Self {
         Self {

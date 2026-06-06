@@ -52,7 +52,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             frame,
             hint_area,
             &app.command_mode,
-            &*app.view.current.read(),
+            &app.view.current.read(),
             theme,
         );
         draw_command_bar(frame, cmd_area, &app.command_mode, theme);

@@ -68,7 +68,7 @@ impl TreeViewData {
     #[tracing::instrument(skip_all)]
     pub fn draw(
         &mut self,
-        icon_provider: Box<dyn FileIconProvider>,
+        icon_provider: &dyn FileIconProvider,
         frame: &mut Frame,
         area: Rect,
         tree: &FileTree,
@@ -152,7 +152,7 @@ impl TreeViewData {
 
     fn draw_tree_body(
         &mut self,
-        icon_provider: Box<dyn FileIconProvider>,
+        icon_provider: &dyn FileIconProvider,
         frame: &mut Frame,
         area: Rect,
         tree: &FileTree,
@@ -162,7 +162,7 @@ impl TreeViewData {
         let rows = self.flat_rows(tree, cache);
         let items: Vec<ListItem> = rows
             .iter()
-            .map(|r| render_tree_row(&icon_provider, r, theme))
+            .map(|r| render_tree_row(icon_provider, r, theme))
             .collect();
         self.list_state.select(Some(self.selected_index));
 
@@ -297,7 +297,7 @@ fn flatten_recursive(
 }
 
 fn render_tree_row<'a>(
-    icon_provider: &Box<dyn FileIconProvider>,
+    icon_provider: &dyn FileIconProvider,
     row: &'a TreeRow,
     theme: &'a UiTheme,
 ) -> ListItem<'a> {

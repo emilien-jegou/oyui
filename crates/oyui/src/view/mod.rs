@@ -45,7 +45,7 @@ impl View {
         let current = *self.current.read();
         match current {
             ViewKind::Tree => self.tree_view.write().draw(
-                Box::new(DevIconProvider),
+                &DevIconProvider,
                 frame,
                 area,
                 tree,
