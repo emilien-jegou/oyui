@@ -59,6 +59,10 @@ pub struct UiTheme {
     pub char_hunk_split: String,
     #[builder(default = None)]
     pub char_hunk_split_color: Option<Color>,
+    #[builder(default = "▶".to_string())]
+    pub char_line_split: String,
+    #[builder(default = None)]
+    pub char_line_split_color: Option<Color>,
     #[builder(default = "▎".to_string())]
     pub char_indicator: String,
     #[builder(default = "+ ".to_string())]

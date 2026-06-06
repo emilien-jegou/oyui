@@ -32,6 +32,8 @@ define_actions! {
 
         char_hunk_split { @getset(String) }
         char_hunk_split_color { @getset(String) }
+        char_line_split { @getset(String) }
+        char_line_split_color { @getset(String) }
         char_indicator { @getset(String) }
         char_add_sign { @getset(String) }
         char_del_sign { @getset(String) }

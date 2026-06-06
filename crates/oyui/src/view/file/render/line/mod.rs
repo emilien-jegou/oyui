@@ -2,7 +2,7 @@ pub mod gutter;
 pub mod text;
 
 use super::style::get_line_style;
-use crate::{config::UiTheme, diff::InlineChange};
+use crate::{config::UiTheme, diff::{HunkMarker, InlineChange}};
 use gutter::{GutterConfig, GutterRenderer};
 use ratatui::{
     layout::Constraint,
@@ -10,6 +10,7 @@ use ratatui::{
     widgets::{Block, Borders, Row, Table},
 };
 use text::{TextConfig, TextRenderer};
+use typed_builder::TypedBuilder;
 
 pub fn build_line_table<'a>(rows: Vec<Row<'a>>, theme: &UiTheme) -> Table<'a> {
     Table::new(
@@ -25,22 +26,34 @@ pub fn build_line_table<'a>(rows: Vec<Row<'a>>, theme: &UiTheme) -> Table<'a> {
     .block(Block::default().borders(Borders::NONE).bg(theme.bg))
 }
 
+#[derive(TypedBuilder)]
 pub struct LineRenderer<'a> {
     pub content: &'a str,
     pub idx: usize,
+    #[builder(default)]
     pub is_add: bool,
+    #[builder(default)]
     pub is_del: bool,
+    #[builder(default)]
     pub is_selected: bool,
+    #[builder(default)]
     pub is_staged: bool,
-    pub is_hunk_split: bool,
+    #[builder(default)]
+    pub mode: HunkMarker,
+    #[builder(default = &[])]
     pub inline_highlights: &'a [InlineChange],
+    #[builder(default)]
     pub syntax_opt: Option<&'a Vec<Vec<(syntect::highlighting::Style, String)>>>,
     pub area_width: u16,
+    #[builder(default)]
     pub use_gradient: bool,
     pub theme: &'a UiTheme,
+    #[builder(default)]
     pub hscroll: usize,
 
+    #[builder(default)]
     pub gutter_config: GutterConfig,
+    #[builder(default)]
     pub text_config: TextConfig,
 }
 
@@ -62,7 +75,7 @@ impl<'a> LineRenderer<'a> {
             is_del: self.is_del,
             is_selected: self.is_selected,
             is_staged: self.is_staged,
-            is_hunk_split: self.is_hunk_split,
+            mode: self.mode,
             use_gradient: self.use_gradient,
             area_width: self.area_width,
             row_style,

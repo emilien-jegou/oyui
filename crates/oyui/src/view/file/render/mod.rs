@@ -3,14 +3,19 @@ pub mod separator;
 pub mod style;
 
 use super::FileViewData;
-use crate::{config::UiTheme, diff::DiffResult, diff_cache::DiffCache, tree::FileTree};
+use crate::{
+    config::UiTheme,
+    diff::{DiffResult, HunkMarker},
+    diff_cache::DiffCache,
+    tree::FileTree,
+};
 use line::LineRenderer;
 use separator::render_separator;
 
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Style, Stylize},
-    text::{Line, Span},
+    text::Span,
     widgets::Paragraph,
     Frame,
 };
@@ -77,7 +82,7 @@ impl FileViewData {
         }
 
         frame.render_widget(
-            Paragraph::new(Line::from(header_spans)).bg(theme.bg),
+            Paragraph::new(ratatui::text::Line::from(header_spans)).bg(theme.bg),
             header_area,
         );
 
@@ -173,11 +178,6 @@ impl FileViewData {
             let hunk_new_start = hunk.after_lines.start;
             let context_start = hunk_new_start.saturating_sub(self.context_lines);
 
-            // DETECT SPLIT: If this hunk immediately follows the previous one without context separation,
-            // it means they were originally one hunk that we split in-memory.
-            let is_split_hunk =
-                i > 0 && hunk.after_lines.start == diff.hunks[i - 1].after_lines.end;
-
             if self.is_folded && current_new < context_start {
                 let hidden_count = context_start - current_new;
                 let is_selected = visual_row_idx == selected_row_idx;
@@ -199,24 +199,18 @@ impl FileViewData {
             while current_new < hunk_new_start && current_new < new_lines.len() {
                 let is_selected = visual_row_idx == selected_row_idx;
                 rows.push(
-                    LineRenderer {
-                        content: new_lines[current_new],
-                        idx: current_new,
-                        is_add: false,
-                        is_del: false,
-                        is_selected,
-                        is_staged: true,
-                        is_hunk_split: false,
-                        inline_highlights: &[],
-                        syntax_opt,
-                        area_width,
-                        use_gradient,
-                        theme,
-                        hscroll,
-                        gutter_config: Default::default(),
-                        text_config: Default::default(),
-                    }
-                    .render(),
+                    LineRenderer::builder()
+                        .content(new_lines[current_new])
+                        .idx(current_new)
+                        .is_selected(is_selected)
+                        .is_staged(true)
+                        .syntax_opt(syntax_opt)
+                        .area_width(area_width)
+                        .use_gradient(use_gradient)
+                        .theme(theme)
+                        .hscroll(hscroll)
+                        .build()
+                        .render(),
                 );
                 line_map.push(current_new);
                 row_to_hunk_for_file.push(None);
@@ -235,31 +229,30 @@ impl FileViewData {
                     .unwrap_or(&default_staged);
                 selection_idx += 1;
 
-                let is_hunk_split = is_first_line_of_hunk && is_split_hunk;
+                let line_mode = if is_first_line_of_hunk {
+                    hunk.marker
+                } else {
+                    HunkMarker::default()
+                };
                 is_first_line_of_hunk = false;
 
                 match diff_line {
                     crate::diff::DiffLine::Context { new_line_idx, .. } => {
                         let line = new_lines.get(*new_line_idx).copied().unwrap_or("");
                         rows.push(
-                            LineRenderer {
-                                content: line,
-                                idx: *new_line_idx,
-                                is_add: false,
-                                is_del: false,
-                                is_selected,
-                                is_staged,
-                                is_hunk_split,
-                                inline_highlights: &[],
-                                syntax_opt,
-                                area_width,
-                                use_gradient,
-                                theme,
-                                hscroll,
-                                gutter_config: Default::default(),
-                                text_config: Default::default(),
-                            }
-                            .render(),
+                            LineRenderer::builder()
+                                .content(line)
+                                .idx(*new_line_idx)
+                                .is_selected(is_selected)
+                                .is_staged(is_staged)
+                                .mode(line_mode)
+                                .syntax_opt(syntax_opt)
+                                .area_width(area_width)
+                                .use_gradient(use_gradient)
+                                .theme(theme)
+                                .hscroll(hscroll)
+                                .build()
+                                .render(),
                         );
                         line_map.push(current_new);
                         row_to_hunk_for_file.push(Some(i));
@@ -276,24 +269,20 @@ impl FileViewData {
                         }
                         let line = old_lines.get(*old_line_idx).copied().unwrap_or("");
                         rows.push(
-                            LineRenderer {
-                                content: line,
-                                idx: *old_line_idx,
-                                is_add: false,
-                                is_del: true,
-                                is_selected,
-                                is_staged,
-                                is_hunk_split,
-                                inline_highlights,
-                                syntax_opt: None,
-                                area_width,
-                                use_gradient,
-                                theme,
-                                hscroll,
-                                gutter_config: Default::default(),
-                                text_config: Default::default(),
-                            }
-                            .render(),
+                            LineRenderer::builder()
+                                .content(line)
+                                .idx(*old_line_idx)
+                                .is_del(true)
+                                .is_selected(is_selected)
+                                .is_staged(is_staged)
+                                .mode(line_mode)
+                                .inline_highlights(inline_highlights)
+                                .area_width(area_width)
+                                .use_gradient(use_gradient)
+                                .theme(theme)
+                                .hscroll(hscroll)
+                                .build()
+                                .render(),
                         );
                         line_map.push(current_new);
                         row_to_hunk_for_file.push(Some(i));
@@ -309,24 +298,21 @@ impl FileViewData {
                         }
                         let line = new_lines.get(*new_line_idx).copied().unwrap_or("");
                         rows.push(
-                            LineRenderer {
-                                content: line,
-                                idx: *new_line_idx,
-                                is_add: true,
-                                is_del: false,
-                                is_selected,
-                                is_staged,
-                                is_hunk_split,
-                                inline_highlights,
-                                syntax_opt,
-                                area_width,
-                                use_gradient,
-                                theme,
-                                hscroll,
-                                gutter_config: Default::default(),
-                                text_config: Default::default(),
-                            }
-                            .render(),
+                            LineRenderer::builder()
+                                .content(line)
+                                .idx(*new_line_idx)
+                                .is_add(true)
+                                .is_selected(is_selected)
+                                .is_staged(is_staged)
+                                .mode(line_mode)
+                                .inline_highlights(inline_highlights)
+                                .syntax_opt(syntax_opt)
+                                .area_width(area_width)
+                                .use_gradient(use_gradient)
+                                .theme(theme)
+                                .hscroll(hscroll)
+                                .build()
+                                .render(),
                         );
                         line_map.push(current_new);
                         row_to_hunk_for_file.push(Some(i));
@@ -349,24 +335,18 @@ impl FileViewData {
                 while current_new < context_end && current_new < new_lines.len() {
                     let is_selected = visual_row_idx == selected_row_idx;
                     rows.push(
-                        LineRenderer {
-                            content: new_lines[current_new],
-                            idx: current_new,
-                            is_add: false,
-                            is_del: false,
-                            is_selected,
-                            is_staged: true,
-                            is_hunk_split: false,
-                            inline_highlights: &[],
-                            syntax_opt,
-                            area_width,
-                            use_gradient,
-                            theme,
-                            hscroll,
-                            gutter_config: Default::default(),
-                            text_config: Default::default(),
-                        }
-                        .render(),
+                        LineRenderer::builder()
+                            .content(new_lines[current_new])
+                            .idx(current_new)
+                            .is_selected(is_selected)
+                            .is_staged(true)
+                            .syntax_opt(syntax_opt)
+                            .area_width(area_width)
+                            .use_gradient(use_gradient)
+                            .theme(theme)
+                            .hscroll(hscroll)
+                            .build()
+                            .render(),
                     );
                     line_map.push(current_new);
                     row_to_hunk_for_file.push(None);
@@ -380,24 +360,18 @@ impl FileViewData {
             while current_new < new_lines.len() {
                 let is_selected = visual_row_idx == selected_row_idx;
                 rows.push(
-                    LineRenderer {
-                        content: new_lines[current_new],
-                        idx: current_new,
-                        is_add: false,
-                        is_del: false,
-                        is_selected,
-                        is_staged: true,
-                        is_hunk_split: false,
-                        inline_highlights: &[],
-                        syntax_opt,
-                        area_width,
-                        use_gradient,
-                        theme,
-                        hscroll,
-                        gutter_config: Default::default(),
-                        text_config: Default::default(),
-                    }
-                    .render(),
+                    LineRenderer::builder()
+                        .content(new_lines[current_new])
+                        .idx(current_new)
+                        .is_selected(is_selected)
+                        .is_staged(true)
+                        .syntax_opt(syntax_opt)
+                        .area_width(area_width)
+                        .use_gradient(use_gradient)
+                        .theme(theme)
+                        .hscroll(hscroll)
+                        .build()
+                        .render(),
                 );
                 line_map.push(current_new);
                 row_to_hunk_for_file.push(None);
@@ -427,7 +401,6 @@ impl FileViewData {
         self.line_mapping.insert(path.clone(), line_map);
         self.hunk_starts.insert(path.clone(), hunk_starts_for_file);
         self.row_to_hunk.insert(path.clone(), row_to_hunk_for_file);
-
         let table = line::build_line_table(rows, theme);
 
         let height = list_area.height as usize;

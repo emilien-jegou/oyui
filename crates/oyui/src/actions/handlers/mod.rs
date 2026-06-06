@@ -52,6 +52,8 @@ pub fn generate(
         theme_file_change_highlight_opacity: handler.clone(),
         theme_char_hunk_split: handler.clone(),
         theme_char_hunk_split_color: handler.clone(),
+        theme_char_line_split: handler.clone(),
+        theme_char_line_split_color: handler.clone(),
         theme_char_indicator: handler.clone(),
         theme_char_add_sign: handler.clone(),
         theme_char_del_sign: handler.clone(),

@@ -1,4 +1,4 @@
-use crate::config::UiTheme;
+use crate::{config::UiTheme, diff::HunkMarker};
 use ratatui::{
     style::{Color, Style},
     text::Span,
@@ -12,7 +12,7 @@ pub struct GutterIndicator<'a> {
     pub is_del: bool,
     pub is_staged: bool,
     #[builder(default)]
-    pub is_hunk_split: bool,
+    pub mode: HunkMarker,
     pub bg_color: Option<Color>,
     pub theme: &'a UiTheme,
     #[builder(default)]
@@ -27,11 +27,18 @@ impl<'a> GutterIndicator<'a> {
             self.theme.dim.into()
         };
 
-        // Apply fallback logic: Use the specified color, otherwise defaults to the bar's staging color
-        if self.is_hunk_split {
-            if let Some(custom_color) = self.theme.char_hunk_split_color {
-                fg = custom_color.into();
+        match self.mode {
+            HunkMarker::LineToggle => {
+                if let Some(custom_color) = self.theme.char_line_split_color {
+                    fg = custom_color.into();
+                }
             }
+            HunkMarker::HunkSplit => {
+                if let Some(custom_color) = self.theme.char_hunk_split_color {
+                    fg = custom_color.into();
+                }
+            }
+            HunkMarker::None => {}
         }
 
         let mut sign_style = Style::default()
@@ -46,12 +53,16 @@ impl<'a> GutterIndicator<'a> {
     }
 
     pub fn render(&self) -> Cell<'a> {
-        let sign_char = if self.is_hunk_split {
-            self.theme.char_hunk_split.as_str()
-        } else if self.is_add || self.is_del {
-            self.theme.char_indicator.as_str()
-        } else {
-            " "
+        let sign_char = match self.mode {
+            HunkMarker::LineToggle => self.theme.char_line_split.as_str(),
+            HunkMarker::HunkSplit => self.theme.char_hunk_split.as_str(),
+            HunkMarker::None => {
+                if self.is_add || self.is_del {
+                    self.theme.char_indicator.as_str()
+                } else {
+                    " "
+                }
+            }
         };
         let style = self.compute_style();
 

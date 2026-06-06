@@ -40,6 +40,14 @@ pub enum DiffLine {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HunkMarker {
+    #[default]
+    None,
+    LineToggle,
+    HunkSplit,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Hunk {
     /// Absolute line bounds in the old text (used for chunking / header display)
@@ -50,6 +58,9 @@ pub struct Hunk {
     /// The pre-computed, ordered sequence of lines to display in this hunk.
     /// This saves the TUI thread from doing string/line matching at render time.
     pub lines: Vec<DiffLine>,
+
+    /// The type of marker for this hunk (e.g., line toggle, hunk split, or none).
+    pub marker: HunkMarker,
 }
 
 #[derive(Clone, Debug)]
