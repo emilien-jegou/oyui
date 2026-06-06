@@ -100,6 +100,8 @@ impl_color_getset!(ThemeAddBgActionsHandler, add_bg);
 impl_color_getset!(ThemeDelBgActionsHandler, del_bg);
 impl_color_getset!(ThemeAddFgActionsHandler, add_fg);
 impl_color_getset!(ThemeDelFgActionsHandler, del_fg);
+impl_string_getset!(ThemeCharLineSplitActionsHandler, char_line_split);
+impl_opt_color_getset!(ThemeCharLineSplitColorActionsHandler, char_line_split_color);
 impl_string_getset!(ThemeCharHunkSplitActionsHandler, char_hunk_split);
 impl_opt_color_getset!(ThemeCharHunkSplitColorActionsHandler, char_hunk_split_color);
 impl_string_getset!(ThemeCharIndicatorActionsHandler, char_indicator);

@@ -1,9 +1,11 @@
 pub mod indicator;
+
 pub mod number;
 pub mod sign;
 
-use crate::config::UiTheme;
+use crate::{config::UiTheme, diff::HunkMarker};
 use ratatui::{style::Style, widgets::Cell};
+use typed_builder::TypedBuilder;
 
 #[derive(Clone, Copy, Debug)]
 pub struct GutterConfig {
@@ -28,14 +30,21 @@ impl Default for GutterConfig {
     }
 }
 
+
+#[derive(TypedBuilder)]
 pub struct GutterRenderer<'a> {
     pub config: GutterConfig,
     pub idx: usize,
+    #[builder(default)]
     pub is_add: bool,
+    #[builder(default)]
     pub is_del: bool,
+    #[builder(default)]
     pub is_selected: bool,
+    #[builder(default)]
     pub is_staged: bool,
-    pub is_hunk_split: bool,
+    pub mode: HunkMarker,
+    #[builder(default)]
     pub use_gradient: bool,
     pub area_width: u16,
     pub row_style: Style,
@@ -65,7 +74,7 @@ impl<'a> GutterRenderer<'a> {
                     .is_add(self.is_add)
                     .is_del(self.is_del)
                     .is_staged(self.is_staged)
-                    .is_hunk_split(self.is_hunk_split)
+                    .mode(self.mode)
                     .bg_color(computed_number_style.bg)
                     .theme(self.theme)
                     .custom_style(self.config.indicator_style)

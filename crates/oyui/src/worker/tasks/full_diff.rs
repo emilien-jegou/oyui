@@ -235,6 +235,7 @@ pub fn compute(
             before_lines: (hunk.before.start as usize)..(hunk.before.end as usize),
             after_lines: (hunk.after.start as usize)..(hunk.after.end as usize),
             lines,
+            marker: Default::default()
         });
     }
 
