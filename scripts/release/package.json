@@ -1,0 +1,13 @@
+{
+  "name": "release",
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "relacher": "^0.0.1"
+  }
+}
