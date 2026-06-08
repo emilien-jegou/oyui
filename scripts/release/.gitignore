@@ -2,7 +2,6 @@
 
 !bun.lock
 !package.json
-!release-crates.ts
 !release-gh.ts
-!release-start.ts
+!release.ts
 !tsconfig.json

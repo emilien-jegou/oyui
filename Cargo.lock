@@ -1462,7 +1462,7 @@ dependencies = [
 
 [[package]]
 name = "oyui-rune-actions-derive"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "heck",
  "proc-macro2",

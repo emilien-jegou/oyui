@@ -8,6 +8,6 @@
     "typescript": "^5"
   },
   "dependencies": {
-    "relacher": "^0.0.1"
+    "relacher": "^0.0.4"
   }
 }
