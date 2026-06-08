@@ -76,7 +76,7 @@ pub fn config() {
   // 50+ actions and settings to configure, check the documentation:
   // https://github.com/emilien-jegou/oyui/wiki/Actions-API
   theme::bg::set("#000000");
-  file_staged_highlight::set(LineHighlightMode::Gradient(0.05));
+  theme::file_staged_highlight::set(LineHighlightMode::Gradient(0.05));
 
   // You can nest config per view with on_mode:
   on_mode("file", || {
