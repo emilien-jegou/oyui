@@ -1,38 +1,77 @@
 { pkgs }: {
   mkCli = { name, scripts, desc }:
     let
-      # 1. Generate the dispatcher script
-      dispatcher = ''
-        #!/usr/bin/env bash
+      lib = pkgs.lib;
+      visibleScripts = builtins.filter (s: s.visible or true) scripts;
 
-        # safely handle empty arguments
-        case "''${1:-}" in
-          ${builtins.concatStringsSep "\n" (map (s: ''
-            "${s.cmd}")
-              shift # removes $1 so we can pass "$@" to the underlying command if needed
-              ${s.exec} "$@"
-              ;;
-          '') scripts)}
-          *) 
-            bold=$(tput bold 2>/dev/null || echo "")
-            reset=$(tput sgr0 2>/dev/null || echo "")
-            cyan=$(tput setaf 6 2>/dev/null || echo "")
-            green=$(tput setaf 2 2>/dev/null || echo "")
+      # Helper to format and safely join commands
+      # We assume exec/deps are strings or lists of strings.
+      formatCmds = cmds: 
+        let 
+          list = if builtins.isList cmds then cmds else [ cmds ];
+        in builtins.concatStringsSep " && " list;
 
-            printf "%s%s🚀 %s%s\n" "$bold" "$cyan" "${desc}" "$reset"
-            ${builtins.concatStringsSep "\n" (map (s: ''
-              printf "  %s${name} %-12s%s  ${s.desc}\n" "$green" "${s.cmd}" "$reset"
-            '') scripts)}
-            ;;
-        esac
+      # Logic for executing a script definition
+      genScriptCase = s: ''
+        "${s.cmd}")
+          ${if s ? deps then ''
+            # Execute dependencies
+            ${builtins.concatStringsSep "\n" (map (dep: ''"$0" "${dep}"'') s.deps)}
+          '' else ""}
+          
+          ${if s ? dir then ''
+            pushd "${s.dir}" >/dev/null
+          '' else ""}
+          
+          # Execute main logic
+          set -x
+          ${formatCmds s.exec} "''${@:2}"
+          EXIT_CODE=$?
+          { set +x; } 2>/dev/null
+          
+          ${if s ? dir then "popd >/dev/null" else ""}
+          
+          [ $EXIT_CODE -eq 0 ] || exit $EXIT_CODE
+          ;;
       '';
 
+      dispatcher = ''
+        #!/usr/bin/env bash
+        set -e # Abort on error
+
+        # Gray color for set -x output
+        export PS4='$(tput setaf 8 2>/dev/null)+ $(tput sgr0 2>/dev/null)'
+
+        run_cmd() {
+          case "$1" in
+            ${builtins.concatStringsSep "\n" (map genScriptCase scripts)}
+            *)
+              echo "Error: Command '$1' not found."
+              exit 1
+              ;;
+          esac
+        }
+
+        case "''${1:-}" in
+          "") 
+             bold=$(tput bold 2>/dev/null || echo "")
+             reset=$(tput sgr0 2>/dev/null || echo "")
+             cyan=$(tput setaf 6 2>/dev/null || echo "")
+             green=$(tput setaf 2 2>/dev/null || echo "")
+
+             printf "%s%s🚀 %s%s\n" "$bold" "$cyan" "${desc}" "$reset"
+             ${builtins.concatStringsSep "\n" (map (s: ''
+               printf "  %s${name} %-12s%s  ${s.desc}\n" "$green" "${s.cmd}" "$reset"
+             '') visibleScripts)}
+             ;;
+          *) 
+             run_cmd "$@"
+             ;;
+        esac
+      '';
     in
-    # symlinkJoin bundles our script and completions into a single Nix package
     pkgs.symlinkJoin {
       name = "${name}-cli";
-      paths = [
-        (pkgs.writeShellScriptBin name dispatcher)
-      ];
+      paths = [ (pkgs.writeShellScriptBin name dispatcher) ];
     };
 }

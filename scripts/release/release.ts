@@ -46,7 +46,7 @@ function groupBy<T, K extends keyof T>(arr: T[], key: K): Record<string, T[]> {
 // Replicates the cliff.toml output template in pure TypeScript
 function cliffTemplate({ version, date, commits }: ChangelogContext): string {
   const cleanVersion = version ? version.replace(/^v/, "") : "Unreleased";
-  const lines = [`## [${cleanVersion}] - ${date}`];
+  const lines = ['', `## [${cleanVersion}] - ${date}`];
 
   const grouped = groupBy(commits, "type");
 
@@ -73,32 +73,38 @@ step("Preflight checks");
 const vcs = new JjVcsProvider(root);
 ok("Jujutsu VCS provider initialized");
 
-const config = cargoDeps(root).on("oyui", (c) =>
-  c
+const config = cargoDeps(root).on("oyui", (dep) =>
+  dep
     .update(
-      regexUpdate({
-        path: "./flake.nix",
+      regexUpdate("./flake.nix", {
         search: 'version = "[^"]+"',
         replace: 'version = "{{version}}"',
       }),
     )
+    .update(changelogUpdate('./crates/oyui/CHANGELOG.md', {}))
     .update(
-      changelogUpdate({
-        path: "./CHANGELOG.md",
+      changelogUpdate("./CHANGELOG.md", {
         global: true,
         template: cliffTemplate,
       }),
-    ),
-);
+    ))
+  .on("oyui-tasker", (dep) => dep
+    .update(changelogUpdate('./crates/oyui-tasker/CHANGELOG.md', {})))
+  .on("oyui-rune-actions", (dep) => dep
+    .update(changelogUpdate('./crates/oyui-rune-actions/CHANGELOG.md', {})))
+
+  .couple('oyui-rune-actions', 'oyui-rune-actions-derive')
+  .couple('oyui-tasker', 'oyui-tasker-derive');
 
 step("Evaluating updates");
 const updates = await prepare(config, vcs, {
   cwd: root,
+  excludeNestedWatches: true,
   sizes: {
-    major: { pattern: "^[a-z]+(?:\\([^)]+\\))?!:|BREAKING CHANGE" },
-    minor: { pattern: "^feat|^revert" },
-    patch: { pattern: "^fix|^build|^refactor|^nit|^style" },
-    skip: { pattern: "^release|^chore|^infra|^docs|^test|^ci|^build" },
+    major: { pattern: "^[a-z]+(?:\\([^)]+\\))?!|^[a-z]+\\([^)]+\\)!:|^BREAKING CHANGE", },
+    minor: { pattern: "^(feat|revert|refactor|perf)" },
+    patch: { pattern: "^(fix|bugfix|patch|deps)" },
+    skip: { pattern: "^(release|chore|infra|docs|test|ci|build|nit|style)" },
   },
   cascade: {
     patch: {
