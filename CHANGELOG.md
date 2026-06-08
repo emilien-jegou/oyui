@@ -1,6 +1,13 @@
-# Changelog
+## [0.1.0] - 2026-06-08
 
-All notable changes to this project will be documented in this file.
+### Refactor
+- Fix clippy issues — [`26c903d`](https://github.com/emilien-jegou/oyui/commit/26c903da845f096be92e2302e4ee45b14cccdf5b) by emilien-jegou
+
+### Feat
+- Add missing keybinds hints — [`2d3b3df`](https://github.com/emilien-jegou/oyui/commit/2d3b3df5dc0e1de767b3a1026636d3acaeb2a703) by emilien-jegou
+- Improve line toggling — [`8f4f302`](https://github.com/emilien-jegou/oyui/commit/8f4f30278322dd724e41eb813f0d35a5d20fd46b) by emilien-jegou
+- Add per-line staging toggle with `t` key — [`3e2cf1e`](https://github.com/emilien-jegou/oyui/commit/3e2cf1e950ab0aa9d1975de322204b475bb77ba4) by Gaëtan Lehmann
+- Add page up/down key bindings for file and tree views — [`1bde194`](https://github.com/emilien-jegou/oyui/commit/1bde19465499bc93f03f99504d9f145a7b1ace0d) by Gaëtan Lehmann
 
 ## [0.0.7] - 2026-06-02
 
@@ -33,7 +40,7 @@ All notable changes to this project will be documented in this file.
 - Gif in readme — [`568da8c`](https://github.com/emilien-jegou/oyui/commit/568da8cb7b7a2aea0715fb16a57e09d51c265b94) by Emilien, 2026-06-02
 - Add a language badge in readme — [`580d67a`](https://github.com/emilien-jegou/oyui/commit/580d67ab120d8c499f164e7e2c1b8c47647698b4) by Emilien, 2026-06-02
 
-### Features
+### Feat
 
 - Bootstrap — [`d6b2517`](https://github.com/emilien-jegou/oyui/commit/d6b2517500710a3df0d1ab8426dba189a9fb0ecd) by Emilien, 2026-05-19
 - Add shortcut for tree inversion — [`770ffd0`](https://github.com/emilien-jegou/oyui/commit/770ffd032a5d921d2fb0f59b7fee354a8174cd97) by Emilien, 2026-05-19
@@ -63,5 +70,3 @@ All notable changes to this project will be documented in this file.
 - Simplify async task creation logic — [`36e27a5`](https://github.com/emilien-jegou/oyui/commit/36e27a512b8e76c8a1de003bdaac2b7e68b1e3bf) by Emilien, 2026-05-21
 - Divide file view in logical parts — [`b0f301e`](https://github.com/emilien-jegou/oyui/commit/b0f301eb7147218fd488dcd1b676c8d88655d66a) by Emilien, 2026-05-27
 - Remove manual define of action handler — [`d6cb855`](https://github.com/emilien-jegou/oyui/commit/d6cb855db9f47f5ee3028d20d22380cd2001c49a) by Emilien, 2026-06-02
-
-

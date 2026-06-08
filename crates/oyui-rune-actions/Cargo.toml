@@ -1,6 +1,6 @@
 [package]
 name = "oyui-rune-actions"
-version = "0.0.7"
+version = "0.0.8"
 edition = "2021"
 description = "A declarative framework for defining nested action hierarchies, generating handler traits, and registering bindings automatically for the Rune scripting language."
 license = "MIT OR Apache-2.0"

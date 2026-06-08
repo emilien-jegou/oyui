@@ -42,7 +42,7 @@
         packages = {
           oyui = rustPlatform.buildRustPackage (commonBuildArgs // {
             pname = "oyui";
-            version = "0.0.7";
+            version = "0.1.0";
 
             postInstall = ''
               wrapProgram $out/bin/oyui \
