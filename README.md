@@ -134,3 +134,4 @@ Follow the progress of new features on the [Feature Tracking page](https://githu
 
 *   [scm-record](https://github.com/arxanas/scm-record)
 *   [oyo](https://github.com/ahkohd/oyo)
+*   [syndiff](https://docs.rs/syndiff/latest/syndiff/)
