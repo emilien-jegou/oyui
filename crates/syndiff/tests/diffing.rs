@@ -2,7 +2,7 @@ use rstest::rstest;
 use std::ops::Range;
 use std::path::PathBuf;
 
-use syndiff::{build_tree, diff_trees, SyntaxDiffOptions, SyntaxTree};
+use oyui_syndiff::{build_tree, diff_trees, SyntaxDiffOptions, SyntaxTree};
 
 fn parse_with_language(source: &str, language: tree_sitter::Language) -> SyntaxTree<'_> {
     let mut parser = tree_sitter::Parser::new();
