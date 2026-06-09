@@ -21,7 +21,7 @@
 //! This example shows how to diff two Rust code snippets:
 //!
 //! ```
-//! use syndiff::{build_tree, diff_trees};
+//! use oyui_syndiff::{build_tree, diff_trees};
 //!
 //! let old_source = "fn add(a: i32, b: i32) -> i32 { a + b }";
 //! let new_source = "fn add(x: i32, y: i32) -> i32 { x + y }";
@@ -65,8 +65,8 @@
 //! [`SyntaxDiffOptions`] to set a limit:
 //!
 //! ```
-//! use syndiff::{diff_trees, SyntaxDiffOptions};
-//! # use syndiff::build_tree;
+//! use oyui_syndiff::{diff_trees, SyntaxDiffOptions};
+//! # use oyui_syndiff::build_tree;
 //! # let mut parser = tree_sitter::Parser::new();
 //! # parser.set_language(&tree_sitter_rust::LANGUAGE.into()).unwrap();
 //! # let old_tree = build_tree(parser.parse("fn a() {}", None).unwrap().walk(), "fn a() {}");
@@ -92,7 +92,7 @@
 //! bounds. The returned ranges will be clipped and made relative to the bounds:
 //!
 //! ```
-//! use syndiff::{build_tree, diff_trees};
+//! use oyui_syndiff::{build_tree, diff_trees};
 //! # let mut parser = tree_sitter::Parser::new();
 //! # parser.set_language(&tree_sitter_rust::LANGUAGE.into()).unwrap();
 //!
@@ -171,7 +171,7 @@ pub use syntax_tree::{build_tree, SyntaxTree};
 /// # Example
 ///
 /// ```
-/// use syndiff::SyntaxDiffOptions;
+/// use oyui_syndiff::SyntaxDiffOptions;
 ///
 /// let options = SyntaxDiffOptions {
 ///     graph_limit: 500_000,
