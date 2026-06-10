@@ -6,7 +6,9 @@ define_actions! {
     global {
         quit(),
         confirm(),
+        execute_merge(),
         open_command_mode(),
+        confirm_merge_window_enabled { @getset(bool) },
     },
     theme {
         @getset(String)
