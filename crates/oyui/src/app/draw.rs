@@ -5,19 +5,9 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::Paragraph,
     Frame,
 };
-
-fn centered_rect(width: u16, height: u16, r: Rect) -> Rect {
-    Layout::vertical([Constraint::Length(height)])
-        .flex(ratatui::layout::Flex::Center)
-        .split(
-            Layout::horizontal([Constraint::Length(width)])
-                .flex(ratatui::layout::Flex::Center)
-                .split(r)[0],
-        )[0]
-}
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
@@ -57,14 +47,8 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         draw_command_bar(frame, cmd_area, &app.command_mode, theme);
 
         if let CommandMode::ConfirmMerge = app.command_mode {
-            let confirm_area = centered_rect(40, 3, frame.area());
-            frame.render_widget(Clear, confirm_area);
-            frame.render_widget(
-                Paragraph::new("Press Enter to Confirm Merge")
-                    .block(Block::default().borders(Borders::ALL).title(" Merge "))
-                    .style(Style::default().fg(theme.partial.into())),
-                confirm_area,
-            );
+            let merge_stats = app.get_merge_stats();
+            crate::view::confirm_window::draw(frame, theme, merge_stats);
         }
     }
 }

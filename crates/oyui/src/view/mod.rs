@@ -1,6 +1,7 @@
 pub mod config_error;
 pub mod file;
 pub mod tree;
+pub mod confirm_window;
 
 use crate::commons::file_icon::DevIconProvider;
 use crate::config::UiTheme;
