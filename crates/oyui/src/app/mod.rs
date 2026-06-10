@@ -82,6 +82,7 @@ impl From<AppReq> for App {
             value.tree.clone(),
             value.cache.clone(),
             value.view.clone(),
+            value.right_path.clone(),
         );
 
         Self {
@@ -198,12 +199,6 @@ impl App {
                 self.command_mode = std::mem::replace(&mut state.command_mode, CommandMode::Normal);
             }
         }
-
-        if state.confirm_merge_triggered {
-            state.confirm_merge_triggered = false;
-            drop(state);
-            let _ = self.confirm_merge();
-        }
     }
 
     #[tracing::instrument(skip_all)]
@@ -252,24 +247,44 @@ impl App {
 
             if event::poll(Duration::from_millis(16))? {
                 if let Event::Key(key) = event::read()? {
-                    // If we are in active command mode, capture input instead of running keybinds
                     if let CommandMode::Active(ref mut buf) = self.command_mode {
-                        match key.code {
-                            KeyCode::Enter => {
-                                let cmd = buf.clone();
-                                self.execute_command(&cmd);
-                                self.command_mode = CommandMode::Normal;
+                        if key.kind == event::KeyEventKind::Press
+                            || key.kind == event::KeyEventKind::Repeat
+                        {
+                            match key.code {
+                                KeyCode::Enter => {
+                                    let cmd = buf.clone();
+                                    self.execute_command(&cmd);
+                                    self.command_mode = CommandMode::Normal;
+                                }
+                                KeyCode::Esc => {
+                                    self.command_mode = CommandMode::Normal;
+                                }
+                                KeyCode::Backspace => {
+                                    buf.pop();
+                                }
+                                KeyCode::Char(c) => {
+                                    buf.push(c);
+                                }
+                                _ => {}
                             }
-                            KeyCode::Esc => {
-                                self.command_mode = CommandMode::Normal;
+                        }
+                    } else if let CommandMode::ConfirmMerge = self.command_mode {
+                        if key.kind == event::KeyEventKind::Press {
+                            match key.code {
+                                KeyCode::Enter => {
+                                    self.command_mode = CommandMode::Normal;
+                                    self.handler.dispatch(&crate::actions::Action(
+                                        crate::actions::Actions::global(
+                                            crate::actions::GlobalActions::execute_merge,
+                                        ),
+                                    ));
+                                }
+                                KeyCode::Char('q') | KeyCode::Esc => {
+                                    self.command_mode = CommandMode::Normal;
+                                }
+                                _ => {}
                             }
-                            KeyCode::Backspace => {
-                                buf.pop();
-                            }
-                            KeyCode::Char(c) => {
-                                buf.push(c);
-                            }
-                            _ => {}
                         }
                     } else {
                         // Standard keybind handling
@@ -357,7 +372,7 @@ impl App {
         Ok(())
     }
 
-    pub fn sync_cache_with_tree(&mut self) {
+    pub fn sync_cache_with_tree(&self) {
         let tree = self.tree.read();
         let mut cache = self.cache.write();
         Self::sync_cache_recursive(&tree.nodes, &mut cache);
@@ -533,18 +548,145 @@ impl App {
         find_and_update(&mut tree.nodes, path, new_state);
     }
 
-    #[tracing::instrument(skip_all)]
-    pub fn confirm_merge(&mut self) -> Result<ExitAction, Box<dyn std::error::Error>> {
-        let right_dir = self.right_path.clone();
-        let mut tree = self.tree.write();
-        let cache = self.cache.read();
-        merge::confirm_and_write(&mut tree, &mut self.should_quit, &right_dir, &cache)
-    }
-
     pub fn get_diff_summary(&self) -> (usize, usize, usize) {
         let (mut a, mut d, mut m) = (0, 0, 0);
         self.count_recursive(&self.tree.read().nodes, &mut a, &mut d, &mut m);
         (a, d, m)
+    }
+
+    pub fn get_merge_stats(
+        &self,
+    ) -> (
+        (usize, usize, usize, usize, usize),
+        (usize, usize, usize, usize, usize),
+    ) {
+        self.sync_cache_with_tree(); // Sync stale line_selections before reading
+        let mut left = (0, 0, 0, 0, 0);
+        let mut right = (0, 0, 0, 0, 0);
+        self.count_split_recursive(
+            &self.tree.read().nodes,
+            &self.cache.read(),
+            &mut left,
+            &mut right,
+        );
+        (left, right)
+    }
+
+    fn count_split_recursive(
+        &self,
+        nodes: &[TreeNode],
+        cache: &DiffCache,
+        left: &mut (usize, usize, usize, usize, usize),
+        right: &mut (usize, usize, usize, usize, usize),
+    ) {
+        for node in nodes {
+            match node {
+                TreeNode::File(f) => {
+                    let is_added = f.left_path.is_none();
+                    let is_deleted = f.right_path.is_none();
+
+                    if f.state == crate::tree::StagingState::Staged
+                        || f.state == crate::tree::StagingState::PartiallyStaged
+                    {
+                        if is_added {
+                            left.0 += 1;
+                        } else if is_deleted {
+                            left.1 += 1;
+                        } else {
+                            left.2 += 1;
+                        }
+                    }
+
+                    if f.state == crate::tree::StagingState::Unstaged
+                        || f.state == crate::tree::StagingState::PartiallyStaged
+                    {
+                        if is_added {
+                            right.0 += 1;
+                        } else if is_deleted {
+                            right.1 += 1;
+                        } else {
+                            right.2 += 1;
+                        }
+                    }
+
+                    if let Some(crate::diff::DiffResult::Text(diff)) =
+                        cache.diffs.get(&f.path).value()
+                    {
+                        let mut selection_idx = 0;
+                        let default_staged = f.state == crate::tree::StagingState::Staged;
+                        for hunk in &diff.hunks {
+                            for diff_line in &hunk.lines {
+                                let is_staged = *diff
+                                    .line_selections
+                                    .get(selection_idx)
+                                    .unwrap_or(&default_staged);
+                                selection_idx += 1;
+                                match diff_line {
+                                    crate::diff::DiffLine::Addition { .. } => {
+                                        if is_staged {
+                                            left.3 += 1;
+                                        } else {
+                                            right.3 += 1;
+                                        }
+                                    }
+                                    crate::diff::DiffLine::Deletion { .. } => {
+                                        if is_staged {
+                                            left.4 += 1;
+                                        } else {
+                                            right.4 += 1;
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                    } else {
+                        let mut ins = 0;
+                        let mut del = 0;
+                        let mut stats_found = false;
+                        if let Some(crate::diff::DiffStats::Text {
+                            insertions,
+                            deletions,
+                        }) = cache.stats.get(&f.path).value()
+                        {
+                            ins = *insertions;
+                            del = *deletions;
+                            stats_found = true;
+                        }
+
+                        if !stats_found {
+                            if is_added {
+                                if let Some(r) = &f.right_path {
+                                    if let Ok(content) = std::fs::read_to_string(r) {
+                                        ins = content.lines().count();
+                                    }
+                                }
+                            } else if is_deleted {
+                                if let Some(l) = &f.left_path {
+                                    if let Ok(content) = std::fs::read_to_string(l) {
+                                        del = content.lines().count();
+                                    }
+                                }
+                            }
+                        }
+
+                        if f.state == crate::tree::StagingState::Staged {
+                            left.3 += ins;
+                            left.4 += del;
+                        } else if f.state == crate::tree::StagingState::Unstaged {
+                            right.3 += ins;
+                            right.4 += del;
+                        } else {
+                            left.3 += ins;
+                            left.4 += del;
+                        }
+                    }
+                }
+                TreeNode::Directory(dir) => {
+                    self.count_split_recursive(&dir.children, cache, left, right)
+                }
+            }
+        }
     }
 
     fn count_recursive(&self, nodes: &[TreeNode], a: &mut usize, d: &mut usize, m: &mut usize) {

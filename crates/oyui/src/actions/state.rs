@@ -22,7 +22,7 @@ pub struct TuiState {
     pub theme: ThemeState,
     pub should_quit: bool,
     pub command_mode: CommandMode,
-    pub confirm_merge_triggered: bool,
+    pub confirm_merge_window_enabled: bool,
 }
 
 impl TuiState {
@@ -31,7 +31,7 @@ impl TuiState {
             theme: ThemeState::new(base_theme_name),
             should_quit: false,
             command_mode: CommandMode::Normal,
-            confirm_merge_triggered: false,
+            confirm_merge_window_enabled: false,
         }
     }
 }

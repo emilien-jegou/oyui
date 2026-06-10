@@ -4,6 +4,7 @@ use crate::diff_cache::DiffCache;
 use crate::tree::FileTree;
 use crate::view::View;
 use parking_lot::RwLock;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 pub mod global_handler;
@@ -16,6 +17,7 @@ pub struct AppActionsHandler {
     pub tree: Arc<RwLock<FileTree>>,
     pub cache: Arc<RwLock<DiffCache>>,
     pub view: View,
+    pub right_path: PathBuf,
 }
 
 pub fn generate(
@@ -23,15 +25,18 @@ pub fn generate(
     tree: Arc<RwLock<FileTree>>,
     cache: Arc<RwLock<DiffCache>>,
     view: View,
+    right_path: PathBuf,
 ) -> BoxedHandler {
     let handler = AppActionsHandler {
         state,
         tree,
         cache,
         view,
+        right_path,
     };
     Handler {
         global: handler.clone(),
+        global_confirm_merge_window_enabled: handler.clone(),
         theme: handler.clone(),
         theme_bg: handler.clone(),
         theme_fg: handler.clone(),
