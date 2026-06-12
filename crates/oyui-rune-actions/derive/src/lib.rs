@@ -8,7 +8,7 @@ use syn::{
     braced, parenthesized,
     parse::{Parse, ParseStream},
     punctuated::Punctuated,
-    Ident, Result, Token, Type,
+    Expr, Ident, Result, Token, Type,
 };
 
 struct ActionTree {
@@ -241,6 +241,22 @@ pub fn define_actions(input: TokenStream) -> TokenStream {
         });
     }
 
+    // Create single-type instantiation helper
+    let single_types: Vec<TokenStream2> = generic_params.iter().map(|_| quote! { T }).collect();
+    let from_single_impl = if !generic_params.is_empty() {
+        quote! {
+            impl<T: Clone> Handler<#(#single_types),*> {
+                pub fn from_single(handler: T) -> Self {
+                    Self {
+                        #(#field_names: handler.clone()),*
+                    }
+                }
+            }
+        }
+    } else {
+        quote! {}
+    };
+
     // 5.5 Generate dispatch method implementation arms for BoxedHandler
     let mut dispatch_arms = Vec::new();
     for (path, _getset, leaves) in &active_branches {
@@ -284,6 +300,8 @@ pub fn define_actions(input: TokenStream) -> TokenStream {
         pub struct Handler<#(#generic_params),*> {
             #(#fields),*
         }
+
+        #from_single_impl
 
         // BoxedHandler is now fully type-erased (no generic parameters)
         #[derive(Clone)]
@@ -389,12 +407,38 @@ pub fn define_actions(input: TokenStream) -> TokenStream {
         });
     }
 
+    // Prepare structural metadata to bake into the generated macro
+    let mut metadata_entries = Vec::new();
+    for (path, _, _) in &active_branches {
+        let field_name = path_to_field_name(path);
+        let path_idents: Vec<Ident> = path.iter().cloned().collect();
+        metadata_entries.push(quote! {
+            #field_name: [ #(#path_idents)* ]
+        });
+    }
+
+    let build_handler_macro = quote! {
+        #[allow(unused_macros)]
+        macro_rules! build_handler {
+            ($($body:tt)*) => {
+                ::oyui_rune_actions::__internal_build_handler!(
+                    [ #(#metadata_entries),* ],
+                    $($body)*
+                )
+            };
+        }
+        #[allow(unused_imports)]
+        pub(crate) use build_handler;
+    };
+
     let expanded = quote! {
         #(#enum_definitions)*
 
         #(#traits)*
 
         #handler_struct
+
+        #build_handler_macro
 
         #[derive(Clone, Debug, ::oyui_rune_actions::reexport::rune::Any)]
         pub struct Action(pub Actions);
@@ -418,6 +462,180 @@ pub fn define_actions(input: TokenStream) -> TokenStream {
     };
 
     TokenStream::from(expanded)
+}
+
+struct InnerBuildHandlerInput {
+    metadata: Vec<MetadataEntry>,
+    user_entries: Vec<BuildHandlerEntry>,
+}
+
+struct MetadataEntry {
+    field_name: Ident,
+    path: Vec<Ident>,
+}
+
+enum BuildHandlerEntry {
+    Terminal {
+        ident: Ident,
+        expr: Expr,
+    },
+    Nested {
+        ident: Ident,
+        entries: Vec<BuildHandlerEntry>,
+    },
+}
+
+impl Parse for InnerBuildHandlerInput {
+    fn parse(input: ParseStream) -> Result<Self> {
+        // Parse metadata bracket
+        let metadata_content;
+        syn::bracketed!(metadata_content in input);
+
+        let mut metadata = Vec::new();
+        while !metadata_content.is_empty() {
+            let field_name: Ident = metadata_content.parse()?;
+            metadata_content.parse::<Token![:]>()?;
+
+            let path_content;
+            syn::bracketed!(path_content in metadata_content);
+            let mut path = Vec::new();
+            while !path_content.is_empty() {
+                path.push(path_content.parse::<Ident>()?);
+            }
+
+            metadata.push(MetadataEntry { field_name, path });
+            if metadata_content.peek(Token![,]) {
+                metadata_content.parse::<Token![,]>()?;
+            }
+        }
+
+        // Parse the comma separator
+        input.parse::<Token![,]>()?;
+
+        // Parse user entries
+        let mut user_entries = Vec::new();
+        while !input.is_empty() {
+            user_entries.push(input.parse()?);
+            if input.peek(Token![,]) {
+                input.parse::<Token![,]>()?;
+            }
+        }
+
+        Ok(InnerBuildHandlerInput {
+            metadata,
+            user_entries,
+        })
+    }
+}
+
+impl Parse for BuildHandlerEntry {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let ident: Ident = input.parse()?;
+
+        if input.peek(syn::token::Brace) {
+            let content;
+            braced!(content in input);
+            let mut entries = Vec::new();
+            while !content.is_empty() {
+                entries.push(content.parse()?);
+                if content.peek(Token![,]) {
+                    content.parse::<Token![,]>()?;
+                }
+            }
+            Ok(BuildHandlerEntry::Nested { ident, entries })
+        } else {
+            input.parse::<Token![:]>()?;
+            let expr: Expr = input.parse()?;
+            Ok(BuildHandlerEntry::Terminal { ident, expr })
+        }
+    }
+}
+
+#[proc_macro]
+pub fn __internal_build_handler(input: TokenStream) -> TokenStream {
+    let input = syn::parse_macro_input!(input as InnerBuildHandlerInput);
+
+    let mut flat_user_entries = Vec::new();
+    let mut current_path = Vec::new();
+    flatten_user_entries(&input.user_entries, &mut current_path, &mut flat_user_entries);
+
+    let mut field_assignments = Vec::new();
+
+    for meta in &input.metadata {
+        let field_name = &meta.field_name;
+        // Search for the most specific prefix match
+        let meta_path_strings: Vec<String> = meta
+            .path
+            .iter()
+            .map(|id| id.to_string().to_lowercase())
+            .collect();
+
+        let mut matched_expr = None;
+
+        // Search from most specific (longest prefix match) to least specific
+        for len in (1..=meta_path_strings.len()).rev() {
+            let prefix = &meta_path_strings[0..len];
+            if let Some(user_entry) = flat_user_entries.iter().find(|entry| entry.path == prefix) {
+                matched_expr = Some(&user_entry.expr);
+                break;
+            }
+        }
+
+        match matched_expr {
+            Some(expr) => {
+                field_assignments.push(quote! {
+                    #field_name: #expr
+                });
+            }
+            None => {
+                let path_str = meta_path_strings.join(" :: ");
+                let err_msg = format!(
+                    "No handler expression provided for active branch '{}' (path: {})",
+                    field_name, path_str
+                );
+                return syn::Error::new(field_name.span(), err_msg)
+                    .to_compile_error()
+                    .into();
+            }
+        }
+    }
+
+    let expanded = quote! {
+        Handler {
+            #(#field_assignments),*
+        }
+    };
+
+    TokenStream::from(expanded)
+}
+
+struct FlatUserEntry {
+    path: Vec<String>,
+    expr: Expr,
+}
+
+fn flatten_user_entries(
+    entries: &[BuildHandlerEntry],
+    current_path: &mut Vec<String>,
+    flat_entries: &mut Vec<FlatUserEntry>,
+) {
+    for entry in entries {
+        match entry {
+            BuildHandlerEntry::Terminal { ident, expr } => {
+                current_path.push(ident.to_string().to_lowercase());
+                flat_entries.push(FlatUserEntry {
+                    path: current_path.clone(),
+                    expr: expr.clone(),
+                });
+                current_path.pop();
+            }
+            BuildHandlerEntry::Nested { ident, entries } => {
+                current_path.push(ident.to_string().to_lowercase());
+                flatten_user_entries(entries, current_path, flat_entries);
+                current_path.pop();
+            }
+        }
+    }
 }
 
 fn find_active_branches(
