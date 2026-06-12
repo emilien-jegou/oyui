@@ -6,7 +6,9 @@ define_actions! {
     global {
         quit(),
         confirm(),
+        execute_merge(),
         open_command_mode(),
+        confirm_merge_window_enabled { @getset(bool) },
     },
     theme {
         @getset(String)
@@ -37,6 +39,15 @@ define_actions! {
         char_indicator { @getset(String) }
         char_add_sign { @getset(String) }
         char_del_sign { @getset(String) }
+        char_trailing_space_fg { @getset(String) }
+        char_tab_fg { @getset(String) }
+        char_scroll_fg { @getset(String) }
+
+        char_trailing_space { @getset(String) }
+        char_tab { @getset(String) }
+        char_scroll_both { @getset(String) }
+        char_scroll_left { @getset(String) }
+        char_scroll_right { @getset(String) }
     },
     view {
         file {

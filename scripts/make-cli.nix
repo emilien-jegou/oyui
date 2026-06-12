@@ -18,19 +18,19 @@
             # Execute dependencies
             ${builtins.concatStringsSep "\n" (map (dep: ''"$0" "${dep}"'') s.deps)}
           '' else ""}
-          
+
           ${if s ? dir then ''
             pushd "${s.dir}" >/dev/null
           '' else ""}
-          
+
           # Execute main logic
           set -x
           ${formatCmds s.exec} "''${@:2}"
           EXIT_CODE=$?
           { set +x; } 2>/dev/null
-          
+
           ${if s ? dir then "popd >/dev/null" else ""}
-          
+
           [ $EXIT_CODE -eq 0 ] || exit $EXIT_CODE
           ;;
       '';
