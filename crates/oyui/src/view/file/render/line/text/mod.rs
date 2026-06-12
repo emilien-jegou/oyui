@@ -69,42 +69,93 @@ impl<'a> TextRenderer<'a> {
 
         let char_by_char = bg_calc.char_by_char();
 
-        let mut push_slice = |slice: &str, style: Style, has_inline: bool| {
-            if !char_by_char || has_inline {
-                let mut final_style = style;
-                if !has_inline && !char_by_char {
-                    final_style = final_style.bg(bg_calc.get_bg(visual_x));
-                }
-                row_spans.push(Span::styled(slice.to_string(), final_style));
-                visual_x += slice.chars().count();
-                return;
-            }
+        let trailing_space_start_byte = self.content.trim_end_matches(' ').len();
+        let has_special_chars =
+            self.content.contains('\t') || trailing_space_start_byte < self.content.len();
 
-            let mut current_string = String::new();
-            let mut current_bg = None;
+        let tab_str = &self.theme.char_tab;
+        let trailing_space_str = &self.theme.char_trailing_space;
+        let tab_color = self.theme.char_tab_fg.into();
+        let trailing_space_color = self.theme.char_trailing_space_fg.into();
 
-            for c in slice.chars() {
-                let target_bg = bg_calc.get_bg(visual_x);
+        let mut push_slice =
+            |slice: &str, slice_start_byte: usize, style: Style, has_inline: bool| {
+                let slice_has_special = has_special_chars
+                    && (slice.contains('\t')
+                        || (slice_start_byte + slice.len() > trailing_space_start_byte));
 
-                if Some(target_bg) != current_bg {
-                    if !current_string.is_empty() {
-                        row_spans.push(Span::styled(
-                            current_string.clone(),
-                            style.bg(current_bg.unwrap()),
-                        ));
-                        current_string.clear();
+                if !char_by_char && !has_inline && !slice_has_special {
+                    let mut final_style = style;
+                    if !has_inline && !char_by_char {
+                        final_style = final_style.bg(bg_calc.get_bg(visual_x));
                     }
-                    current_bg = Some(target_bg);
+                    row_spans.push(Span::styled(slice.to_string(), final_style));
+                    visual_x += slice.chars().count();
+                    return;
                 }
-                current_string.push(c);
-                visual_x += 1;
-            }
 
-            if !current_string.is_empty() {
-                let final_bg = current_bg.unwrap_or_else(|| bg_calc.get_bg(visual_x));
-                row_spans.push(Span::styled(current_string, style.bg(final_bg)));
-            }
-        };
+                let mut current_string = String::new();
+                let mut current_bg = None;
+                let mut current_fg = None;
+
+                let mut char_byte_offset = 0;
+
+                for c in slice.chars() {
+                    let char_len = c.len_utf8();
+                    let abs_byte = slice_start_byte + char_byte_offset;
+                    char_byte_offset += char_len;
+
+                    let target_bg = bg_calc.get_bg(visual_x);
+                    let is_tab = c == '\t';
+                    let is_trailing_space = c == ' ' && abs_byte >= trailing_space_start_byte;
+
+                    let (display_str, target_fg) = if is_tab {
+                        (Some(tab_str.as_str()), Some(tab_color))
+                    } else if is_trailing_space {
+                        (
+                            Some(trailing_space_str.as_str()),
+                            Some(trailing_space_color),
+                        )
+                    } else {
+                        (None, None)
+                    };
+
+                    let effective_fg = target_fg.or_else(|| style.fg);
+
+                    if Some(target_bg) != current_bg || current_fg != effective_fg {
+                        if !current_string.is_empty() {
+                            let mut s = style;
+                            if let Some(bg) = current_bg {
+                                s = s.bg(bg);
+                            }
+                            if let Some(fg) = current_fg {
+                                s = s.fg(fg);
+                            }
+                            row_spans.push(Span::styled(current_string.clone(), s));
+                            current_string.clear();
+                        }
+                        current_bg = Some(target_bg);
+                        current_fg = effective_fg;
+                    }
+
+                    if let Some(s) = display_str {
+                        current_string.push_str(s);
+                    } else {
+                        current_string.push(c);
+                    }
+
+                    visual_x += 1;
+                }
+
+                if !current_string.is_empty() {
+                    let final_bg = current_bg.unwrap_or_else(|| bg_calc.get_bg(visual_x));
+                    let mut s = style.bg(final_bg);
+                    if let Some(fg) = current_fg {
+                        s = s.fg(fg);
+                    }
+                    row_spans.push(Span::styled(current_string, s));
+                }
+            };
 
         let inline_bg: Color = if !self.is_staged {
             if self.is_selected {
@@ -126,7 +177,12 @@ impl<'a> TextRenderer<'a> {
 
         let crate::config::theme::Color::Rgb(fg_r, fg_g, fg_b) = self.theme.fg;
         let fallback_style = syntect::highlighting::Style {
-            foreground: syntect::highlighting::Color { r: fg_r, g: fg_g, b: fg_b, a: 255 },
+            foreground: syntect::highlighting::Color {
+                r: fg_r,
+                g: fg_g,
+                b: fg_b,
+                a: 255,
+            },
             background: syntect::highlighting::Color::WHITE,
             font_style: syntect::highlighting::FontStyle::empty(),
         };
@@ -160,34 +216,38 @@ impl<'a> TextRenderer<'a> {
 
             while token_offset < text.len() {
                 let abs_byte = text_start + token_offset;
-                let active_hl = self.inline_highlights
+                let active_hl = self
+                    .inline_highlights
                     .iter()
                     .find(|h| h.byte_range.contains(&abs_byte));
 
                 let prev_offset = token_offset;
 
                 if let Some(hl) = active_hl {
-                    let hl_end_in_token = (hl.byte_range.end.saturating_sub(text_start)).min(text.len());
+                    let hl_end_in_token =
+                        (hl.byte_range.end.saturating_sub(text_start)).min(text.len());
                     if let Some(slice) = text.get(token_offset..hl_end_in_token) {
-                        push_slice(slice, base_style.bg(inline_bg), true);
+                        push_slice(slice, abs_byte, base_style.bg(inline_bg), true);
                     } else {
-                        push_slice(&text[token_offset..], base_style, false);
+                        push_slice(&text[token_offset..], abs_byte, base_style, false);
                         break;
                     }
                     token_offset = hl_end_in_token;
                 } else {
-                    let next_hl_start = self.inline_highlights
+                    let next_hl_start = self
+                        .inline_highlights
                         .iter()
                         .map(|h| h.byte_range.start)
                         .filter(|&start| start > abs_byte)
                         .min()
                         .unwrap_or(text_end);
 
-                    let next_hl_in_token = (next_hl_start.saturating_sub(text_start)).min(text.len());
+                    let next_hl_in_token =
+                        (next_hl_start.saturating_sub(text_start)).min(text.len());
                     if let Some(slice) = text.get(token_offset..next_hl_in_token) {
-                        push_slice(slice, base_style, false);
+                        push_slice(slice, abs_byte, base_style, false);
                     } else {
-                        push_slice(&text[token_offset..], base_style, false);
+                        push_slice(&text[token_offset..], abs_byte, base_style, false);
                         break;
                     }
                     token_offset = next_hl_in_token;
@@ -200,7 +260,7 @@ impl<'a> TextRenderer<'a> {
             current_byte = text_end;
         }
 
-        let content_len = self.content.chars().count();
+        let content_len: usize = row_spans.iter().map(|s| s.content.chars().count()).sum();
         let code_col_width = (self.area_width as usize).saturating_sub(6);
 
         let final_line = SpansWrapper {

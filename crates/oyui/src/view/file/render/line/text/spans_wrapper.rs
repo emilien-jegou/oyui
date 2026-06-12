@@ -89,7 +89,8 @@ impl<'a> SpansWrapper<'a> {
             }
         }
 
-        let indicator_style = Style::default().fg(theme.dim.into());
+        let indicator_style =
+            Style::default().fg(theme.char_scroll_fg.into());
 
         if has_left && !capped_spans.is_empty() {
             let first_span = capped_spans.remove(0);
@@ -98,14 +99,14 @@ impl<'a> SpansWrapper<'a> {
             let rest: String = chars.collect();
 
             let symbol = if has_right && capped_spans.is_empty() && rest.is_empty() {
-                "↔"
+                &theme.char_scroll_both
             } else {
-                "˂"
+                &theme.char_scroll_left
             };
 
             capped_spans.insert(
                 0,
-                Span::styled(symbol, first_span.style.patch(indicator_style)),
+                Span::styled(symbol.clone(), first_span.style.patch(indicator_style)),
             );
 
             if !rest.is_empty() {
@@ -119,16 +120,19 @@ impl<'a> SpansWrapper<'a> {
             if chars_count > 0 {
                 let prefix: String = last_span.content.chars().take(chars_count - 1).collect();
                 let symbol = if has_left && capped_spans.is_empty() && prefix.is_empty() {
-                    "↔"
+                    &theme.char_scroll_both
                 } else {
-                    "˃"
+                    &theme.char_scroll_right
                 };
 
                 if !prefix.is_empty() {
                     capped_spans.push(Span::styled(prefix, last_span.style));
                 }
 
-                capped_spans.push(Span::styled(symbol, last_span.style.patch(indicator_style)));
+                capped_spans.push(Span::styled(
+                    symbol.clone(),
+                    last_span.style.patch(indicator_style),
+                ));
             }
         }
 

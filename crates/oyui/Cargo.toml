@@ -39,6 +39,10 @@ rune = { workspace = true }
 serde_json = { workspace = true }
 parking_lot = { workspace = true }
 once_cell = { workspace = true }
+paste = { workspace = true }
+
+[dev-dependencies]
+paste = { workspace = true }
 
 [build-dependencies]
 syntect = { workspace = true }
@@ -46,3 +50,4 @@ serde = { workspace = true }
 toml = { workspace = true }
 typed-builder = { workspace = true }
 rune = { workspace = true }
+

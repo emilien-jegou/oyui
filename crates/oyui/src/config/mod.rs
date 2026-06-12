@@ -18,8 +18,6 @@ thread_local! {
         RefCell::new(crate::actions::keybinds::default_keybinds());
 }
 
-// NB: This code was place here so that we don't need
-//     to add ratatui to the build dependency list
 impl From<theme::Color> for ratatui::style::Color {
     fn from(c: theme::Color) -> Self {
         match c {

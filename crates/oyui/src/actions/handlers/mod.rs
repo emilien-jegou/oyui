@@ -34,6 +34,7 @@ pub fn generate(
         view,
         right_path,
     };
+
     Handler {
         global: handler.clone(),
         global_confirm_merge_window_enabled: handler.clone(),
@@ -72,6 +73,14 @@ pub fn generate(
         view_tree_cursor: handler.clone(),
         view_tree_directory: handler.clone(),
         view_tree_staging: handler.clone(),
+        theme_char_trailing_space_fg: handler.clone(),
+        theme_char_tab_fg: handler.clone(),
+        theme_char_scroll_fg: handler.clone(),
+        theme_char_trailing_space: handler.clone(),
+        theme_char_tab: handler.clone(),
+        theme_char_scroll_both: handler.clone(),
+        theme_char_scroll_left: handler.clone(),
+        theme_char_scroll_right: handler.clone(),
     }
     .build()
 }
