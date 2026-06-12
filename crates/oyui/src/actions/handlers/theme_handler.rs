@@ -5,10 +5,8 @@ use crate::config::LineHighlightMode;
 
 /// Helper to convert an internal [`Color`] enum back into a `#rrggbb` hex string
 fn color_to_hex(c: Color) -> String {
-    #[allow(unreachable_patterns)]
     match c {
         Color::Rgb(r, g, b) => format!("#{:02x}{:02x}{:02x}", r, g, b),
-        _ => "#000000".to_string(),
     }
 }
 
@@ -34,39 +32,43 @@ impl ThemeActionsHandler for AppActionsHandler {
     }
 }
 
-macro_rules! impl_color_getset {
-    ($trait_name:ident, $field:ident) => {
-        impl $trait_name for AppActionsHandler {
-            fn get(&self) -> String {
-                let color = self.state.read().theme.ui.$field;
-                color_to_hex(color)
-            }
+macro_rules! impl_opt_color_getset {
+    ($field:ident) => {
+        paste::paste! {
+            impl [< Theme $field:camel ActionsHandler >] for AppActionsHandler {
+                fn get(&self) -> String {
+                    if let Some(color) = self.state.read().theme.ui.$field {
+                        color_to_hex(color)
+                    } else {
+                        String::new()
+                    }
+                }
 
-            fn set(&self, val: String) {
-                if let Some(c) = crate::actions::parse_hex_color(&val) {
-                    self.state.write().theme.ui.$field = c;
+                fn set(&self, val: String) {
+                    if val.is_empty() || val == "none" {
+                        self.state.write().theme.ui.$field = None;
+                    } else if let Some(c) = crate::actions::parse_hex_color(&val) {
+                        self.state.write().theme.ui.$field = Some(c);
+                    }
                 }
             }
         }
     };
 }
 
-macro_rules! impl_opt_color_getset {
-    ($trait_name:ident, $field:ident) => {
-        impl $trait_name for AppActionsHandler {
-            fn get(&self) -> String {
-                if let Some(color) = self.state.read().theme.ui.$field {
+macro_rules! impl_color_getset {
+    ($field:ident) => {
+        paste::paste! {
+            impl [< Theme $field:camel ActionsHandler >] for AppActionsHandler {
+                fn get(&self) -> String {
+                    let color = self.state.read().theme.ui.$field;
                     color_to_hex(color)
-                } else {
-                    String::new()
                 }
-            }
 
-            fn set(&self, val: String) {
-                if val.is_empty() || val == "none" {
-                    self.state.write().theme.ui.$field = None;
-                } else if let Some(c) = crate::actions::parse_hex_color(&val) {
-                    self.state.write().theme.ui.$field = Some(c);
+                fn set(&self, val: String) {
+                    if let Some(c) = crate::actions::parse_hex_color(&val) {
+                        self.state.write().theme.ui.$field = c;
+                    }
                 }
             }
         }
@@ -74,40 +76,54 @@ macro_rules! impl_opt_color_getset {
 }
 
 macro_rules! impl_string_getset {
-    ($trait_name:ident, $field:ident) => {
-        impl $trait_name for AppActionsHandler {
-            fn get(&self) -> String {
-                self.state.read().theme.ui.$field.clone()
-            }
+    ($field:ident) => {
+        paste::paste! {
+            impl [< Theme $field:camel ActionsHandler >] for AppActionsHandler {
+                fn get(&self) -> String {
+                    self.state.read().theme.ui.$field.clone()
+                }
 
-            fn set(&self, val: String) {
-                self.state.write().theme.ui.$field = val;
+                fn set(&self, val: String) {
+                    self.state.write().theme.ui.$field = val;
+                }
             }
         }
     };
 }
 
-impl_color_getset!(ThemeBgActionsHandler, bg);
-impl_color_getset!(ThemeFgActionsHandler, fg);
-impl_color_getset!(ThemeCursorBgActionsHandler, cursor_bg);
-impl_color_getset!(ThemeDimActionsHandler, dim);
-impl_color_getset!(ThemeStagedActionsHandler, staged);
-impl_color_getset!(ThemeUnstagedActionsHandler, unstaged);
-impl_color_getset!(ThemePartialActionsHandler, partial);
-impl_color_getset!(ThemeDirActionsHandler, dir);
-impl_color_getset!(ThemeCmdActionsHandler, cmd);
-impl_color_getset!(ThemeAddBgActionsHandler, add_bg);
-impl_color_getset!(ThemeDelBgActionsHandler, del_bg);
-impl_color_getset!(ThemeAddFgActionsHandler, add_fg);
-impl_color_getset!(ThemeDelFgActionsHandler, del_fg);
-impl_string_getset!(ThemeCharLineSplitActionsHandler, char_line_split);
-impl_opt_color_getset!(ThemeCharLineSplitColorActionsHandler, char_line_split_color);
-impl_string_getset!(ThemeCharHunkSplitActionsHandler, char_hunk_split);
-impl_opt_color_getset!(ThemeCharHunkSplitColorActionsHandler, char_hunk_split_color);
-impl_string_getset!(ThemeCharIndicatorActionsHandler, char_indicator);
-impl_string_getset!(ThemeCharAddSignActionsHandler, char_add_sign);
-impl_string_getset!(ThemeCharDelSignActionsHandler, char_del_sign);
+// Color fields
+impl_color_getset!(bg);
+impl_color_getset!(fg);
+impl_color_getset!(cursor_bg);
+impl_color_getset!(dim);
+impl_color_getset!(staged);
+impl_color_getset!(unstaged);
+impl_color_getset!(partial);
+impl_color_getset!(dir);
+impl_color_getset!(cmd);
+impl_color_getset!(add_bg);
+impl_color_getset!(del_bg);
+impl_color_getset!(add_fg);
+impl_color_getset!(del_fg);
+impl_opt_color_getset!(char_line_split_color);
+impl_opt_color_getset!(char_hunk_split_color);
+impl_color_getset!(char_scroll_fg);
+impl_color_getset!(char_trailing_space_fg);
+impl_color_getset!(char_tab_fg);
 
+// String fields
+impl_string_getset!(char_line_split);
+impl_string_getset!(char_hunk_split);
+impl_string_getset!(char_indicator);
+impl_string_getset!(char_add_sign);
+impl_string_getset!(char_del_sign);
+impl_string_getset!(char_scroll_both);
+impl_string_getset!(char_scroll_right);
+impl_string_getset!(char_scroll_left);
+impl_string_getset!(char_trailing_space);
+impl_string_getset!(char_tab);
+
+// Highlight modes
 impl ThemeFileStagedHighlightActionsHandler for AppActionsHandler {
     fn get(&self) -> LineHighlightMode {
         self.state.read().theme.ui.file_staged_highlight

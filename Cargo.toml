@@ -7,6 +7,7 @@ oyui-tasker = { path = "crates/oyui-tasker", version = "0.0.7" }
 oyui-rune-actions = { path = "crates/oyui-rune-actions", version = "0.0.8" }
 oyui-syndiff = { path = "crates/syndiff", version = "0.0.7" }
 
+paste = "1.0.15"
 ratatui = { version = "0.30", default-features = false, features = ["crossterm"] }
 crossterm = "0.29"
 imara-diff = "0.2"

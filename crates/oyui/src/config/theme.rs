@@ -7,6 +7,14 @@ pub enum Color {
     Rgb(u8, u8, u8),
 }
 
+impl Color {
+    pub fn as_rgb(&self) -> (u8, u8, u8) {
+        match self {
+            Color::Rgb(r, g, b) => (*r, *g, *b),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Any)]
 pub enum LineHighlightMode {
     #[rune(constructor)]
@@ -35,6 +43,7 @@ pub struct UiTheme {
     pub cursor_bg: Color,
     pub fg: Color,
     pub dim: Color,
+    pub dimmer: Color,
     pub staged: Color,
     pub unstaged: Color,
     pub partial: Color,
@@ -44,6 +53,13 @@ pub struct UiTheme {
     pub del_bg: Color,
     pub add_fg: Color,
     pub del_fg: Color,
+    pub char_trailing_space_fg: Color,
+    pub char_tab_fg: Color,
+    pub char_scroll_fg: Color,
+    #[builder(default = None)]
+    pub char_hunk_split_color: Option<Color>,
+    #[builder(default = None)]
+    pub char_line_split_color: Option<Color>,
 
     #[builder(default = LineHighlightMode::Gradient(0.08))]
     pub file_staged_highlight: LineHighlightMode,
@@ -57,16 +73,25 @@ pub struct UiTheme {
 
     #[builder(default = "◣".to_string())]
     pub char_hunk_split: String,
-    #[builder(default = None)]
-    pub char_hunk_split_color: Option<Color>,
     #[builder(default = "▶".to_string())]
     pub char_line_split: String,
-    #[builder(default = None)]
-    pub char_line_split_color: Option<Color>,
     #[builder(default = "▎".to_string())]
     pub char_indicator: String,
     #[builder(default = "+ ".to_string())]
     pub char_add_sign: String,
     #[builder(default = "- ".to_string())]
     pub char_del_sign: String,
+
+    #[builder(default = "•".to_string())]
+    pub char_trailing_space: String,
+
+    #[builder(default = "·   ".to_string())]
+    pub char_tab: String,
+
+    #[builder(default = "↔".to_string())]
+    pub char_scroll_both: String,
+    #[builder(default = "˂".to_string())]
+    pub char_scroll_left: String,
+    #[builder(default = "˃".to_string())]
+    pub char_scroll_right: String,
 }

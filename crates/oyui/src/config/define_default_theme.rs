@@ -51,6 +51,7 @@ macro_rules! define_default_theme {
                 let staged = self.staged();
                 let del_fg = self.del_fg();
                 let dim = self.dim();
+                let dimmer = self.dimmer();
 
                 let cursor_bg = syn_to_color(self.theme().settings.line_highlight)
                     .unwrap_or_else(|| blend(fg, bg, 1.));
@@ -60,6 +61,7 @@ macro_rules! define_default_theme {
                   .cursor_bg(cursor_bg)
                   .fg(fg)
                   .dim(dim)
+                  .dimmer(dimmer)
                   .staged(staged)
                   .unstaged(dim)
                   .partial(self.partial())
@@ -69,6 +71,9 @@ macro_rules! define_default_theme {
                   .del_bg(blend(del_fg, bg, 1.))
                   .add_fg(staged)
                   .del_fg(del_fg)
+                  .char_trailing_space_fg(dimmer)
+                  .char_tab_fg(dimmer)
+                  .char_scroll_fg(dimmer)
                   .build()
             }
         }
@@ -86,6 +91,11 @@ define_default_theme! {
         setting: gutter_foreground,
         light: (150, 150, 160),
         dark: (90, 90, 105),
+    },
+    dimmer: {
+        setting: gutter_foreground,
+        light: (180, 180, 197),
+        dark: (60, 60, 75),
     },
     staged: {
         list: ["markup.inserted", "string", "entity.name.string"],
@@ -146,9 +156,12 @@ pub fn derive_ui_theme(theme: &Theme) -> UiTheme {
 }
 
 pub fn is_dark(bg: Color) -> bool {
-    let Color::Rgb(r, g, b) = bg;
-    let luminance = 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32;
-    luminance < 128.0
+    match bg {
+        Color::Rgb(r, g, b) => {
+            let luminance = 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32;
+            luminance < 128.0
+        }
+    }
 }
 
 fn extract_scope_color(theme: &Theme, target_scopes: &[&str]) -> Option<Color> {
@@ -167,8 +180,8 @@ fn extract_scope_color(theme: &Theme, target_scopes: &[&str]) -> Option<Color> {
 }
 
 fn blend(fg: Color, bg: Color, alpha: f32) -> Color {
-    let Color::Rgb(fr, fg_g, fb) = fg;
-    let Color::Rgb(br, bg_g, bb) = bg;
+    let (fr, fg_g, fb) = fg.as_rgb();
+    let (br, bg_g, bb) = bg.as_rgb();
 
     let blend_channel = |f: u8, b: u8| ((f as f32 * alpha) + (b as f32 * (1.0 - alpha))) as u8;
 
