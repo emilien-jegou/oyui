@@ -93,16 +93,21 @@ impl TreeViewData {
         theme: &UiTheme,
     ) {
         let (a, d, m) = diff_summary;
-        let (tot_ins, tot_del) = cache.stats.iter().fold((0, 0), |acc, s| {
+
+        let mut tot_ins = 0;
+        let mut tot_del = 0;
+
+        let _ = cache.stats.inner().iter_sync(|_, v| {
             if let lazy::Lazy::Ready(DiffStats::Text {
                 insertions,
                 deletions,
-            }) = s
+            }) = v
             {
-                (acc.0 + insertions, acc.1 + deletions)
-            } else {
-                acc
+                tot_ins += insertions;
+                tot_del += deletions;
             }
+
+            true
         });
 
         let path = base_path

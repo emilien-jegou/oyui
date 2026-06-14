@@ -12,19 +12,20 @@ fn color_to_hex(c: Color) -> String {
 
 impl ThemeActionsHandler for AppActionsHandler {
     fn get(&self) -> String {
-        self.state.read().theme.base_theme_name.clone()
+        self.state.theme.read().base_theme_name.clone()
     }
 
     fn set(&self, name: String) {
-        let mut state = self.state.write();
-        let s = &state.theme.base_theme_name;
+        let current_base = self.state.theme.read().base_theme_name.clone();
         let (base_ui, tm) = crate::config::get_embedded_themes()
             .get(&name)
             .cloned()
-            .unwrap_or_else(|| crate::config::fallback_theme(s));
-        state.theme.ui = base_ui;
-        state.theme.base_theme_name = name;
-        state.theme.tm_theme = tm;
+            .unwrap_or_else(|| crate::config::fallback_theme(&current_base));
+
+        let mut theme = self.state.theme.write();
+        theme.ui = base_ui;
+        theme.base_theme_name = name;
+        theme.tm_theme = tm;
     }
 
     fn toggle_gradient(&self) {
@@ -37,7 +38,7 @@ macro_rules! impl_opt_color_getset {
         paste::paste! {
             impl [< Theme $field:camel ActionsHandler >] for AppActionsHandler {
                 fn get(&self) -> String {
-                    if let Some(color) = self.state.read().theme.ui.$field {
+                    if let Some(color) = self.state.theme.read().ui.$field {
                         color_to_hex(color)
                     } else {
                         String::new()
@@ -46,9 +47,9 @@ macro_rules! impl_opt_color_getset {
 
                 fn set(&self, val: String) {
                     if val.is_empty() || val == "none" {
-                        self.state.write().theme.ui.$field = None;
+                        self.state.theme.write().ui.$field = None;
                     } else if let Some(c) = crate::actions::parse_hex_color(&val) {
-                        self.state.write().theme.ui.$field = Some(c);
+                        self.state.theme.write().ui.$field = Some(c);
                     }
                 }
             }
@@ -61,13 +62,13 @@ macro_rules! impl_color_getset {
         paste::paste! {
             impl [< Theme $field:camel ActionsHandler >] for AppActionsHandler {
                 fn get(&self) -> String {
-                    let color = self.state.read().theme.ui.$field;
+                    let color = self.state.theme.read().ui.$field;
                     color_to_hex(color)
                 }
 
                 fn set(&self, val: String) {
                     if let Some(c) = crate::actions::parse_hex_color(&val) {
-                        self.state.write().theme.ui.$field = c;
+                        self.state.theme.write().ui.$field = c;
                     }
                 }
             }
@@ -80,11 +81,11 @@ macro_rules! impl_string_getset {
         paste::paste! {
             impl [< Theme $field:camel ActionsHandler >] for AppActionsHandler {
                 fn get(&self) -> String {
-                    self.state.read().theme.ui.$field.clone()
+                    self.state.theme.read().ui.$field.clone()
                 }
 
                 fn set(&self, val: String) {
-                    self.state.write().theme.ui.$field = val;
+                    self.state.theme.write().ui.$field = val;
                 }
             }
         }
@@ -126,40 +127,40 @@ impl_string_getset!(char_tab);
 // Highlight modes
 impl ThemeFileStagedHighlightActionsHandler for AppActionsHandler {
     fn get(&self) -> LineHighlightMode {
-        self.state.read().theme.ui.file_staged_highlight
+        self.state.theme.read().ui.file_staged_highlight
     }
 
     fn set(&self, val: LineHighlightMode) {
-        self.state.write().theme.ui.file_staged_highlight = val;
+        self.state.theme.write().ui.file_staged_highlight = val;
     }
 }
 
 impl ThemeFileStagedHighlightOpacityActionsHandler for AppActionsHandler {
     fn get(&self) -> f64 {
-        self.state.read().theme.ui.file_staged_highlight_opacity
+        self.state.theme.read().ui.file_staged_highlight_opacity
     }
 
     fn set(&self, val: f64) {
-        self.state.write().theme.ui.file_staged_highlight_opacity = val;
+        self.state.theme.write().ui.file_staged_highlight_opacity = val;
     }
 }
 
 impl ThemeFileChangeHighlightActionsHandler for AppActionsHandler {
     fn get(&self) -> LineHighlightMode {
-        self.state.read().theme.ui.file_change_highlight
+        self.state.theme.read().ui.file_change_highlight
     }
 
     fn set(&self, val: LineHighlightMode) {
-        self.state.write().theme.ui.file_change_highlight = val;
+        self.state.theme.write().ui.file_change_highlight = val;
     }
 }
 
 impl ThemeFileChangeHighlightOpacityActionsHandler for AppActionsHandler {
     fn get(&self) -> f64 {
-        self.state.read().theme.ui.file_change_highlight_opacity
+        self.state.theme.read().ui.file_change_highlight_opacity
     }
 
     fn set(&self, val: f64) {
-        self.state.write().theme.ui.file_change_highlight_opacity = val;
+        self.state.theme.write().ui.file_change_highlight_opacity = val;
     }
 }

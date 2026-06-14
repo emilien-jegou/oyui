@@ -1,14 +1,14 @@
 use crate::actions::handlers::AppActionsHandler;
 use crate::actions::*;
+use crate::diff_cache::DiffCache;
 use crate::tree::FileTree;
 
 impl ViewTreeActionsHandler for AppActionsHandler {
     fn open_selected(&self) {
         let tree = self.tree.read();
-        let cache = self.cache.read();
         let mut view = self.view.tree_view.write();
 
-        if let Some(row) = view.selected_row(&tree, &cache) {
+        if let Some(row) = view.selected_row(&tree, &self.cache) {
             if row.is_dir {
                 view.ui_state.set_folded(&row.path, false);
             } else {
@@ -32,10 +32,9 @@ impl ViewTreeCursorActionsHandler for AppActionsHandler {
 
     fn down(&self, val: u32) {
         let tree = self.tree.read();
-        let cache = self.cache.read();
         let mut view = self.view.tree_view.write();
 
-        let len = view.flat_rows(&tree, &cache).len();
+        let len = view.flat_rows(&tree, &self.cache).len();
         let max_idx = len.saturating_sub(1);
         view.selected_index = (view.selected_index + val as usize).min(max_idx);
     }
@@ -56,9 +55,8 @@ impl ViewTreeCursorActionsHandler for AppActionsHandler {
 
     fn page_down(&self) {
         let tree = self.tree.read();
-        let cache = self.cache.read();
         let mut view = self.view.tree_view.write();
-        let len = view.flat_rows(&tree, &cache).len();
+        let len = view.flat_rows(&tree, &self.cache).len();
         let max_idx = len.saturating_sub(1);
         let page_size = view.last_height.saturating_sub(2).max(1);
         view.selected_index = (view.selected_index + page_size).min(max_idx);
@@ -71,10 +69,9 @@ impl ViewTreeCursorActionsHandler for AppActionsHandler {
 
     fn bottom(&self) {
         let tree = self.tree.read();
-        let cache = self.cache.read();
         let mut view = self.view.tree_view.write();
 
-        let len = view.flat_rows(&tree, &cache).len();
+        let len = view.flat_rows(&tree, &self.cache).len();
         let max_idx = len.saturating_sub(1);
         view.selected_index = max_idx;
     }
@@ -83,10 +80,9 @@ impl ViewTreeCursorActionsHandler for AppActionsHandler {
 impl ViewTreeDirectoryActionsHandler for AppActionsHandler {
     fn expand(&self) {
         let tree = self.tree.read();
-        let cache = self.cache.read();
         let mut view = self.view.tree_view.write();
 
-        if let Some(row) = view.selected_row(&tree, &cache) {
+        if let Some(row) = view.selected_row(&tree, &self.cache) {
             if row.is_dir {
                 view.ui_state.set_folded(&row.path, false);
             }
@@ -95,10 +91,9 @@ impl ViewTreeDirectoryActionsHandler for AppActionsHandler {
 
     fn collapse(&self) {
         let tree = self.tree.read();
-        let cache = self.cache.read();
         let mut view = self.view.tree_view.write();
 
-        if let Some(row) = view.selected_row(&tree, &cache) {
+        if let Some(row) = view.selected_row(&tree, &self.cache) {
             if row.is_dir {
                 view.ui_state.set_folded(&row.path, true);
             }
@@ -109,33 +104,29 @@ impl ViewTreeDirectoryActionsHandler for AppActionsHandler {
 impl ViewTreeStagingActionsHandler for AppActionsHandler {
     fn toggle_selected(&self) {
         let tree_guard = self.tree.read();
-        let cache_guard = self.cache.read();
         let view = self.view.tree_view.read();
 
-        if let Some(row) = view.selected_row(&tree_guard, &cache_guard) {
+        if let Some(row) = view.selected_row(&tree_guard, &self.cache) {
             let new_state = row.staging_state.toggle();
             let path_clone = row.path.clone();
             drop(tree_guard);
-            drop(cache_guard);
             drop(view);
 
             tracing::debug!(path = %path_clone.display(), ?new_state, "Toggling stage state");
             let mut tree_write = self.tree.write();
             crate::app::commands::set_state_for_path(&mut tree_write, &path_clone, new_state);
 
-            let mut cache_write = self.cache.write();
-            sync_cache(&tree_write, &mut cache_write);
+            sync_cache(&tree_write, &self.cache);
         }
     }
 
     fn invert(&self) {
         tracing::debug!("Inverting all staging selections");
         let mut tree_write = self.tree.write();
-        let mut cache_write = self.cache.write();
 
         fn invert_recursive(
             nodes: &mut [crate::tree::TreeNode],
-            cache: &mut crate::diff_cache::DiffCache,
+            cache: &DiffCache,
         ) {
             for node in nodes {
                 match node {
@@ -211,15 +202,12 @@ impl ViewTreeStagingActionsHandler for AppActionsHandler {
             }
         }
 
-        invert_recursive(&mut tree_write.nodes, &mut cache_write);
+        invert_recursive(&mut tree_write.nodes, &self.cache);
     }
 }
 
-pub(crate) fn sync_cache(tree: &FileTree, cache: &mut crate::diff_cache::DiffCache) {
-    fn sync_cache_recursive(
-        nodes: &[crate::tree::TreeNode],
-        cache: &mut crate::diff_cache::DiffCache,
-    ) {
+pub(crate) fn sync_cache(tree: &FileTree, cache: &DiffCache) {
+    fn sync_cache_recursive(nodes: &[crate::tree::TreeNode], cache: &DiffCache) {
         for node in nodes {
             match node {
                 crate::tree::TreeNode::File(f) => {
@@ -259,5 +247,6 @@ pub(crate) fn sync_cache(tree: &FileTree, cache: &mut crate::diff_cache::DiffCac
             }
         }
     }
+
     sync_cache_recursive(&tree.nodes, cache);
 }

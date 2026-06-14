@@ -168,7 +168,8 @@ impl FileViewData {
             header_area,
         );
 
-        let Some(diff_result) = cache.diffs.get(path).value() else {
+        let df = cache.diffs.get(path);
+        let Some(diff_result) = df.value() else {
             frame.render_widget(Paragraph::new("Loading...").bg(theme.bg), list_area);
             return;
         };
@@ -229,10 +230,11 @@ impl FileViewData {
             }
         };
 
-        let syntax_opt = cache.syntax.get(path).value();
+        let df = cache.syntax.get(path);
+        let syntax_opt = df.value();
 
-        let old_lines: Vec<&str> = diff.old_text.lines().collect();
-        let new_lines: Vec<&str> = diff.new_text.lines().collect();
+        let old_lines: Vec<&str> = diff.old_file_content.lines().collect();
+        let new_lines: Vec<&str> = diff.new_file_content.lines().collect();
 
         // Get scroll state for hover styling
         let scroll_state = self.scroll_states.entry(path.clone()).or_default();

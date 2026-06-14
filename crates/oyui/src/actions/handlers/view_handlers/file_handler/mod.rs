@@ -2,6 +2,7 @@ use std::path::Path;
 
 use crate::actions::handlers::AppActionsHandler;
 use crate::actions::*;
+use crate::diff::DiffResult;
 use crate::diff_cache::DiffCache;
 
 pub mod file_staging_handler;
@@ -59,15 +60,15 @@ fn handle_hscroll(
 ) {
     let mut max_line_len = 0;
 
-    if let Some(crate::diff::DiffResult::Text(diff)) = cache.diffs.get(path).value() {
+    if let Some(DiffResult::Text(diff)) = cache.diffs.get(path).value() {
         let old_max = diff
-            .old_text
+            .old_file_content
             .lines()
             .map(|l| l.chars().count())
             .max()
             .unwrap_or(0);
         let new_max = diff
-            .new_text
+            .new_file_content
             .lines()
             .map(|l| l.chars().count())
             .max()
@@ -92,17 +93,15 @@ impl ViewFileActionsHandler for AppActionsHandler {
 impl ViewFileScrollActionsHandler for AppActionsHandler {
     fn left(&self, val: u32) {
         let mut view = self.view.file_view.write();
-        let cache = self.cache.read();
         if let Some(ctx) = get_file_context(&view) {
-            handle_hscroll(&mut view, &ctx.path, -(val as isize * 4), &cache);
+            handle_hscroll(&mut view, &ctx.path, -(val as isize * 4), &self.cache);
         }
     }
 
     fn right(&self, val: u32) {
         let mut view = self.view.file_view.write();
-        let cache = self.cache.read();
         if let Some(ctx) = get_file_context(&view) {
-            handle_hscroll(&mut view, &ctx.path, val as isize * 4, &cache);
+            handle_hscroll(&mut view, &ctx.path, val as isize * 4, &self.cache);
         }
     }
 }
@@ -213,7 +212,6 @@ impl ViewFileNavActionsHandler for AppActionsHandler {
 impl ViewFileFoldActionsHandler for AppActionsHandler {
     fn toggle(&self) {
         let mut view = self.view.file_view.write();
-        let cache = self.cache.read();
         if let Some(ctx) = get_file_context(&view) {
             let mut target_logical = 0;
             if let Some(mapping) = view.line_mapping.get(&ctx.path) {
@@ -223,9 +221,9 @@ impl ViewFileFoldActionsHandler for AppActionsHandler {
             view.is_folded = !view.is_folded;
 
             let next_selected = if let Some(crate::diff::DiffResult::Text(diff)) =
-                cache.diffs.get(&ctx.path).value()
+                self.cache.diffs.get(&ctx.path).value()
             {
-                let new_lines_len = diff.new_text.lines().count();
+                let new_lines_len = diff.new_file_content.lines().count();
                 let new_map = view.get_line_map(diff, new_lines_len);
 
                 new_map

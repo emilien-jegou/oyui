@@ -225,7 +225,7 @@ pub fn tasker_registry(input: TokenStream) -> TokenStream {
 
         quote! {
             Event::#name(ev) => {
-                let _ = ev_tx.send(Event::#name(ev.clone()));
+                let _ = ev_tx.try_send(Event::#name(ev.clone()));
                 #( #listener_spawns )*
             }
         }
@@ -242,7 +242,7 @@ pub fn tasker_registry(input: TokenStream) -> TokenStream {
 
         #[derive(Clone)]
         pub struct EventSender {
-            tx: ::tokio::sync::mpsc::UnboundedSender<Event>,
+            tx: ::oyui_tasker::reexport::async_channel::Sender<Event>,
         }
 
         impl EventSender {
@@ -252,33 +252,42 @@ pub fn tasker_registry(input: TokenStream) -> TokenStream {
             {
                 let ev = Event::from(event);
                 ::oyui_tasker::reexport::tracing::trace!(?ev, "EventSender sending event");
-                self.tx.send(ev)
+                self.tx.try_send(ev).map_err(|e| match e {
+                    ::oyui_tasker::reexport::async_channel::TrySendError::Full(_) => unreachable!("unbounded channel cannot be full"),
+                    ::oyui_tasker::reexport::async_channel::TrySendError::Closed(val) => ::tokio::sync::mpsc::error::SendError(val),
+                })
             }
 
             pub fn shutdown(&self) -> Result<(), ::tokio::sync::mpsc::error::SendError<Event>> {
                 ::oyui_tasker::reexport::tracing::info!("EventSender sending Shutdown signal");
-                self.tx.send(Event::Shutdown)
+                self.tx.try_send(Event::Shutdown).map_err(|e| match e {
+                    ::oyui_tasker::reexport::async_channel::TrySendError::Full(_) => unreachable!("unbounded channel cannot be full"),
+                    ::oyui_tasker::reexport::async_channel::TrySendError::Closed(val) => ::tokio::sync::mpsc::error::SendError(val),
+                })
             }
         }
 
         pub struct EventReceiver {
-            rx: ::tokio::sync::mpsc::UnboundedReceiver<Event>,
+            rx: ::oyui_tasker::reexport::async_channel::Receiver<Event>,
         }
 
         impl EventReceiver {
-            pub async fn recv(&mut self) -> Option<Event> {
-                self.rx.recv().await
+            pub async fn recv(&self) -> Option<Event> {
+                self.rx.recv().await.ok()
             }
 
-            pub fn try_recv(&mut self) -> Result<Event, ::tokio::sync::mpsc::error::TryRecvError> {
-                self.rx.try_recv()
+            pub fn try_recv(&self) -> Result<Event, ::tokio::sync::mpsc::error::TryRecvError> {
+                self.rx.try_recv().map_err(|e| match e {
+                    ::oyui_tasker::reexport::async_channel::TryRecvError::Empty => ::tokio::sync::mpsc::error::TryRecvError::Empty,
+                    ::oyui_tasker::reexport::async_channel::TryRecvError::Closed => ::tokio::sync::mpsc::error::TryRecvError::Disconnected,
+                })
             }
         }
 
         pub struct EventRegistry {
-            tx: ::tokio::sync::mpsc::UnboundedSender<Event>,
-            rx: ::tokio::sync::mpsc::UnboundedReceiver<Event>,
-            handle: Option<::tokio::task::JoinHandle<()>>,
+            tx: ::oyui_tasker::reexport::async_channel::Sender<Event>,
+            rx: ::oyui_tasker::reexport::async_channel::Receiver<Event>,
+            handle: ::std::sync::Mutex<Option<::tokio::task::JoinHandle<()>>>,
         }
 
         impl EventRegistry {
@@ -290,28 +299,38 @@ pub fn tasker_registry(input: TokenStream) -> TokenStream {
             where
                 Event: From<E>,
             {
-                self.tx.send(Event::from(event))
+                self.tx.try_send(Event::from(event)).map_err(|e| match e {
+                    ::oyui_tasker::reexport::async_channel::TrySendError::Full(_) => unreachable!("unbounded channel cannot be full"),
+                    ::oyui_tasker::reexport::async_channel::TrySendError::Closed(val) => ::tokio::sync::mpsc::error::SendError(val),
+                })
             }
 
-            pub async fn recv(&mut self) -> Option<Event> {
-                self.rx.recv().await
+            pub async fn recv(&self) -> Option<Event> {
+                self.rx.recv().await.ok()
             }
 
-            pub fn try_recv(&mut self) -> Result<Event, ::tokio::sync::mpsc::error::TryRecvError> {
-                self.rx.try_recv()
+            pub fn try_recv(&self) -> Result<Event, ::tokio::sync::mpsc::error::TryRecvError> {
+                self.rx.try_recv().map_err(|e| match e {
+                    ::oyui_tasker::reexport::async_channel::TryRecvError::Empty => ::tokio::sync::mpsc::error::TryRecvError::Empty,
+                    ::oyui_tasker::reexport::async_channel::TryRecvError::Closed => ::tokio::sync::mpsc::error::TryRecvError::Disconnected,
+                })
             }
 
             pub fn into_split(self) -> (EventSender, EventReceiver, Option<::tokio::task::JoinHandle<()>>) {
                 (
                     EventSender { tx: self.tx },
                     EventReceiver { rx: self.rx },
-                    self.handle
+                    self.handle.into_inner().unwrap()
                 )
             }
 
-            pub async fn shutdown(&mut self) -> Result<(), ::tokio::sync::mpsc::error::SendError<Event>> {
-                self.tx.send(Event::Shutdown)?;
-                if let Some(handle) = self.handle.take() {
+            pub async fn shutdown(&self) -> Result<(), ::tokio::sync::mpsc::error::SendError<Event>> {
+                self.tx.try_send(Event::Shutdown).map_err(|e| match e {
+                    ::oyui_tasker::reexport::async_channel::TrySendError::Full(_) => unreachable!("unbounded channel cannot be full"),
+                    ::oyui_tasker::reexport::async_channel::TrySendError::Closed(val) => ::tokio::sync::mpsc::error::SendError(val),
+                })?;
+                let handle = self.handle.lock().unwrap().take();
+                if let Some(handle) = handle {
                     let _ = handle.await;
                 }
                 Ok(())
@@ -323,8 +342,8 @@ pub fn tasker_registry(input: TokenStream) -> TokenStream {
                 #( #spawn_bounds, )*
             {
                 let c = ::std::sync::Arc::new(ctx);
-                let (req_tx, mut req_rx) = ::tokio::sync::mpsc::unbounded_channel::<Event>();
-                let (ev_tx, ev_rx) = ::tokio::sync::mpsc::unbounded_channel::<Event>();
+                let (req_tx, req_rx) = ::oyui_tasker::reexport::async_channel::unbounded::<Event>();
+                let (ev_tx, ev_rx) = ::oyui_tasker::reexport::async_channel::unbounded::<Event>();
 
                 let tx_clone = EventSender { tx: req_tx.clone() };
 
@@ -332,10 +351,10 @@ pub fn tasker_registry(input: TokenStream) -> TokenStream {
                     use ::oyui_tasker::reexport::tracing::Instrument;
 
                     async move {
-                        while let Some(event) = req_rx.recv().await {
+                        while let Ok(event) = req_rx.recv().await {
                             match event {
                                 Event::Shutdown => {
-                                    let _ = ev_tx.send(Event::Shutdown);
+                                    let _ = ev_tx.try_send(Event::Shutdown);
                                     break;
                                 }
                                 #( #match_arms )*
@@ -346,7 +365,11 @@ pub fn tasker_registry(input: TokenStream) -> TokenStream {
                     .await;
                 });
 
-                Self { tx: req_tx, rx: ev_rx, handle: Some(handle) }
+                Self {
+                    tx: req_tx,
+                    rx: ev_rx,
+                    handle: ::std::sync::Mutex::new(Some(handle)),
+                }
             }
         }
     };

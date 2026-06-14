@@ -67,7 +67,7 @@ tasker_registry! {
 #[tokio::test]
 async fn test_unified_registry() {
     let ctx = AppContext { multiplier: 10 };
-    let mut registry = EventRegistry::spawn(ctx);
+    let registry = EventRegistry::spawn(ctx);
 
     registry
         .send(Echo {
@@ -94,7 +94,7 @@ async fn test_split_registry() {
     let ctx = AppContext { multiplier: 3 };
     let registry = EventRegistry::spawn(ctx);
 
-    let (sender, mut receiver, _handle) = registry.into_split();
+    let (sender, receiver, _handle) = registry.into_split();
 
     sender.send(Math { values: (4, 5) }).unwrap();
 

@@ -1,17 +1,20 @@
 use crate::actions::handlers::AppActionsHandler;
 use crate::actions::{GlobalActionsHandler, GlobalConfirmMergeWindowEnabledActionsHandler};
 use crate::app::CommandMode;
+use std::sync::atomic::Ordering;
 
 impl GlobalActionsHandler for AppActionsHandler {
     fn quit(&self) {
-        let mut state = self.state.write();
-        state.should_quit = true;
+        self.state.should_quit.store(true, Ordering::Relaxed);
     }
 
     fn confirm(&self) {
-        let enabled = self.state.read().confirm_merge_window_enabled;
+        let enabled = self
+            .state
+            .confirm_merge_window_enabled
+            .load(Ordering::Relaxed);
         if enabled {
-            self.state.write().command_mode = CommandMode::ConfirmMerge;
+            *self.state.command_mode.write() = CommandMode::ConfirmMerge;
         } else {
             self.execute_merge();
         }
@@ -19,16 +22,15 @@ impl GlobalActionsHandler for AppActionsHandler {
 
     fn execute_merge(&self) {
         let mut tree = self.tree.write();
-        let cache = self.cache.read();
         let mut should_quit = false;
         let res = crate::app::merge::confirm_and_write(
             &mut tree,
             &mut should_quit,
             &self.right_path,
-            &cache,
+            &self.cache,
         );
         if should_quit {
-            self.state.write().should_quit = true;
+            self.state.should_quit.store(true, Ordering::Relaxed);
         }
         if let Err(e) = res {
             tracing::error!("Merge failed: {}", e);
@@ -36,17 +38,20 @@ impl GlobalActionsHandler for AppActionsHandler {
     }
 
     fn open_command_mode(&self) {
-        let mut state = self.state.write();
-        state.command_mode = CommandMode::Active(String::new());
+        *self.state.command_mode.write() = CommandMode::Active(String::new());
     }
 }
 
 impl GlobalConfirmMergeWindowEnabledActionsHandler for AppActionsHandler {
     fn get(&self) -> bool {
-        self.state.read().confirm_merge_window_enabled
+        self.state
+            .confirm_merge_window_enabled
+            .load(Ordering::Relaxed)
     }
 
     fn set(&self, val: bool) {
-        self.state.write().confirm_merge_window_enabled = val;
+        self.state
+            .confirm_merge_window_enabled
+            .store(val, Ordering::Relaxed);
     }
 }

@@ -23,3 +23,4 @@ oyui-tasker-derive = { path = "./derive", version = "0.0.7" }
 tokio = { workspace = true }
 tracing = { workspace = true }
 eyre = { workspace = true }
+async-channel = { workspace = true }

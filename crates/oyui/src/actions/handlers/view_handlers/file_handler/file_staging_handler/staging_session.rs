@@ -11,14 +11,14 @@ pub struct StagingSession {
     pub hunk_idx: Option<usize>,
     pub hunk_visual_start: Option<usize>,
     pub tree: Arc<RwLock<FileTree>>,
-    pub cache: Arc<RwLock<DiffCache>>,
+    pub cache: DiffCache,
     pub view: Arc<RwLock<crate::view::file::FileViewData>>,
 }
 
 impl StagingSession {
     pub fn try_new(
         tree: Arc<RwLock<FileTree>>,
-        cache: Arc<RwLock<DiffCache>>,
+        cache: DiffCache,
         view: Arc<RwLock<crate::view::file::FileViewData>>,
     ) -> Option<Self> {
         let view_guard = view.read();
@@ -56,13 +56,11 @@ impl StagingSession {
     where
         F: FnOnce(&mut FileDiff, &RwLock<FileTree>),
     {
-        let mut cache_guard = self.cache.write();
-        if let Some(mut diff_result) = cache_guard.diffs.get(&self.path).value().cloned()
-        {
+        if let Some(mut diff_result) = self.cache.diffs.get(&self.path).value().cloned() {
             if let crate::diff::DiffResult::Text(ref mut diff) = diff_result {
                 f(diff, &self.tree);
             }
-            cache_guard.diffs.set(self.path.clone(), diff_result);
+            self.cache.diffs.set(self.path.clone(), diff_result);
         }
     }
 }

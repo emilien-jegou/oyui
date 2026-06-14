@@ -54,8 +54,8 @@ fn apply_tree_changes(
                         cache.diffs.get(&f.path).value()
                     {
                         let mut out = String::new();
-                        let old_lines: Vec<&str> = diff.old_text.split('\n').collect();
-                        let new_lines: Vec<&str> = diff.new_text.split('\n').collect();
+                        let old_lines: Vec<&str> = diff.old_file_content.split('\n').collect();
+                        let new_lines: Vec<&str> = diff.new_file_content.split('\n').collect();
 
                         let mut current_old_line = 0;
                         let mut selection_idx = 0;

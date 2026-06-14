@@ -24,7 +24,7 @@ pub fn toggle_stage_at_cursor(session: &StagingSession) {
     if let Some(hunk_idx) = hidx {
         let is_line_toggle = {
             if let Some(crate::diff::DiffResult::Text(diff)) =
-                session.cache.read().diffs.get(&session.path).value()
+                session.cache.diffs.get(&session.path).value()
             {
                 diff.hunks
                     .get(hunk_idx)
@@ -90,7 +90,7 @@ pub fn split_hunk_at_cursor(session: &StagingSession) {
 
 pub fn invert_staging(session: &StagingSession) {
     let has_text_diff = matches!(
-        session.cache.read().diffs.get(&session.path).value(),
+        session.cache.diffs.get(&session.path).value(),
         Some(crate::diff::DiffResult::Text(_))
     );
 

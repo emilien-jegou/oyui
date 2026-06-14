@@ -10,6 +10,7 @@ use crate::cli::DiffAlgorithm;
 use crate::commons::lazy::Lazy;
 use crate::diff::{DiffLine, DiffResult, FileDiff, Hunk, InlineChange};
 use crate::diff_cache::DiffCache;
+use crate::worker::tasks::syntax::SyntaxReq;
 
 const MAX_FILE_SIZE: u64 = 1024 * 1024; // 1 MB limit
 
@@ -29,7 +30,7 @@ pub struct FullDiffRes {
     pub right_path: Option<PathBuf>,
 }
 
-async fn load_text_safely(path: &PathBuf) -> Result<String, DiffResult> {
+async fn load_file_content_safely(path: &PathBuf) -> Result<String, DiffResult> {
     let meta = match fs::metadata(path).await {
         Ok(m) => m,
         Err(e) => return Err(DiffResult::Error(e.to_string())),
@@ -110,11 +111,11 @@ impl<'a> LineIndex<'a> {
 
 pub fn compute(
     algo: &DiffAlgorithm,
-    left_text: &str,
-    right_text: &str,
+    left_file_content: &str,
+    right_file_content: &str,
     path: &Path,
 ) -> Result<Vec<Hunk>, Box<dyn std::error::Error + Send + Sync>> {
-    let input = InternedInput::new(left_text, right_text);
+    let input = InternedInput::new(left_file_content, right_file_content);
 
     let inner_algo = match algo {
         DiffAlgorithm::Histogram | DiffAlgorithm::SyntaxAware => Algorithm::Histogram,
@@ -124,11 +125,11 @@ pub fn compute(
 
     let diff = Diff::compute(inner_algo, &input);
 
-    let old_idx = LineIndex::new(left_text);
-    let new_idx = LineIndex::new(right_text);
+    let old_idx = LineIndex::new(left_file_content);
+    let new_idx = LineIndex::new(right_file_content);
 
     let syntax_res = if *algo == DiffAlgorithm::SyntaxAware {
-        match oyui_syndiff::diff_source(left_text, right_text, path, None) {
+        match oyui_syndiff::diff_source(left_file_content, right_file_content, path, None) {
             Ok(res) => Some(res),
             Err(e) => {
                 tracing::debug!(
@@ -155,7 +156,7 @@ pub fn compute(
             let trimmed_len = line_text.trim().len();
 
             if trimmed_len == 0 {
-                return Vec::new(); 
+                return Vec::new();
             }
 
             if let Some(_syntax) = &syntax_res {
@@ -207,7 +208,7 @@ pub fn compute(
                     .as_ref()
                     .map(|s| s.old_ranges.as_slice())
                     .unwrap_or(&[]),
-                left_text,
+                left_file_content,
             );
             lines.push(DiffLine::Deletion {
                 old_line_idx: i,
@@ -223,7 +224,7 @@ pub fn compute(
                     .as_ref()
                     .map(|s| s.new_ranges.as_slice())
                     .unwrap_or(&[]),
-                right_text,
+                right_file_content,
             );
             lines.push(DiffLine::Addition {
                 new_line_idx: i,
@@ -235,7 +236,7 @@ pub fn compute(
             before_lines: (hunk.before.start as usize)..(hunk.before.end as usize),
             after_lines: (hunk.after.start as usize)..(hunk.after.end as usize),
             lines,
-            marker: Default::default()
+            marker: Default::default(),
         });
     }
 
@@ -267,14 +268,14 @@ impl Listener<FullDiffReq, crate::worker::EventSender> for FullDiff {
 
         let left_fut = async {
             if let Some(p) = &left_path_clone {
-                load_text_safely(p).await
+                load_file_content_safely(p).await
             } else {
                 Ok(String::new())
             }
         };
         let right_fut = async {
             if let Some(p) = &right_path_clone {
-                load_text_safely(p).await
+                load_file_content_safely(p).await
             } else {
                 Ok(String::new())
             }
@@ -295,8 +296,8 @@ impl Listener<FullDiffReq, crate::worker::EventSender> for FullDiff {
 
                 match compute(&ctx.algorithm, &left_text, &right_text, &event.node_path) {
                     Ok(hunks) => DiffResult::Text(FileDiff {
-                        old_text: Arc::from(left_text),
-                        new_text: Arc::from(right_text),
+                        old_file_content: Arc::from(left_text),
+                        new_file_content: Arc::from(right_text),
                         hunks,
                         line_selections: Default::default(),
                     }),
@@ -317,8 +318,8 @@ impl Listener<FullDiffReq, crate::worker::EventSender> for FullDiff {
 
 #[derive(TaskerContext)]
 pub struct FullDiffResCtx {
-    pub cache: Arc<RwLock<DiffCache>>,
-    pub syntax_theme: Arc<RwLock<Lazy<Arc<syntect::highlighting::Theme>>>>,
+    pub cache: DiffCache,
+    pub syntax_theme: Arc<RwLock<Lazy<syntect::highlighting::Theme>>>,
 }
 
 pub struct FullDiffResListener;
@@ -332,23 +333,21 @@ impl Listener<FullDiffRes, crate::worker::EventSender> for FullDiffResListener {
     ) -> eyre::Result<()> {
         tracing::debug!(node_path = %event.node_path.display(), "Applied FullDiff cache");
 
-        let mut cache = ctx.cache.write();
         if let crate::diff::DiffResult::Text(ref file_diff) = event.result {
-            let text = file_diff.new_text.clone();
-            cache.syntax.mark_started(event.node_path.clone());
+            let text = file_diff.new_file_content.clone();
+            ctx.cache.syntax.mark_started(event.node_path.clone());
 
             tracing::trace!(node_path = %event.node_path.display(), "Queueing Syntax task");
             if let Some(val) = ctx.syntax_theme.read().value() {
-                let _ = tx.send(crate::worker::tasks::syntax::SyntaxReq {
+                let _ = tx.send(SyntaxReq {
                     node_path: event.node_path.clone(),
                     text,
-                    right_path: event.right_path.clone(),
-                    theme: val.clone(),
+                    theme: (*val).clone(),
                 });
             }
         }
 
-        cache.diffs.set(event.node_path, event.result);
+        ctx.cache.diffs.set(event.node_path, event.result);
         Ok(())
     }
 }
