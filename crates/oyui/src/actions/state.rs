@@ -1,5 +1,8 @@
+use parking_lot::RwLock;
+
 use crate::app::CommandMode;
 use crate::config::{fallback_theme, UiTheme};
+use std::sync::atomic::AtomicBool;
 
 pub struct ThemeState {
     pub ui: UiTheme,
@@ -19,19 +22,19 @@ impl ThemeState {
 }
 
 pub struct TuiState {
-    pub theme: ThemeState,
-    pub should_quit: bool,
-    pub command_mode: CommandMode,
-    pub confirm_merge_window_enabled: bool,
+    pub theme: RwLock<ThemeState>,
+    pub should_quit: AtomicBool,
+    pub command_mode: RwLock<CommandMode>,
+    pub confirm_merge_window_enabled: AtomicBool,
 }
 
 impl TuiState {
     pub fn new(base_theme_name: &str) -> Self {
         Self {
-            theme: ThemeState::new(base_theme_name),
-            should_quit: false,
-            command_mode: CommandMode::Normal,
-            confirm_merge_window_enabled: false,
+            theme: RwLock::new(ThemeState::new(base_theme_name)),
+            should_quit: AtomicBool::new(false),
+            command_mode: RwLock::new(CommandMode::Normal),
+            confirm_merge_window_enabled: AtomicBool::new(false),
         }
     }
 }

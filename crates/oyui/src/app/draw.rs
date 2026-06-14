@@ -25,13 +25,12 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             let diff_summary = app.get_diff_summary();
 
             let tree_guard = app.tree.read();
-            let cache_guard = app.cache.read();
 
             app.view.draw(
                 frame,
                 view_area,
                 &tree_guard,
-                &cache_guard,
+                &app.cache,
                 app.base_path.as_ref(),
                 diff_summary,
                 theme,

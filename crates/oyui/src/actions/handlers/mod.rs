@@ -3,6 +3,7 @@ use crate::actions::*;
 use crate::diff_cache::DiffCache;
 use crate::tree::FileTree;
 use crate::view::View;
+use crate::worker::EventRegistry;
 use parking_lot::RwLock;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -13,34 +14,22 @@ pub mod view_handlers;
 
 #[derive(Clone)]
 pub struct AppActionsHandler {
-    pub state: Arc<RwLock<TuiState>>,
+    pub state: Arc<TuiState>,
     pub tree: Arc<RwLock<FileTree>>,
-    pub cache: Arc<RwLock<DiffCache>>,
+    pub cache: DiffCache,
     pub view: View,
     pub right_path: PathBuf,
+    pub worker: Arc<EventRegistry>,
 }
 
-pub fn generate(
-    state: Arc<RwLock<TuiState>>,
-    tree: Arc<RwLock<FileTree>>,
-    cache: Arc<RwLock<DiffCache>>,
-    view: View,
-    right_path: PathBuf,
-) -> BoxedHandler {
-    let handler = AppActionsHandler {
-        state,
-        tree,
-        cache,
-        view,
-        right_path,
-    };
-
+pub fn generate(actions_handler: AppActionsHandler) -> BoxedHandler {
     build_handler! {
-        global: handler.clone(),
-        theme: handler.clone(),
+        global: actions_handler.clone(),
+        theme: actions_handler.clone(),
         view {
-            tree: handler.clone(),
-            file: handler.clone(),
+            tree: actions_handler.clone(),
+            file: actions_handler.clone(),
         }
-    }.build()
+    }
+    .build()
 }

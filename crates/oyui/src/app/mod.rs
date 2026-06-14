@@ -7,16 +7,18 @@ pub use events::{CommandMode, ExitAction};
 use typed_builder::TypedBuilder;
 
 use crate::actions::state::TuiState;
-use crate::actions::{handlers, BoxedHandler};
+use crate::actions::BoxedHandler;
 use crate::commands::CommandError;
 use crate::commons::lazy::Lazy;
 use crate::config::UiTheme;
+use crate::config::{load_config, Config};
 use crate::diff_cache::DiffCache;
 use crate::tree::{FileTree, TreeNode};
 use crate::view::View;
 use crate::worker::{tasks, EventRegistry};
 use parking_lot::RwLock;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use syntect::highlighting::Theme;
 
@@ -32,23 +34,19 @@ use std::time::Duration;
 #[derive(TypedBuilder)]
 #[builder(build_method(into = App))]
 pub struct AppReq {
-    #[builder(default = Arc::new(RwLock::new(FileTree::default())))]
-    pub tree: Arc<RwLock<FileTree>>,
-    #[builder(default = Arc::new(RwLock::new(DiffCache::default())))]
-    pub cache: Arc<RwLock<DiffCache>>,
-    #[builder(default)]
-    pub view: View,
     #[builder(default)]
     pub theme: Lazy<UiTheme>,
-    #[builder(default = Arc::new(RwLock::new(Lazy::Uninitialized)))]
-    pub syntax_theme: Arc<RwLock<Lazy<Arc<Theme>>>>,
-    #[builder(default = Arc::new(RwLock::new(None)))]
+    pub tree: Arc<RwLock<FileTree>>,
+    pub view: View,
+    pub syntax_theme: Arc<RwLock<Lazy<Theme>>>,
     pub config_error: Arc<RwLock<Option<String>>>,
-    #[builder(default = Arc::new(RwLock::new(None)))]
     pub current_path: Arc<RwLock<Option<PathBuf>>>,
-
     pub config_path: PathBuf,
-    pub worker: EventRegistry,
+    pub worker: Arc<EventRegistry>,
+    pub cache: DiffCache,
+    pub handler: BoxedHandler,
+    pub state: Arc<TuiState>,
+    pub config: Config,
     pub left_path: PathBuf,
     pub right_path: PathBuf,
     pub base_path: Option<PathBuf>,
@@ -56,14 +54,14 @@ pub struct AppReq {
 
 pub struct App {
     pub tree: Arc<RwLock<FileTree>>,
-    pub cache: Arc<RwLock<DiffCache>>,
+    pub cache: DiffCache,
     pub view: View,
     pub theme: Lazy<UiTheme>,
-    pub syntax_theme: Arc<RwLock<Lazy<Arc<Theme>>>>,
+    pub syntax_theme: Arc<RwLock<Lazy<Theme>>>,
     pub config_path: PathBuf,
     pub config_error: Arc<RwLock<Option<String>>>,
     pub current_path: Arc<RwLock<Option<PathBuf>>>,
-    pub worker: EventRegistry,
+    pub worker: Arc<EventRegistry>,
     pub left_path: PathBuf,
     pub right_path: PathBuf,
     pub base_path: Option<PathBuf>,
@@ -71,20 +69,11 @@ pub struct App {
     pub handler: BoxedHandler,
     pub should_quit: bool,
     pub command_mode: CommandMode,
-    pub state: Arc<RwLock<crate::actions::state::TuiState>>,
+    pub state: Arc<TuiState>,
 }
 
 impl From<AppReq> for App {
     fn from(value: AppReq) -> Self {
-        let state = Arc::new(RwLock::new(TuiState::new("weywot")));
-        let handler = handlers::generate(
-            state.clone(),
-            value.tree.clone(),
-            value.cache.clone(),
-            value.view.clone(),
-            value.right_path.clone(),
-        );
-
         Self {
             tree: value.tree,
             cache: value.cache,
@@ -92,17 +81,16 @@ impl From<AppReq> for App {
             theme: value.theme,
             syntax_theme: value.syntax_theme,
             config_path: value.config_path,
-            config_error: value.config_error,
             current_path: value.current_path,
             worker: value.worker,
             left_path: value.left_path,
             right_path: value.right_path,
             base_path: value.base_path,
-
-            handler,
-            state,
+            state: value.state,
             should_quit: false,
             command_mode: CommandMode::Normal,
+            config_error: value.config_error,
+            handler: value.handler,
         }
     }
 }
@@ -119,37 +107,41 @@ impl App {
         Ok(())
     }
 
+    pub fn handle_reload_event(&mut self, path: &Path) {
+        tracing::info!("Reloading config on main thread...");
+        if let Err(e) = load_config(path, self.handler.clone()) {
+            tracing::error!("Config compilation error: {}", e);
+            *self.config_error.write() = Some(e.to_string());
+        } else {
+            *self.config_error.write() = None;
+        }
+    }
+
     pub async fn tick(&mut self) {
         while let Ok(event) = self.worker.try_recv() {
             if let crate::worker::Event::WatchConfigRes(res) = event {
                 tracing::info!("Reloading config on main thread...");
-
-                if let Err(e) = crate::config::load_config(&res.path, self.handler.clone()) {
-                    tracing::error!("Config compilation error: {}", e);
-                    *self.config_error.write() = Some(e.to_string());
-                } else {
-                    *self.config_error.write() = None;
-                }
+                self.handle_reload_event(&res.path);
             }
         }
 
-        let mut state = self.state.write();
-
-        self.theme = Lazy::Ready(state.theme.ui.clone());
-        *self.syntax_theme.write() = Lazy::Ready(Arc::new(state.theme.tm_theme.clone()));
+        {
+            let theme_guard = self.state.theme.read();
+            self.theme = Lazy::Ready(theme_guard.ui.clone());
+            *self.syntax_theme.write() = Lazy::Ready(theme_guard.tm_theme.clone());
+        }
 
         let current_path_val = self.view.file_view.read().current_path.clone();
         let mut path_guard = self.current_path.write();
         if *path_guard != current_path_val {
             *path_guard = current_path_val.clone();
             if let Some(path) = current_path_val {
-                let mut cache_write = self.cache.write();
                 if matches!(
-                    cache_write.diffs.get(&path),
+                    self.cache.diffs.get(&path),
                     crate::commons::lazy::Lazy::Uninitialized
                 ) {
                     tracing::debug!(path = %path.display(), "Queueing full diff calculation");
-                    cache_write.diffs.mark_started(path.clone());
+                    self.cache.diffs.mark_started(path.clone());
 
                     let tree_read = self.tree.read();
                     fn find_file_paths_recursive(
@@ -189,29 +181,33 @@ impl App {
         }
         drop(path_guard); // Terminates immutable borrow of self before self.confirm_merge()
 
-        if state.should_quit {
+        if self.state.should_quit.load(Ordering::Relaxed) {
             self.should_quit = true;
         }
 
-        match state.command_mode {
-            CommandMode::Normal => {}
-            _ => {
-                self.command_mode = std::mem::replace(&mut state.command_mode, CommandMode::Normal);
+        {
+            let mut cmd_mode_guard = self.state.command_mode.write();
+            match *cmd_mode_guard {
+                CommandMode::Normal => {}
+                _ => {
+                    self.command_mode =
+                        std::mem::replace(&mut *cmd_mode_guard, CommandMode::Normal);
+                }
             }
         }
     }
 
     #[tracing::instrument(skip_all)]
-    pub async fn shutdown(&mut self) {
+    pub async fn shutdown(&self) {
         let _ = self.worker.shutdown().await;
+        crate::config::clear_registry();
     }
 
     #[tracing::instrument(skip_all, fields(cmd = cmd))]
     pub fn execute_command(&mut self, cmd: &str) {
         let mut tree = self.tree.write();
-        let cache = self.cache.read();
         let view_read = self.view.tree_view.read();
-        commands::execute(cmd, &mut tree, &view_read, &cache);
+        commands::execute(cmd, &mut tree, &view_read, &self.cache);
     }
 
     pub fn start_tree_calculation(&self) -> eyre::Result<()> {
@@ -374,11 +370,10 @@ impl App {
 
     pub fn sync_cache_with_tree(&self) {
         let tree = self.tree.read();
-        let mut cache = self.cache.write();
-        Self::sync_cache_recursive(&tree.nodes, &mut cache);
+        self.sync_cache_recursive(&tree.nodes);
     }
 
-    fn sync_cache_recursive(nodes: &[TreeNode], cache: &mut DiffCache) {
+    fn sync_cache_recursive(&self, nodes: &[TreeNode]) {
         for node in nodes {
             match node {
                 TreeNode::File(f) => {
@@ -388,7 +383,7 @@ impl App {
                         let target_val = f.state == crate::tree::StagingState::Staged;
 
                         let mut diff_clone = None;
-                        if let Some(val) = cache.diffs.get(&f.path).value() {
+                        if let Some(val) = self.cache.diffs.get(&f.path).value() {
                             if let crate::diff::DiffResult::Text(diff) = val {
                                 let total_lines: usize =
                                     diff.hunks.iter().map(|h| h.lines.len()).sum();
@@ -408,12 +403,12 @@ impl App {
                                 diff.line_selections.clear();
                                 diff.line_selections.resize(total_lines, target_val);
                             }
-                            cache.diffs.set(f.path.clone(), diff_result);
+                            self.cache.diffs.set(f.path.clone(), diff_result);
                         }
                     }
                 }
                 TreeNode::Directory(d) => {
-                    Self::sync_cache_recursive(&d.children, cache);
+                    self.sync_cache_recursive(&d.children);
                 }
             }
         }
@@ -426,7 +421,7 @@ impl App {
         };
 
         let mut diff_clone = None;
-        if let Some(val) = self.cache.read().diffs.get(&path).value() {
+        if let Some(val) = self.cache.diffs.get(&path).value() {
             diff_clone = Some(val.clone());
         }
 
@@ -517,7 +512,7 @@ impl App {
                 self.update_file_state(&path, new_staging_state);
             }
 
-            self.cache.write().diffs.set(path, diff_result);
+            self.cache.diffs.set(path, diff_result);
         }
     }
 
@@ -563,12 +558,7 @@ impl App {
         self.sync_cache_with_tree(); // Sync stale line_selections before reading
         let mut left = (0, 0, 0, 0, 0);
         let mut right = (0, 0, 0, 0, 0);
-        self.count_split_recursive(
-            &self.tree.read().nodes,
-            &self.cache.read(),
-            &mut left,
-            &mut right,
-        );
+        self.count_split_recursive(&self.tree.read().nodes, &self.cache, &mut left, &mut right);
         (left, right)
     }
 

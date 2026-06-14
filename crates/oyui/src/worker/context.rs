@@ -17,8 +17,8 @@ pub struct AppWorkerContext {
     pub algorithm: DiffAlgorithm,
 
     pub tree: Arc<RwLock<FileTree>>,
-    pub cache: Arc<RwLock<DiffCache>>,
+    pub cache: DiffCache,
     pub config_error: Arc<RwLock<Option<String>>>,
-    pub syntax_theme: Arc<RwLock<Lazy<Arc<syntect::highlighting::Theme>>>>,
+    pub syntax_theme: Arc<RwLock<Lazy<syntect::highlighting::Theme>>>,
     pub current_path: Arc<RwLock<Option<PathBuf>>>,
 }

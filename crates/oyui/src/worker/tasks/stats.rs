@@ -2,11 +2,9 @@ use crate::diff::DiffStats;
 use crate::diff_cache::DiffCache;
 use imara_diff::{Algorithm, Diff, InternedInput};
 use oyui_tasker::{Listener, TaskerContext};
-use parking_lot::RwLock;
 use rayon::prelude::*;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 pub struct Stats;
 
@@ -102,7 +100,7 @@ impl Listener<StatsReq, crate::worker::EventSender> for Stats {
 
 #[derive(TaskerContext)]
 pub struct StatsResCtx {
-    pub cache: Arc<RwLock<DiffCache>>,
+    pub cache: DiffCache,
 }
 
 pub struct StatsResListener;
@@ -115,9 +113,8 @@ impl Listener<StatsRes, crate::worker::EventSender> for StatsResListener {
         _tx: crate::worker::EventSender,
     ) -> eyre::Result<()> {
         tracing::debug!("Applied Stats cache");
-        let mut cache = ctx.cache.write();
         for (node_path, stats) in event.stats {
-            cache.stats.set(node_path, stats);
+            ctx.cache.stats.set(node_path, stats);
         }
         Ok(())
     }

@@ -1,5 +1,8 @@
+use parking_lot::RwLock;
 use std::cell::RefCell;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use syntect::highlighting::Theme;
 use tracing::{info, info_span};
 
 pub mod builtin;
@@ -12,10 +15,19 @@ pub use define_default_theme::derive_ui_theme;
 pub use theme::{LineHighlightMode, UiTheme};
 
 use crate::actions::BoxedHandler;
+use crate::commons::lazy::Lazy;
+use crate::worker::tasks::watch_config;
+use crate::worker::EventRegistry;
 
 thread_local! {
     pub static ACTIVE_REGISTRY: RefCell<crate::actions::keybinds::KeybindRegistry> =
         RefCell::new(crate::actions::keybinds::default_keybinds());
+}
+
+pub fn clear_registry() {
+    ACTIVE_REGISTRY.with(|r| {
+        *r.borrow_mut() = crate::actions::keybinds::default_keybinds();
+    });
 }
 
 impl From<theme::Color> for ratatui::style::Color {
@@ -45,4 +57,33 @@ pub fn load_config(path: &Path, handler: BoxedHandler) -> Result<(), Box<dyn std
 
     info!("Config loaded successfully");
     Ok(())
+}
+
+pub struct Config {
+    pub path: PathBuf,
+    pub theme: Lazy<UiTheme>,
+    pub syntax_theme: Arc<RwLock<Lazy<Theme>>>,
+}
+
+impl Config {
+    pub fn new(path: PathBuf) -> Self {
+        Self {
+            path,
+            theme: Lazy::Uninitialized,
+            syntax_theme: Arc::new(RwLock::new(Lazy::Uninitialized)),
+        }
+    }
+
+    pub fn start_watching(&self, worker: &EventRegistry) -> eyre::Result<()> {
+        worker.send(watch_config::WatchConfigReq {
+            path: self.path.clone(),
+            last_mtime: None,
+        })?;
+        Ok(())
+    }
+
+    pub fn update_theme(&mut self, ui_theme: &UiTheme, tm_theme: &Theme) {
+        self.theme = Lazy::Ready(ui_theme.clone());
+        *self.syntax_theme.write() = Lazy::Ready(tm_theme.clone());
+    }
 }

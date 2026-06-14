@@ -164,7 +164,7 @@ pub fn is_dark(bg: Color) -> bool {
     }
 }
 
-fn extract_scope_color(theme: &Theme, target_scopes: &[&str]) -> Option<Color> {
+pub fn extract_scope_color(theme: &Theme, target_scopes: &[&str]) -> Option<Color> {
     for &target in target_scopes {
         let matched_color = theme
             .scopes

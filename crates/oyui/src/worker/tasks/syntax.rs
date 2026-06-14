@@ -4,7 +4,6 @@ use std::sync::Arc;
 use crate::diff_cache::DiffCache;
 use crate::syntax::SyntaxEngine;
 use oyui_tasker::{Listener, TaskerContext};
-use parking_lot::RwLock;
 use syntect::highlighting::Style as SyntectStyle;
 
 pub struct Syntax;
@@ -13,8 +12,7 @@ pub struct Syntax;
 pub struct SyntaxReq {
     pub node_path: PathBuf,
     pub text: Arc<str>,
-    pub right_path: Option<PathBuf>,
-    pub theme: Arc<syntect::highlighting::Theme>,
+    pub theme: syntect::highlighting::Theme,
 }
 
 #[derive(Debug, Clone)]
@@ -44,9 +42,8 @@ impl Listener<SyntaxReq, crate::worker::EventSender> for Syntax {
         let syntax = syntax_set
             .find_syntax_by_extension(
                 event
-                    .right_path
-                    .as_ref()
-                    .and_then(|p| p.extension())
+                    .node_path
+                    .extension()
                     .and_then(|s| s.to_str())
                     .unwrap_or(""),
             )
@@ -77,7 +74,7 @@ impl Listener<SyntaxReq, crate::worker::EventSender> for Syntax {
 
 #[derive(TaskerContext)]
 pub struct SyntaxResCtx {
-    pub cache: Arc<RwLock<DiffCache>>,
+    pub cache: DiffCache,
 }
 
 pub struct SyntaxResListener;
@@ -90,7 +87,7 @@ impl Listener<SyntaxRes, crate::worker::EventSender> for SyntaxResListener {
         _tx: crate::worker::EventSender,
     ) -> eyre::Result<()> {
         tracing::debug!(node_path = %event.node_path.display(), "Applied Syntax cache");
-        ctx.cache.write().syntax.set(event.node_path, event.highlighted);
+        ctx.cache.syntax.set(event.node_path, event.highlighted);
         Ok(())
     }
 }

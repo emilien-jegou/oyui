@@ -65,8 +65,8 @@ pub struct Hunk {
 
 #[derive(Clone, Debug)]
 pub struct FileDiff {
-    pub old_text: Arc<str>,
-    pub new_text: Arc<str>,
+    pub old_file_content: Arc<str>,
+    pub new_file_content: Arc<str>,
     pub hunks: Vec<Hunk>,
 
     /// Tracks which hunks/lines are staged/selected by the user
