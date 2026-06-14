@@ -5,14 +5,10 @@ use crate::{
     diff::InlineChange,
     view::file::{
         render::style::{to_tui_style, LineBgCalculator},
-        utils::colors::lerp_color,
+        utils::colors::safe_lerp_color,
     },
 };
-use ratatui::{
-    style::{Color, Style},
-    text::Span,
-    widgets::Cell,
-};
+use ratatui::{style::Style, text::Span, widgets::Cell};
 use spans_wrapper::SpansWrapper;
 
 #[derive(Clone, Copy, Debug)]
@@ -87,7 +83,7 @@ impl<'a> TextRenderer<'a> {
                 if !char_by_char && !has_inline && !slice_has_special {
                     let mut final_style = style;
                     if !has_inline && !char_by_char {
-                        final_style = final_style.bg(bg_calc.get_bg(visual_x));
+                        final_style = final_style.bg(bg_calc.get_bg(visual_x).into());
                     }
                     row_spans.push(Span::styled(slice.to_string(), final_style));
                     visual_x += slice.chars().count();
@@ -120,16 +116,16 @@ impl<'a> TextRenderer<'a> {
                         (None, None)
                     };
 
-                    let effective_fg = target_fg.or_else(|| style.fg);
+                    let effective_fg = target_fg.or(style.fg);
 
                     if Some(target_bg) != current_bg || current_fg != effective_fg {
                         if !current_string.is_empty() {
                             let mut s = style;
                             if let Some(bg) = current_bg {
-                                s = s.bg(bg);
+                                s = s.bg(bg.into());
                             }
                             if let Some(fg) = current_fg {
-                                s = s.fg(fg);
+                                s = s.fg(fg.into());
                             }
                             row_spans.push(Span::styled(current_string.clone(), s));
                             current_string.clear();
@@ -149,7 +145,7 @@ impl<'a> TextRenderer<'a> {
 
                 if !current_string.is_empty() {
                     let final_bg = current_bg.unwrap_or_else(|| bg_calc.get_bg(visual_x));
-                    let mut s = style.bg(final_bg);
+                    let mut s = style.bg(final_bg.into());
                     if let Some(fg) = current_fg {
                         s = s.fg(fg);
                     }
@@ -157,53 +153,43 @@ impl<'a> TextRenderer<'a> {
                 }
             };
 
-        let inline_bg: Color = if !self.is_staged {
+        let inline_bg = if !self.is_staged {
             if self.is_selected {
-                self.theme.cursor_bg.into()
+                self.theme.cursor_bg
             } else {
-                self.theme.bg.into()
+                self.theme.bg
             }
         } else if self.is_selected {
             if self.is_add {
-                lerp_color(self.theme.add_bg.into(), self.theme.add_fg.into(), 0.4)
+                safe_lerp_color(&self.theme.add_bg, &self.theme.add_fg, 0.4)
             } else {
-                lerp_color(self.theme.del_bg.into(), self.theme.del_fg.into(), 0.4)
+                safe_lerp_color(&self.theme.del_bg, &self.theme.del_fg, 0.4)
             }
         } else if self.is_add {
-            lerp_color(self.theme.add_bg.into(), self.theme.add_fg.into(), 0.2)
+            safe_lerp_color(&self.theme.add_bg, &self.theme.add_fg, 0.2)
         } else {
-            lerp_color(self.theme.del_bg.into(), self.theme.del_fg.into(), 0.2)
+            safe_lerp_color(&self.theme.del_bg, &self.theme.del_fg, 0.2)
         };
 
-        let crate::config::theme::Color::Rgb(fg_r, fg_g, fg_b) = self.theme.fg;
-        let fallback_style = syntect::highlighting::Style {
-            foreground: syntect::highlighting::Color {
-                r: fg_r,
-                g: fg_g,
-                b: fg_b,
-                a: 255,
-            },
-            background: syntect::highlighting::Color::WHITE,
-            font_style: syntect::highlighting::FontStyle::empty(),
-        };
-        let fallback_tokens = vec![(fallback_style, self.content.to_string())];
-
-        let tokens = if !self.is_del {
+        let tokens: Vec<(Style, &str)> = if !self.is_del {
             self.syntax_opt
                 .and_then(|lines| lines.get(self.idx))
                 .filter(|t| !t.is_empty())
-                .unwrap_or(&fallback_tokens)
+                .map(|t| {
+                    t.iter()
+                        .map(|(s, text)| (to_tui_style(*s), text.as_str()))
+                        .collect()
+                })
+                .unwrap_or_else(|| vec![(Style::default().fg(self.theme.fg.into()), self.content)])
         } else {
-            &fallback_tokens
+            vec![(Style::default().fg(self.theme.fg.into()), self.content)]
         };
 
         let mut current_byte = 0;
 
-        for (syn_style, text) in tokens {
+        for (mut base_style, text) in tokens {
             let text_start = current_byte;
             let text_end = text_start + text.len();
-
-            let mut base_style = to_tui_style(*syn_style);
 
             if self.is_add {
                 base_style = base_style.fg(self.theme.add_fg.into());
@@ -227,7 +213,7 @@ impl<'a> TextRenderer<'a> {
                     let hl_end_in_token =
                         (hl.byte_range.end.saturating_sub(text_start)).min(text.len());
                     if let Some(slice) = text.get(token_offset..hl_end_in_token) {
-                        push_slice(slice, abs_byte, base_style.bg(inline_bg), true);
+                        push_slice(slice, abs_byte, base_style.bg(inline_bg.into()), true);
                     } else {
                         push_slice(&text[token_offset..], abs_byte, base_style, false);
                         break;
@@ -257,11 +243,33 @@ impl<'a> TextRenderer<'a> {
                     break;
                 }
             }
+            // src/view/file/render/text/mod.rs
+
             current_byte = text_end;
         }
 
-        let content_len: usize = row_spans.iter().map(|s| s.content.chars().count()).sum();
         let code_col_width = (self.area_width as usize).saturating_sub(6);
+
+        // Pad the row spans up to the scrolled viewport width using the custom background calculator
+        let current_char_count = visual_x - self.visual_x_offset;
+        let target_len = self.hscroll + code_col_width;
+        if current_char_count < target_len {
+            let base_style = if self.is_add {
+                Style::default().fg(self.theme.add_fg.into())
+            } else if self.is_del {
+                Style::default().fg(self.theme.del_fg.into())
+            } else {
+                Style::default().fg(self.theme.fg.into())
+            };
+
+            for _ in current_char_count..target_len {
+                let bg_color = bg_calc.get_bg(visual_x);
+                row_spans.push(Span::styled(" ", base_style.bg(bg_color.into())));
+                visual_x += 1;
+            }
+        }
+
+        let content_len: usize = row_spans.iter().map(|s| s.content.chars().count()).sum();
 
         let final_line = SpansWrapper {
             spans: row_spans,

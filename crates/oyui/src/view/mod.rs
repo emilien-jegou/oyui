@@ -6,6 +6,7 @@ pub mod confirm_window;
 use crate::commons::file_icon::DevIconProvider;
 use crate::config::UiTheme;
 use crate::diff_cache::DiffCache;
+use crate::terminal_colors::TerminalColorMode;
 use crate::tree::FileTree;
 use parking_lot::RwLock;
 use std::path::PathBuf;
@@ -18,7 +19,7 @@ pub enum ViewKind {
     File,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct View {
     pub current: Arc<RwLock<ViewKind>>,
     pub tree_view: Arc<RwLock<tree::TreeViewData>>,
@@ -42,6 +43,7 @@ impl View {
         base_path: Option<&PathBuf>,
         diff_summary: (usize, usize, usize),
         theme: &UiTheme,
+        color_mode: &TerminalColorMode
     ) {
         let current = *self.current.read();
         match current {
@@ -54,6 +56,7 @@ impl View {
                 base_path,
                 diff_summary,
                 theme,
+                color_mode,
             ),
             ViewKind::File => self.file_view.write().draw(frame, area, cache, tree, theme),
         }

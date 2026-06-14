@@ -1471,6 +1471,7 @@ dependencies = [
  "eyre",
  "imara-diff",
  "infer",
+ "libc",
  "once_cell",
  "oyui-rune-actions",
  "oyui-syndiff",

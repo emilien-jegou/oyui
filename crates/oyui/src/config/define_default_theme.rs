@@ -18,7 +18,7 @@ macro_rules! define_default_theme {
 
             fn bg(&self) -> Color {
                 syn_to_color(self.theme().settings.background)
-                    .expect("tmTheme is missing a background color, which is required")
+                    .unwrap_or(Color::Reset)
             }
 
             $(
@@ -39,8 +39,7 @@ macro_rules! define_default_theme {
                     )?
 
                     extracted.unwrap_or_else(|| {
-                        let (r, g, b) = if self.is_dark_theme() { $dark } else { $light };
-                        Color::Rgb(r, g, b)
+                        if self.is_dark_theme() { $dark } else { $light }
                     })
                 }
             )*
@@ -54,7 +53,7 @@ macro_rules! define_default_theme {
                 let dimmer = self.dimmer();
 
                 let cursor_bg = syn_to_color(self.theme().settings.line_highlight)
-                    .unwrap_or_else(|| blend(fg, bg, 1.));
+                    .unwrap_or_else(|| blend(fg, bg, 1.).unwrap_or(fg));
 
                 UiTheme::builder()
                   .bg(bg.clone())
@@ -67,8 +66,8 @@ macro_rules! define_default_theme {
                   .partial(self.partial())
                   .dir(self.dir())
                   .cmd(self.cmd())
-                  .add_bg(blend(staged, bg, 1.))
-                  .del_bg(blend(del_fg, bg, 1.))
+                  .add_bg(blend(staged, bg, 1.).unwrap_or(staged))
+                  .del_bg(blend(del_fg, bg, 1.).unwrap_or(del_fg))
                   .add_fg(staged)
                   .del_fg(del_fg)
                   .char_trailing_space_fg(dimmer)
@@ -83,44 +82,44 @@ macro_rules! define_default_theme {
 define_default_theme! {
     fg: {
         setting: foreground,
-        light: (40, 40, 50),
-        dark: (200, 200, 210),
+        light: Color::Black,
+        dark: Color::White,
     },
     dim: {
         list: ["comment", "punctuation"],
         setting: gutter_foreground,
-        light: (150, 150, 160),
-        dark: (90, 90, 105),
+        light: Color::DarkGray,
+        dark: Color::Gray,
     },
     dimmer: {
         setting: gutter_foreground,
-        light: (180, 180, 197),
-        dark: (60, 60, 75),
+        light: Color::Gray,
+        dark: Color::DarkGray,
     },
     staged: {
         list: ["markup.inserted", "string", "entity.name.string"],
-        light: (40, 140, 70),
-        dark: (130, 210, 150),
+        light: Color::Green,
+        dark: Color::LightGreen,
     },
     partial: {
         list: ["markup.changed", "constant.numeric", "support.type"],
-        light: (160, 110, 20),
-        dark: (210, 170, 80),
+        light: Color::Yellow,
+        dark: Color::LightYellow,
     },
     del_fg: {
         list: ["markup.deleted", "invalid", "keyword.operator"],
-        light: (180, 40, 40),
-        dark: (255, 130, 130),
+        light: Color::Red,
+        dark: Color::LightRed,
     },
     dir: {
         list: ["entity.name.type", "entity.name.class", "storage"],
-        light: (30, 80, 170),
-        dark: (100, 140, 210),
+        light: Color::Blue,
+        dark: Color::LightBlue,
     },
     cmd: {
         list: ["keyword.control", "variable", "entity.name.function"],
-        light: (100, 60, 180),
-        dark: (180, 140, 255),
+        light: Color::Magenta,
+        dark: Color::LightMagenta,
     }
 }
 
@@ -131,12 +130,11 @@ pub struct ThemeContext<'a> {
 
 impl<'a> ThemeContext<'a> {
     pub fn new(theme: &'a Theme) -> Self {
-        let bg_color = syn_to_color(theme.settings.background)
-            .expect("tmTheme is missing a background color, which is required");
+        let bg_color = syn_to_color(theme.settings.background).unwrap_or(Color::Reset);
 
         Self {
             theme,
-            is_dark: is_dark(bg_color),
+            is_dark: is_dark(bg_color).unwrap_or(true),
         }
     }
 }
@@ -155,13 +153,10 @@ pub fn derive_ui_theme(theme: &Theme) -> UiTheme {
     ThemeContext::new(theme).derive_ui_theme()
 }
 
-pub fn is_dark(bg: Color) -> bool {
-    match bg {
-        Color::Rgb(r, g, b) => {
-            let luminance = 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32;
-            luminance < 128.0
-        }
-    }
+pub fn is_dark(bg: Color) -> Option<bool> {
+    let (r, g, b) = bg.try_as_rgb()?;
+    let luminance = 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32;
+    Some(luminance < 128.0)
 }
 
 pub fn extract_scope_color(theme: &Theme, target_scopes: &[&str]) -> Option<Color> {
@@ -179,17 +174,17 @@ pub fn extract_scope_color(theme: &Theme, target_scopes: &[&str]) -> Option<Colo
     None
 }
 
-fn blend(fg: Color, bg: Color, alpha: f32) -> Color {
-    let (fr, fg_g, fb) = fg.as_rgb();
-    let (br, bg_g, bb) = bg.as_rgb();
+fn blend(fg: Color, bg: Color, alpha: f32) -> Option<Color> {
+    let (fr, fg_g, fb) = fg.try_as_rgb()?;
+    let (br, bg_g, bb) = bg.try_as_rgb()?;
 
     let blend_channel = |f: u8, b: u8| ((f as f32 * alpha) + (b as f32 * (1.0 - alpha))) as u8;
 
-    Color::Rgb(
+    Some(Color::Rgb(
         blend_channel(fr, br),
         blend_channel(fg_g, bg_g),
         blend_channel(fb, bb),
-    )
+    ))
 }
 
 fn syn_to_color(opt: Option<syntect::highlighting::Color>) -> Option<Color> {

@@ -11,30 +11,33 @@ pub mod config;
 pub mod diff;
 pub mod diff_cache;
 pub mod syntax;
+pub mod terminal_colors;
 pub mod tree;
 pub mod ui_state;
 pub mod view;
 pub mod worker;
 
-use crate::cli::Opts;
-use crate::commands::CommandError;
+use crate::cli::Args;
+use crate::commands::{CommandError, RunOptions};
 
 #[tokio::main]
 async fn main() -> Result<ExitCode, Box<dyn Error>> {
-    let opts = Opts::parse();
+    let args = Args::parse();
+
+    let color_mode = terminal_colors::detect_color_mode()?;
 
     let _trace_guard = commons::tracing::Tracer::builder()
-        .flamegraph_enable(opts.common.flamegraph_enable)
-        .flamegraph_save_file(opts.common.flamegraph_save_file.clone())
-        .log_enable(opts.common.log_enable)
-        .log_save_path(opts.common.log_save_path.clone())
-        .log_console(opts.common.log_console)
+        .flamegraph_enable(args.common.flamegraph_enable)
+        .flamegraph_save_file(args.common.flamegraph_save_file.clone())
+        .log_enable(args.common.log_enable)
+        .log_save_path(args.common.log_save_path.clone())
+        .log_console(args.common.log_console)
         .build()
         .setup()?;
 
     tracing::info!("Starting oyui...");
 
-    let result = commands::run(opts).await;
+    let result = commands::run(RunOptions { args, color_mode }).await;
 
     // Explicitly clear the thread-local registry to prevent TLS drop order
     // issues with scc::HashMap when the main thread terminates.

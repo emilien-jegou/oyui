@@ -436,7 +436,7 @@ pub fn define_actions(input: TokenStream) -> TokenStream {
     let mut metadata_entries = Vec::new();
     for (path, _, _) in &active_branches {
         let field_name = path_to_field_name(path);
-        let path_idents: Vec<Ident> = path.iter().cloned().collect();
+        let path_idents: Vec<Ident> = path.to_vec();
         metadata_entries.push(quote! {
             #field_name: [ #(#path_idents)* ]
         });

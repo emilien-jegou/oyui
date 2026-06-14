@@ -1,16 +1,14 @@
 use imara_diff::{Algorithm, Diff, InternedInput};
 use oyui_tasker::{Listener, TaskerContext};
-use parking_lot::RwLock;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::fs;
 
 use crate::cli::DiffAlgorithm;
-use crate::commons::lazy::Lazy;
 use crate::diff::{DiffLine, DiffResult, FileDiff, Hunk, InlineChange};
 use crate::diff_cache::DiffCache;
-use crate::worker::tasks::syntax::SyntaxReq;
+use crate::worker::events::diff_update::DiffUpdate;
 
 const MAX_FILE_SIZE: u64 = 1024 * 1024; // 1 MB limit
 
@@ -23,11 +21,80 @@ pub struct FullDiffReq {
     pub right_path: Option<PathBuf>,
 }
 
-#[derive(Debug, Clone)]
-pub struct FullDiffRes {
-    pub node_path: PathBuf,
-    pub result: DiffResult,
-    pub right_path: Option<PathBuf>,
+#[derive(TaskerContext)]
+pub struct FullDiffContext {
+    pub cache: DiffCache,
+    pub algorithm: DiffAlgorithm,
+}
+
+impl Listener<FullDiffReq, crate::worker::EventSender> for FullDiff {
+    type Context = FullDiffContext;
+
+    #[tracing::instrument(skip_all, fields(node_path = %event.node_path.display()))]
+    async fn handle(
+        event: FullDiffReq,
+        ctx: Self::Context,
+        tx: crate::worker::EventSender,
+    ) -> eyre::Result<()> {
+        tracing::debug!(
+            left_path = ?event.left_path,
+            right_path = ?event.right_path,
+            "Computing full diff"
+        );
+
+        let left_path_clone = event.left_path.clone();
+        let right_path_clone = event.right_path.clone();
+
+        let left_fut = async {
+            if let Some(p) = &left_path_clone {
+                load_file_content_safely(p).await
+            } else {
+                Ok(String::new())
+            }
+        };
+        let right_fut = async {
+            if let Some(p) = &right_path_clone {
+                load_file_content_safely(p).await
+            } else {
+                Ok(String::new())
+            }
+        };
+        let (left_res, right_res) = tokio::join!(left_fut, right_fut);
+
+        let diff_result = match (left_res, right_res) {
+            (Err(e), _) | (_, Err(e)) => e,
+            (Ok(left_text), Ok(right_text)) => {
+                if left_text.is_empty() && right_text.is_empty() {
+                    ctx.cache
+                        .diffs
+                        .set(event.node_path.clone(), DiffResult::Empty);
+                    let _ = tx.send(DiffUpdate {
+                        path: event.node_path,
+                        diff_result: DiffResult::Empty,
+                    });
+                    return Ok(());
+                }
+
+                match compute(&ctx.algorithm, &left_text, &right_text, &event.node_path) {
+                    Ok(hunks) => DiffResult::Text(FileDiff {
+                        old_file_content: Arc::from(left_text),
+                        new_file_content: Arc::from(right_text),
+                        hunks,
+                        line_selections: Default::default(),
+                    }),
+                    Err(e) => DiffResult::Error(e.to_string()),
+                }
+            }
+        };
+
+        tracing::trace!("Full diff computation finished");
+        ctx.cache.diffs.set(event.node_path.clone(), diff_result.clone());
+        let _ = tx.send(DiffUpdate {
+            path: event.node_path,
+            diff_result,
+        });
+        Ok(())
+    }
 }
 
 async fn load_file_content_safely(path: &PathBuf) -> Result<String, DiffResult> {
@@ -241,113 +308,4 @@ pub fn compute(
     }
 
     Ok(hunks)
-}
-
-#[derive(TaskerContext)]
-pub struct FullDiffContext {
-    pub algorithm: DiffAlgorithm,
-}
-
-impl Listener<FullDiffReq, crate::worker::EventSender> for FullDiff {
-    type Context = FullDiffContext;
-
-    #[tracing::instrument(skip_all, fields(node_path = %event.node_path.display()))]
-    async fn handle(
-        event: FullDiffReq,
-        ctx: Self::Context,
-        tx: crate::worker::EventSender,
-    ) -> eyre::Result<()> {
-        tracing::debug!(
-            left_path = ?event.left_path,
-            right_path = ?event.right_path,
-            "Computing full diff"
-        );
-
-        let left_path_clone = event.left_path.clone();
-        let right_path_clone = event.right_path.clone();
-
-        let left_fut = async {
-            if let Some(p) = &left_path_clone {
-                load_file_content_safely(p).await
-            } else {
-                Ok(String::new())
-            }
-        };
-        let right_fut = async {
-            if let Some(p) = &right_path_clone {
-                load_file_content_safely(p).await
-            } else {
-                Ok(String::new())
-            }
-        };
-        let (left_res, right_res) = tokio::join!(left_fut, right_fut);
-
-        let diff_result = match (left_res, right_res) {
-            (Err(e), _) | (_, Err(e)) => e,
-            (Ok(left_text), Ok(right_text)) => {
-                if left_text.is_empty() && right_text.is_empty() {
-                    tx.send(FullDiffRes {
-                        node_path: event.node_path.clone(),
-                        result: DiffResult::Empty,
-                        right_path: event.right_path.clone(),
-                    })?;
-                    return Ok(());
-                }
-
-                match compute(&ctx.algorithm, &left_text, &right_text, &event.node_path) {
-                    Ok(hunks) => DiffResult::Text(FileDiff {
-                        old_file_content: Arc::from(left_text),
-                        new_file_content: Arc::from(right_text),
-                        hunks,
-                        line_selections: Default::default(),
-                    }),
-                    Err(e) => DiffResult::Error(e.to_string()),
-                }
-            }
-        };
-
-        tracing::trace!("Full diff computation finished");
-        tx.send(FullDiffRes {
-            node_path: event.node_path.clone(),
-            result: diff_result,
-            right_path: event.right_path.clone(),
-        })?;
-        Ok(())
-    }
-}
-
-#[derive(TaskerContext)]
-pub struct FullDiffResCtx {
-    pub cache: DiffCache,
-    pub syntax_theme: Arc<RwLock<Lazy<syntect::highlighting::Theme>>>,
-}
-
-pub struct FullDiffResListener;
-impl Listener<FullDiffRes, crate::worker::EventSender> for FullDiffResListener {
-    type Context = FullDiffResCtx;
-
-    async fn handle(
-        event: FullDiffRes,
-        ctx: Self::Context,
-        tx: crate::worker::EventSender,
-    ) -> eyre::Result<()> {
-        tracing::debug!(node_path = %event.node_path.display(), "Applied FullDiff cache");
-
-        if let crate::diff::DiffResult::Text(ref file_diff) = event.result {
-            let text = file_diff.new_file_content.clone();
-            ctx.cache.syntax.mark_started(event.node_path.clone());
-
-            tracing::trace!(node_path = %event.node_path.display(), "Queueing Syntax task");
-            if let Some(val) = ctx.syntax_theme.read().value() {
-                let _ = tx.send(SyntaxReq {
-                    node_path: event.node_path.clone(),
-                    text,
-                    theme: (*val).clone(),
-                });
-            }
-        }
-
-        ctx.cache.diffs.set(event.node_path, event.result);
-        Ok(())
-    }
 }

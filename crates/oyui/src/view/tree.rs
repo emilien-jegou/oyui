@@ -2,7 +2,9 @@ use crate::commons::file_icon::FileIconProvider;
 use crate::commons::lazy;
 use crate::config::UiTheme;
 use crate::diff_cache::DiffCache;
+use crate::terminal_colors::TerminalColorMode;
 use crate::ui_state::TreeUiState;
+use crate::view::file::utils::colors::try_lerp_color;
 use crate::{
     diff::DiffStats,
     tree::{FileTree, StagingState, TreeNode},
@@ -76,11 +78,12 @@ impl TreeViewData {
         base_path: Option<&PathBuf>,
         diff_summary: (usize, usize, usize),
         theme: &UiTheme,
+        color_mode: &TerminalColorMode,
     ) {
         let [header, body] =
             Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(area);
         self.draw_header(frame, header, cache, base_path, diff_summary, theme);
-        self.draw_tree_body(icon_provider, frame, body, tree, cache, theme);
+        self.draw_tree_body(icon_provider, frame, body, tree, cache, theme, color_mode);
     }
 
     fn draw_header(
@@ -98,10 +101,13 @@ impl TreeViewData {
         let mut tot_del = 0;
 
         let _ = cache.stats.inner().iter_sync(|_, v| {
-            if let lazy::Lazy::Ready(DiffStats::Text {
-                insertions,
-                deletions,
-            }) = v
+            if let lazy::Lazy::Ready(
+                _,
+                DiffStats::Text {
+                    insertions,
+                    deletions,
+                },
+            ) = v
             {
                 tot_ins += insertions;
                 tot_del += deletions;
@@ -163,11 +169,12 @@ impl TreeViewData {
         tree: &FileTree,
         cache: &DiffCache,
         theme: &UiTheme,
+        color_mode: &TerminalColorMode,
     ) {
         let rows = self.flat_rows(tree, cache);
         let items: Vec<ListItem> = rows
             .iter()
-            .map(|r| render_tree_row(icon_provider, r, theme))
+            .map(|r| render_tree_row(icon_provider, r, theme, color_mode))
             .collect();
         self.list_state.select(Some(self.selected_index));
 
@@ -195,30 +202,26 @@ impl TreeViewData {
     }
 }
 
-fn lerp_color(c1: Color, c2: Color, t: f32) -> Color {
-    let (r1, g1, b1) = match c1 {
-        Color::Rgb(r, g, b) => (r, g, b),
-        _ => (0, 0, 0),
-    };
-    let (r2, g2, b2) = match c2 {
-        Color::Rgb(r, g, b) => (r, g, b),
-        _ => (255, 255, 255),
-    };
-    Color::Rgb(
-        (r1 as f32 + (r2 as f32 - r1 as f32) * t).clamp(0.0, 255.0) as u8,
-        (g1 as f32 + (g2 as f32 - g1 as f32) * t).clamp(0.0, 255.0) as u8,
-        (b1 as f32 + (b2 as f32 - b1 as f32) * t).clamp(0.0, 255.0) as u8,
-    )
-}
-
-fn get_diff_color(value: usize, is_addition: bool, theme: &UiTheme) -> Color {
-    let t = (value as f64 / 100.0).min(1.0).sqrt() as f32;
+fn get_diff_color(
+    value: usize,
+    is_addition: bool,
+    theme: &UiTheme,
+    color_mode: &TerminalColorMode,
+) -> Color {
     let target = if is_addition {
-        theme.add_fg.into()
+        theme.add_fg
     } else {
-        theme.del_fg.into()
+        theme.del_fg
     };
-    lerp_color(theme.dim.into(), target, t)
+
+    if color_mode.support_true_color() && theme.tree_progressive_change_dim {
+        let t = (value as f32 / 100.0).min(1.0).sqrt();
+        if let Some(color) = try_lerp_color(&theme.dim, &target, t) {
+            return color.into();
+        }
+    }
+
+    target.into()
 }
 
 fn flatten_recursive(
@@ -305,6 +308,7 @@ fn render_tree_row<'a>(
     icon_provider: &dyn FileIconProvider,
     row: &'a TreeRow,
     theme: &'a UiTheme,
+    color_mode: &TerminalColorMode,
 ) -> ListItem<'a> {
     let mut spans = Vec::new();
 
@@ -417,13 +421,13 @@ fn render_tree_row<'a>(
                 if *insertions > 0 {
                     spans.push(Span::styled(
                         format!("+{} ", insertions),
-                        Style::default().fg(get_diff_color(*insertions, true, theme)),
+                        Style::default().fg(get_diff_color(*insertions, true, theme, color_mode)),
                     ));
                 }
                 if *deletions > 0 {
                     spans.push(Span::styled(
                         format!("-{} ", deletions),
-                        Style::default().fg(get_diff_color(*deletions, false, theme)),
+                        Style::default().fg(get_diff_color(*deletions, false, theme, color_mode)),
                     ));
                 }
             }

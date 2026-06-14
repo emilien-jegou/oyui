@@ -1,3 +1,4 @@
+use std::fmt;
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -63,7 +64,7 @@ pub struct Hunk {
     pub marker: HunkMarker,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct FileDiff {
     pub old_file_content: Arc<str>,
     pub new_file_content: Arc<str>,
@@ -71,6 +72,12 @@ pub struct FileDiff {
 
     /// Tracks which hunks/lines are staged/selected by the user
     pub line_selections: Vec<bool>,
+}
+
+impl fmt::Debug for FileDiff {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FileDiff").finish()
+    }
 }
 
 #[derive(Debug, Clone)]

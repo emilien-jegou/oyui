@@ -2,7 +2,10 @@ use std::error::Error;
 use std::io;
 use std::path::PathBuf;
 
-use crate::cli::{Commands, Opts};
+use crate::{
+    cli::{Args, Commands},
+    terminal_colors::TerminalColorMode,
+};
 
 pub mod diff;
 pub mod language_server;
@@ -46,14 +49,19 @@ impl From<eyre::Report> for CommandError {
     }
 }
 
-pub async fn run(opts: Opts) -> Result<(), CommandError> {
-    let config_path = opts.common.config.clone().unwrap_or_else(|| {
+pub struct RunOptions {
+    pub args: Args,
+    pub color_mode: TerminalColorMode,
+}
+
+pub async fn run(opts: RunOptions) -> Result<(), CommandError> {
+    let config_path = opts.args.common.config.clone().unwrap_or_else(|| {
         dirs::config_dir()
             .map(|d| d.join("oyui/config.rn"))
             .unwrap_or_else(|| PathBuf::from(".config/oyui/config.rn"))
     });
 
-    match opts.command {
+    match opts.args.command {
         Commands::Diff(ref diff_args) => diff::run_diff(&opts, diff_args, config_path).await,
         Commands::LanguageServer => language_server::run_lsp().await,
     }

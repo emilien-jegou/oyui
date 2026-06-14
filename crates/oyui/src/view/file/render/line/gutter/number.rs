@@ -1,5 +1,5 @@
 use crate::config::UiTheme;
-use crate::view::file::utils::colors::lerp_color;
+use crate::view::file::utils::colors::safe_lerp_color;
 use ratatui::{style::Style, text::Span, widgets::Cell};
 use typed_builder::TypedBuilder;
 
@@ -22,11 +22,7 @@ impl<'a> GutterNumber<'a> {
         let mut line_num_style = if self.is_selected {
             if self.is_staged && (self.is_add || self.is_del) {
                 Style::default()
-                    .bg(lerp_color(
-                        self.theme.cursor_bg.into(),
-                        self.theme.partial.into(),
-                        0.2,
-                    ))
+                    .bg(safe_lerp_color(&self.theme.cursor_bg, &self.theme.partial, 0.2).into())
                     .fg(self.theme.fg.into())
             } else {
                 Style::default()
@@ -35,18 +31,14 @@ impl<'a> GutterNumber<'a> {
             }
         } else if self.is_staged && (self.is_add || self.is_del) {
             Style::default()
-                .bg(lerp_color(
-                    self.theme.bg.into(),
-                    self.theme.partial.into(),
-                    0.1,
-                ))
+                .bg(safe_lerp_color(&self.theme.bg, &self.theme.partial, 0.1).into())
                 .fg(self.theme.partial.into())
         } else {
-            let mut fg = self.theme.dim.into();
+            let mut fg = self.theme.dim.clone();
             if self.is_dimmed {
-                fg = lerp_color(fg, self.theme.bg.into(), 0.4);
+                fg = safe_lerp_color(&fg, &self.theme.bg, 0.4);
             }
-            Style::default().bg(self.theme.bg.into()).fg(fg)
+            Style::default().bg(self.theme.bg.into()).fg(fg.into())
         };
 
         if let Some(override_style) = self.custom_style {

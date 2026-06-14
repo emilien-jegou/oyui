@@ -9,18 +9,16 @@ use typed_builder::TypedBuilder;
 use crate::actions::state::TuiState;
 use crate::actions::BoxedHandler;
 use crate::commands::CommandError;
-use crate::commons::lazy::Lazy;
-use crate::config::UiTheme;
-use crate::config::{load_config, Config};
+use crate::config::Config;
 use crate::diff_cache::DiffCache;
+use crate::terminal_colors::TerminalColorMode;
 use crate::tree::{FileTree, TreeNode};
 use crate::view::View;
 use crate::worker::{tasks, EventRegistry};
 use parking_lot::RwLock;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use syntect::highlighting::Theme;
 
 use crossterm::{
     event::{self, Event, KeyCode},
@@ -32,103 +30,41 @@ use std::io;
 use std::time::Duration;
 
 #[derive(TypedBuilder)]
-#[builder(build_method(into = App))]
-pub struct AppReq {
-    #[builder(default)]
-    pub theme: Lazy<UiTheme>,
-    pub tree: Arc<RwLock<FileTree>>,
-    pub view: View,
-    pub syntax_theme: Arc<RwLock<Lazy<Theme>>>,
-    pub config_error: Arc<RwLock<Option<String>>>,
-    pub current_path: Arc<RwLock<Option<PathBuf>>>,
-    pub config_path: PathBuf,
-    pub worker: Arc<EventRegistry>,
-    pub cache: DiffCache,
-    pub handler: BoxedHandler,
-    pub state: Arc<TuiState>,
-    pub config: Config,
-    pub left_path: PathBuf,
-    pub right_path: PathBuf,
-    pub base_path: Option<PathBuf>,
-}
-
 pub struct App {
     pub tree: Arc<RwLock<FileTree>>,
     pub cache: DiffCache,
     pub view: View,
-    pub theme: Lazy<UiTheme>,
-    pub syntax_theme: Arc<RwLock<Lazy<Theme>>>,
-    pub config_path: PathBuf,
-    pub config_error: Arc<RwLock<Option<String>>>,
     pub current_path: Arc<RwLock<Option<PathBuf>>>,
     pub worker: Arc<EventRegistry>,
     pub left_path: PathBuf,
     pub right_path: PathBuf,
     pub base_path: Option<PathBuf>,
-
-    pub handler: BoxedHandler,
-    pub should_quit: bool,
-    pub command_mode: CommandMode,
     pub state: Arc<TuiState>,
-}
+    pub config: Config,
+    pub handler: BoxedHandler,
+    pub color_mode: TerminalColorMode,
 
-impl From<AppReq> for App {
-    fn from(value: AppReq) -> Self {
-        Self {
-            tree: value.tree,
-            cache: value.cache,
-            view: value.view,
-            theme: value.theme,
-            syntax_theme: value.syntax_theme,
-            config_path: value.config_path,
-            current_path: value.current_path,
-            worker: value.worker,
-            left_path: value.left_path,
-            right_path: value.right_path,
-            base_path: value.base_path,
-            state: value.state,
-            should_quit: false,
-            command_mode: CommandMode::Normal,
-            config_error: value.config_error,
-            handler: value.handler,
-        }
-    }
+    #[builder(default = false)]
+    pub should_quit: bool,
+
+    #[builder(default = CommandMode::Normal)]
+    pub command_mode: CommandMode,
 }
 
 impl App {
-    pub fn builder() -> AppReqBuilder {
-        AppReq::builder()
-    }
-
     pub async fn start(&mut self) -> Result<(), CommandError> {
         self.start_tree_calculation()?;
-        self.start_config_watching(self.config_path.clone())?;
+        self.config.start_watching(&self.worker)?;
         self.run().await?;
         Ok(())
     }
 
-    pub fn handle_reload_event(&mut self, path: &Path) {
-        tracing::info!("Reloading config on main thread...");
-        if let Err(e) = load_config(path, self.handler.clone()) {
-            tracing::error!("Config compilation error: {}", e);
-            *self.config_error.write() = Some(e.to_string());
-        } else {
-            *self.config_error.write() = None;
-        }
-    }
-
+    // TODO: move logic from this function to event worker
     pub async fn tick(&mut self) {
         while let Ok(event) = self.worker.try_recv() {
             if let crate::worker::Event::WatchConfigRes(res) = event {
-                tracing::info!("Reloading config on main thread...");
-                self.handle_reload_event(&res.path);
+                self.config.handle_reload_event(&res.path);
             }
-        }
-
-        {
-            let theme_guard = self.state.theme.read();
-            self.theme = Lazy::Ready(theme_guard.ui.clone());
-            *self.syntax_theme.write() = Lazy::Ready(theme_guard.tm_theme.clone());
         }
 
         let current_path_val = self.view.file_view.read().current_path.clone();
@@ -141,7 +77,7 @@ impl App {
                     crate::commons::lazy::Lazy::Uninitialized
                 ) {
                     tracing::debug!(path = %path.display(), "Queueing full diff calculation");
-                    self.cache.diffs.mark_started(path.clone());
+                    self.cache.diffs.mark_started(path.clone(), true);
 
                     let tree_read = self.tree.read();
                     fn find_file_paths_recursive(
@@ -216,14 +152,6 @@ impl App {
                 left: self.left_path.clone(),
                 right: self.right_path.clone(),
             })?;
-        Ok(())
-    }
-
-    pub fn start_config_watching(&self, path: PathBuf) -> eyre::Result<()> {
-        self.worker.send(tasks::watch_config::WatchConfigReq {
-            path,
-            last_mtime: None,
-        })?;
         Ok(())
     }
 

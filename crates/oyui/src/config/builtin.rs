@@ -14,11 +14,8 @@ pub fn get_embedded_themes() -> &'static EmbeddedThemeMap {
     })
 }
 
-pub fn fallback_theme(base_theme_name: &str) -> (UiTheme, Theme) {
+pub fn get_theme(theme_name: &str) -> Option<(UiTheme, Option<Theme>)> {
     let themes = get_embedded_themes();
-    themes
-        .get(base_theme_name)
-        .or_else(|| themes.values().next())
-        .expect("At least one theme should be present")
-        .clone()
+    let pair = themes.get(theme_name).cloned().map(|s| (s.0, Some(s.1)));
+    pair
 }

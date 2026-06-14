@@ -13,7 +13,7 @@ pub enum DiffAlgorithm {
 
 #[derive(Parser, Clone, Debug)]
 #[command(name = "oyui", version, about, subcommand_required = true)]
-pub struct Opts {
+pub struct Args {
     #[clap(flatten)]
     pub common: CommonArgs,
 
