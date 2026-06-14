@@ -15,9 +15,10 @@ impl Color {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Any)]
+#[derive(Default, Debug, Clone, Copy, Serialize, Deserialize, Any)]
 pub enum LineHighlightMode {
     #[rune(constructor)]
+    #[default]
     None,
     #[rune(constructor)]
     Solid,
