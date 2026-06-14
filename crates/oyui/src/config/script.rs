@@ -29,8 +29,7 @@ pub fn build_context(handler: BoxedHandler) -> Result<Context, ContextError> {
 
         crate::config::ACTIVE_REGISTRY.with(|r| {
             let mut reg = r.borrow_mut();
-            let owned_reg =
-                std::mem::take(&mut *reg);
+            let owned_reg = std::mem::take(&mut *reg);
 
             if let Some(mode) = mode_opt {
                 *reg = owned_reg.register_fn_mode(mode, kb, Rc::new(cb));
@@ -73,14 +72,12 @@ pub fn build_context(handler: BoxedHandler) -> Result<Context, ContextError> {
 /// Compile and return a ready [`Vm`] from a `.rn` source file.
 pub fn build_vm(
     path: &std::path::Path,
-    handler: BoxedHandler,
+    context: Context,
 ) -> Result<Vm, Box<dyn std::error::Error>> {
     let span = info_span!("build_vm", path = %path.display());
     let _enter = span.enter();
 
     debug!("Registering runtime context and modules");
-
-    let context = build_context(handler)?;
 
     let runtime = Arc::new(context.runtime()?);
 

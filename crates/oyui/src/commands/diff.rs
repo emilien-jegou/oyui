@@ -1,12 +1,12 @@
 use crate::actions::handlers::{self, AppActionsHandler};
 use crate::actions::state::TuiState;
 use crate::app::App;
-use crate::cli::{DiffArgs, Opts};
-use crate::commands::CommandError;
-use crate::commons::lazy::Lazy;
+use crate::cli::DiffArgs;
+use crate::commands::{CommandError, RunOptions};
 use crate::config::Config;
 use crate::diff_cache::DiffCache;
 use crate::syntax::SyntaxEngine;
+use crate::view::file::FileViewData;
 use crate::view::View;
 use crate::worker::context::AppWorkerContext;
 use crate::worker::EventRegistry;
@@ -15,29 +15,31 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 pub async fn run_diff(
-    opts: &Opts,
+    options: &RunOptions,
     diff_args: &DiffArgs,
     config_path: PathBuf,
 ) -> Result<(), CommandError> {
     let tree = Arc::new(RwLock::new(crate::tree::FileTree::default()));
     let cache = DiffCache::default();
     let config_error = Arc::new(RwLock::new(None));
-    let syntax_theme = Arc::new(RwLock::new(Lazy::Uninitialized));
     let current_path = Arc::new(RwLock::new(None));
 
-    let view = View::default();
-    let state = Arc::new(TuiState::new("weywot"));
-
-    let config = Config::new(config_path.clone());
+    let file_view_data = FileViewData::new(options.color_mode.support_true_color());
+    let view = View {
+        current: Default::default(),
+        tree_view: Default::default(),
+        file_view: Arc::new(RwLock::new(file_view_data)),
+    };
+    let state = Arc::new(TuiState::new(&options.color_mode));
 
     let worker_context = AppWorkerContext::builder()
         .syntax_engine(SyntaxEngine::new())
+        .view(view.clone())
         .algorithm(diff_args.diff_algorithm)
-        .config(opts.clone())
         .tree(tree.clone())
         .cache(cache.clone())
         .config_error(config_error.clone())
-        .syntax_theme(syntax_theme.clone())
+        .state(state.clone())
         .current_path(current_path.clone())
         .build();
 
@@ -50,14 +52,20 @@ pub async fn run_diff(
         view: view.clone(),
         worker: worker.clone(),
         right_path: diff_args.right.clone(),
+        color_mode: options.color_mode.clone(),
     });
+
+    let config = Config {
+        path: config_path,
+        error: config_error.clone(),
+        handler: handler.clone(),
+    };
 
     view.configure(diff_args.scrolloff, diff_args.context_lines);
 
     let mut app = App::builder()
         .worker(worker)
-        .config_path(config_path)
-        .config_error(config_error.clone())
+        .config(config)
         .base_path(diff_args.base.clone())
         .left_path(diff_args.left.clone())
         .right_path(diff_args.right.clone())
@@ -65,10 +73,9 @@ pub async fn run_diff(
         .tree(tree)
         .state(state)
         .cache(cache)
-        .syntax_theme(syntax_theme)
         .handler(handler)
-        .config(config)
         .current_path(current_path)
+        .color_mode(options.color_mode.clone())
         .build();
 
     app.start().await?;

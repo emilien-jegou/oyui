@@ -1,6 +1,6 @@
 use crate::config::UiTheme;
 use crate::view::file::render::line::text::spans_wrapper::slice_spans;
-use crate::view::file::utils::colors::lerp_color;
+use crate::view::file::utils::colors::safe_lerp_color;
 use ratatui::{
     style::Style,
     text::{Line, Span},
@@ -16,21 +16,22 @@ pub fn render_separator<'a>(
     hscroll: usize,
 ) -> Row<'a> {
     let mut style = Style::default()
-        .bg(lerp_color(theme.bg.into(), theme.dir.into(), 0.1))
-        .fg(lerp_color(theme.dim.into(), theme.dir.into(), 0.5));
+        .bg(safe_lerp_color(&theme.bg, &theme.dir, 0.1).into())
+        .fg(safe_lerp_color(&theme.dim, &theme.dir, 0.5).into());
     if is_selected {
         style = style.bg(theme.cursor_bg.into()).fg(theme.fg.into());
     }
 
     let mut spans = vec![];
     if let (Some(old), Some(new)) = (next_old, next_new) {
+        let fgc = if is_selected {
+            theme.fg.into()
+        } else {
+            safe_lerp_color(&theme.dim, &theme.dir, 0.8)
+        };
         spans.push(Span::styled(
             format!(" @@ -{} +{} @@ ", old + 1, new + 1),
-            style.fg(if is_selected {
-                theme.fg.into()
-            } else {
-                lerp_color(theme.dim.into(), theme.dir.into(), 0.8)
-            }),
+            style.fg(fgc.into()),
         ));
     }
     spans.push(Span::styled(

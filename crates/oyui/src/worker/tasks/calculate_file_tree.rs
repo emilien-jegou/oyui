@@ -6,16 +6,28 @@ use std::sync::Arc;
 
 pub struct CalculateFileTree;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct CalculateFileTreeReq {
     pub left: PathBuf,
     pub right: PathBuf,
 }
 
-#[derive(Debug, Clone)]
+impl std::fmt::Debug for CalculateFileTreeReq {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CalculateFileTreeReq").finish()
+    }
+}
+
+#[derive(Clone)]
 pub struct CalculateFileTreeRes {
     pub tree: FileTree,
     pub files_to_stat: Vec<(PathBuf, PathBuf, PathBuf)>,
+}
+
+impl std::fmt::Debug for CalculateFileTreeRes {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CalculateFileTreeRes").finish()
+    }
 }
 
 impl Listener<CalculateFileTreeReq, crate::worker::EventSender> for CalculateFileTree {
@@ -54,8 +66,7 @@ impl Listener<CalculateFileTreeRes, crate::worker::EventSender> for CalculateFil
     ) -> eyre::Result<()> {
         if event.tree.nodes.is_empty() {
             tracing::error!("No modifications found. Nothing to split.");
-            *ctx.config_error.write() =
-                Some("No modifications found. Nothing to split.".into());
+            *ctx.config_error.write() = Some("No modifications found. Nothing to split.".into());
         } else {
             *ctx.tree.write() = event.tree;
             let _ = tx.send(crate::worker::tasks::stats::StatsReq {

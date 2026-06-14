@@ -8,14 +8,28 @@ use std::path::{Path, PathBuf};
 
 pub struct Stats;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct StatsReq {
     pub files: Vec<(PathBuf, PathBuf, PathBuf)>,
 }
 
-#[derive(Debug, Clone)]
+impl std::fmt::Debug for StatsReq {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StatsReq")
+            .field("file_count", &self.files.len())
+            .finish()
+    }
+}
+
+#[derive(Clone)]
 pub struct StatsRes {
     pub stats: Vec<(PathBuf, DiffStats)>,
+}
+
+impl std::fmt::Debug for StatsRes {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StatsRes").finish()
+    }
 }
 
 fn get_file_info(path: &Path) -> (bool, isize, Option<String>) {

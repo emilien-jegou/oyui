@@ -90,27 +90,25 @@ fn apply_tree_changes(
                                         current_old_line = *old_line_idx + 1;
                                     }
                                     crate::diff::DiffLine::Deletion { old_line_idx, .. } => {
-                                        if !is_staged {
-                                            if *old_line_idx < old_lines.len() {
+                                        if !is_staged
+                                            && *old_line_idx < old_lines.len() {
                                                 if first_line_written {
                                                     out.push('\n');
                                                 }
                                                 out.push_str(old_lines[*old_line_idx]);
                                                 first_line_written = true;
                                             }
-                                        }
                                         current_old_line = *old_line_idx + 1;
                                     }
                                     crate::diff::DiffLine::Addition { new_line_idx, .. } => {
-                                        if is_staged {
-                                            if *new_line_idx < new_lines.len() {
+                                        if is_staged
+                                            && *new_line_idx < new_lines.len() {
                                                 if first_line_written {
                                                     out.push('\n');
                                                 }
                                                 out.push_str(new_lines[*new_line_idx]);
                                                 first_line_written = true;
                                             }
-                                        }
                                     }
                                 }
                             }

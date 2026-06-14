@@ -2,6 +2,8 @@ use crate::actions::handlers::AppActionsHandler;
 use crate::actions::*;
 use crate::diff_cache::DiffCache;
 use crate::tree::FileTree;
+use crate::worker::events::file_opened::FileOpened;
+use tracing::debug;
 
 impl ViewTreeActionsHandler for AppActionsHandler {
     fn open_selected(&self) {
@@ -12,15 +14,20 @@ impl ViewTreeActionsHandler for AppActionsHandler {
             if row.is_dir {
                 view.ui_state.set_folded(&row.path, false);
             } else {
+                debug!("Opened selected");
                 *self.view.current.write() = crate::view::ViewKind::File;
                 self.view.file_view.write().current_path = Some(row.path.clone());
+                let _ = self.worker.send(FileOpened { path: row.path });
             }
         }
     }
 
     fn open_file(&self, file: String) {
         *self.view.current.write() = crate::view::ViewKind::File;
-        self.view.file_view.write().current_path = Some(std::path::PathBuf::from(file));
+        let path = std::path::PathBuf::from(file);
+        self.view.file_view.write().current_path = Some(path.clone());
+        debug!("Opened file");
+        let _ = self.worker.send(FileOpened { path });
     }
 }
 
@@ -124,10 +131,7 @@ impl ViewTreeStagingActionsHandler for AppActionsHandler {
         tracing::debug!("Inverting all staging selections");
         let mut tree_write = self.tree.write();
 
-        fn invert_recursive(
-            nodes: &mut [crate::tree::TreeNode],
-            cache: &DiffCache,
-        ) {
+        fn invert_recursive(nodes: &mut [crate::tree::TreeNode], cache: &DiffCache) {
             for node in nodes {
                 match node {
                     crate::tree::TreeNode::File(f) => {

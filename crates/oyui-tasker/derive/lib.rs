@@ -251,7 +251,7 @@ pub fn tasker_registry(input: TokenStream) -> TokenStream {
                 Event: From<E>,
             {
                 let ev = Event::from(event);
-                ::oyui_tasker::reexport::tracing::trace!(?ev, "EventSender sending event");
+                ::oyui_tasker::reexport::tracing::debug!(?ev, "EventSender sending event");
                 self.tx.try_send(ev).map_err(|e| match e {
                     ::oyui_tasker::reexport::async_channel::TrySendError::Full(_) => unreachable!("unbounded channel cannot be full"),
                     ::oyui_tasker::reexport::async_channel::TrySendError::Closed(val) => ::tokio::sync::mpsc::error::SendError(val),
@@ -299,7 +299,9 @@ pub fn tasker_registry(input: TokenStream) -> TokenStream {
             where
                 Event: From<E>,
             {
-                self.tx.try_send(Event::from(event)).map_err(|e| match e {
+                let ev = Event::from(event);
+                ::oyui_tasker::reexport::tracing::debug!(?ev, "EventRegistry sending event");
+                self.tx.try_send(ev).map_err(|e| match e {
                     ::oyui_tasker::reexport::async_channel::TrySendError::Full(_) => unreachable!("unbounded channel cannot be full"),
                     ::oyui_tasker::reexport::async_channel::TrySendError::Closed(val) => ::tokio::sync::mpsc::error::SendError(val),
                 })
@@ -352,6 +354,7 @@ pub fn tasker_registry(input: TokenStream) -> TokenStream {
 
                     async move {
                         while let Ok(event) = req_rx.recv().await {
+                            ::oyui_tasker::reexport::tracing::debug!(?event, "Processing event");
                             match event {
                                 Event::Shutdown => {
                                     let _ = ev_tx.try_send(Event::Shutdown);

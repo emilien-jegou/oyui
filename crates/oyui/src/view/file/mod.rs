@@ -22,8 +22,8 @@ pub struct FileViewData {
     pub use_gradient: bool,
 }
 
-impl Default for FileViewData {
-    fn default() -> Self {
+impl FileViewData {
+    pub fn new(use_gradient: bool) -> Self {
         Self {
             scroll_states: HashMap::new(),
             hscroll_states: HashMap::new(),
@@ -37,7 +37,7 @@ impl Default for FileViewData {
             context_lines: 4,
             last_height: 0,
             last_width: 0,
-            use_gradient: true,
+            use_gradient,
         }
     }
 }

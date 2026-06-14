@@ -118,14 +118,13 @@ impl FileTree {
                     left_resolved = left_dir.join(name);
                 }
             }
-        } else if is_right_dir && !left_exists {
-            if left_dir.extension().is_some() {
+        } else if is_right_dir && !left_exists
+            && left_dir.extension().is_some() {
                 is_file_diff = true;
                 if let Some(name) = left_dir.file_name() {
                     right_resolved = right_dir.join(name);
                 }
             }
-        }
 
         if is_file_diff {
             let mut tree = Self {
@@ -149,11 +148,10 @@ impl FileTree {
             let right_path = if right_res_exists { Some(right_resolved.clone()) } else { None };
 
             let mut should_insert = true;
-            if left_res_exists && right_res_exists {
-                if files_are_identical(&left_resolved, &right_resolved) {
+            if left_res_exists && right_res_exists
+                && files_are_identical(&left_resolved, &right_resolved) {
                     should_insert = false;
                 }
-            }
 
             if should_insert {
                 tree.insert_file(

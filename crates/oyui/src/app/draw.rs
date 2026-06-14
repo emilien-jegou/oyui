@@ -18,37 +18,42 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     ])
     .areas(area);
 
-    if let Some(theme) = app.theme.value() {
-        if let Some(ref err) = *app.config_error.read() {
-            crate::view::config_error::draw(frame, view_area, err, theme);
-        } else if let Some(theme) = app.theme.value() {
-            let diff_summary = app.get_diff_summary();
+    let theme_guard = app.state.theme.read();
+    let theme = theme_guard.ui.clone();
+    drop(theme_guard);
 
-            let tree_guard = app.tree.read();
+    let diff_summary = app.get_diff_summary();
+    let tree_guard = app.tree.read();
 
-            app.view.draw(
-                frame,
-                view_area,
-                &tree_guard,
-                &app.cache,
-                app.base_path.as_ref(),
-                diff_summary,
-                theme,
-            );
-        }
-        draw_hint_bar(
-            frame,
-            hint_area,
-            &app.command_mode,
-            &app.view.current.read(),
-            theme,
-        );
-        draw_command_bar(frame, cmd_area, &app.command_mode, theme);
+    // 1. Draw the underlying view first
+    app.view.draw(
+        frame,
+        view_area,
+        &tree_guard,
+        &app.cache,
+        app.base_path.as_ref(),
+        diff_summary,
+        &theme,
+        &app.color_mode
+    );
 
-        if let CommandMode::ConfirmMerge = app.command_mode {
-            let merge_stats = app.get_merge_stats();
-            crate::view::confirm_window::draw(frame, theme, merge_stats);
-        }
+    // 2. Draw the config error on top of the view if it exists
+    if let Some(ref err) = *app.config.error.read() {
+        crate::view::config_error::draw(frame, view_area, err, &theme);
+    }
+
+    draw_hint_bar(
+        frame,
+        hint_area,
+        &app.command_mode,
+        &app.view.current.read(),
+        &theme,
+    );
+    draw_command_bar(frame, cmd_area, &app.command_mode, &theme);
+
+    if let CommandMode::ConfirmMerge = app.command_mode {
+        let merge_stats = app.get_merge_stats();
+        crate::view::confirm_window::draw(frame, &theme, merge_stats);
     }
 }
 

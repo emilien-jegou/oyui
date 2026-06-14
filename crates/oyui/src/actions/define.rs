@@ -4,15 +4,15 @@ use crate::config::LineHighlightMode;
 
 define_actions! {
     global {
-        quit(),
-        confirm(),
-        execute_merge(),
-        open_command_mode(),
-        confirm_merge_window_enabled { @getset(bool) },
-    },
+        quit()
+        confirm()
+        execute_merge()
+        open_command_mode()
+        confirm_merge_window_enabled { @getset(bool) }
+    }
     theme {
         @getset(String)
-        toggle_gradient(),
+        toggle_gradient()
 
         bg { @getset(String) }
         fg { @getset(String) }
@@ -48,60 +48,62 @@ define_actions! {
         char_scroll_both { @getset(String) }
         char_scroll_left { @getset(String) }
         char_scroll_right { @getset(String) }
-    },
+
+        tree_progressive_change_dim { @getset(bool) }
+    }
     view {
         file {
             scroll {
-                left(u32),
-                right(u32),
-            },
+                left(u32)
+                right(u32)
+            }
             cursor {
-                up(u32),
-                down(u32),
-                page_up(),
-                page_down(),
-                half_page_up(),
-                half_page_down(),
-                top(),
-                bottom(),
-            },
+                up(u32)
+                down(u32)
+                page_up()
+                page_down()
+                half_page_up()
+                half_page_down()
+                top()
+                bottom()
+            }
             nav {
-                next_hunk(),
-                prev_hunk(),
-            },
+                next_hunk()
+                prev_hunk()
+            }
             staging {
-                toggle(),
-                toggle_hunk(u32),
-                toggle_line(),
-                split(),
-                invert(),
-            },
+                toggle()
+                toggle_hunk(u32)
+                toggle_line()
+                split()
+                invert()
+            }
             fold {
-                toggle(),
-            },
-            close(),
-        },
+                toggle()
+            }
+            close()
+        }
         tree {
             cursor {
-                up(u32),
-                down(u32),
-                page_up(),
-                page_down(),
-                half_page_up(),
-                half_page_down(),
-                top(),
-                bottom(),
-            },
+                up(u32)
+                down(u32)
+                page_up()
+                page_down()
+                half_page_up()
+                half_page_down()
+                top()
+                bottom()
+            }
             directory {
-                expand(),
-                collapse(),
-            },
+                expand()
+                collapse()
+            }
             staging {
-                toggle_selected(),
-                invert(),
-            },
-            open_selected(),
-            open_file(String),
+                toggle_selected()
+                invert()
+            }
+            open_selected()
+            open_file(String)
         }
     }
 }
