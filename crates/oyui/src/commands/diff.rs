@@ -21,10 +21,12 @@ pub async fn run_diff(
     let config_error = Arc::new(RwLock::new(None));
     let syntax_theme = Arc::new(RwLock::new(Lazy::Uninitialized));
     let current_path = Arc::new(RwLock::new(None));
+    let inline_diff = Arc::new(RwLock::new(true));
 
     let worker_context = AppWorkerContext::builder()
         .syntax_engine(SyntaxEngine::new())
         .algorithm(diff_args.diff_algorithm)
+        .inline_diff(inline_diff.clone())
         .config(opts.clone())
         .tree(tree.clone())
         .cache(cache.clone())
@@ -40,6 +42,7 @@ pub async fn run_diff(
 
     let mut app = App::builder()
         .worker(worker)
+        .inline_diff(inline_diff)
         .config_path(config_path)
         .config_error(config_error)
         .base_path(diff_args.base.clone())

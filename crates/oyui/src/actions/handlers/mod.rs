@@ -3,6 +3,7 @@ use crate::actions::*;
 use crate::diff_cache::DiffCache;
 use crate::tree::FileTree;
 use crate::view::View;
+use crate::worker::EventSender;
 use parking_lot::RwLock;
 use std::sync::Arc;
 
@@ -16,6 +17,8 @@ pub struct AppActionsHandler {
     pub tree: Arc<RwLock<FileTree>>,
     pub cache: Arc<RwLock<DiffCache>>,
     pub view: View,
+    pub inline_diff: Arc<RwLock<bool>>,
+    pub worker: EventSender,
 }
 
 pub fn generate(
@@ -23,12 +26,16 @@ pub fn generate(
     tree: Arc<RwLock<FileTree>>,
     cache: Arc<RwLock<DiffCache>>,
     view: View,
+    inline_diff: Arc<RwLock<bool>>,
+    worker: EventSender,
 ) -> BoxedHandler {
     let handler = AppActionsHandler {
         state,
         tree,
         cache,
         view,
+        inline_diff,
+        worker,
     };
     Handler {
         global: handler.clone(),
@@ -63,6 +70,7 @@ pub fn generate(
         view_file_nav: handler.clone(),
         view_file_staging: handler.clone(),
         view_file_fold: handler.clone(),
+        view_file_inline_diff: handler.clone(),
         view_tree: handler.clone(),
         view_tree_cursor: handler.clone(),
         view_tree_directory: handler.clone(),

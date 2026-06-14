@@ -46,6 +46,8 @@ pub struct AppReq {
     pub config_error: Arc<RwLock<Option<String>>>,
     #[builder(default = Arc::new(RwLock::new(None)))]
     pub current_path: Arc<RwLock<Option<PathBuf>>>,
+    #[builder(default = Arc::new(RwLock::new(true)))]
+    pub inline_diff: Arc<RwLock<bool>>,
 
     pub config_path: PathBuf,
     pub worker: EventRegistry,
@@ -63,6 +65,7 @@ pub struct App {
     pub config_path: PathBuf,
     pub config_error: Arc<RwLock<Option<String>>>,
     pub current_path: Arc<RwLock<Option<PathBuf>>>,
+    pub inline_diff: Arc<RwLock<bool>>,
     pub worker: EventRegistry,
     pub left_path: PathBuf,
     pub right_path: PathBuf,
@@ -82,6 +85,8 @@ impl From<AppReq> for App {
             value.tree.clone(),
             value.cache.clone(),
             value.view.clone(),
+            value.inline_diff.clone(),
+            value.worker.sender(),
         );
 
         Self {
@@ -93,6 +98,7 @@ impl From<AppReq> for App {
             config_path: value.config_path,
             config_error: value.config_error,
             current_path: value.current_path,
+            inline_diff: value.inline_diff,
             worker: value.worker,
             left_path: value.left_path,
             right_path: value.right_path,

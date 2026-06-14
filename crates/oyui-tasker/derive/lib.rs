@@ -246,6 +246,11 @@ pub fn tasker_registry(input: TokenStream) -> TokenStream {
         }
 
         impl EventSender {
+            pub fn new_dummy() -> Self {
+                let (tx, _) = ::tokio::sync::mpsc::unbounded_channel();
+                Self { tx }
+            }
+
             pub fn send<E>(&self, event: E) -> Result<(), ::tokio::sync::mpsc::error::SendError<Event>>
             where
                 Event: From<E>,

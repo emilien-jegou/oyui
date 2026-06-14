@@ -18,7 +18,14 @@ pub async fn run_lsp() -> Result<(), CommandError> {
     let cache = Arc::new(parking_lot::RwLock::new(DiffCache::default()));
     let view = View::default();
 
-    let handler = handlers::generate(state, tree, cache, view);
+    let handler = handlers::generate(
+        state,
+        tree,
+        cache,
+        view,
+        Arc::new(parking_lot::RwLock::new(true)),
+        crate::worker::EventSender::new_dummy(),
+    );
     let context = script::build_context(handler)
         .map_err(|e| CommandError::Runtime(Box::new(e)))?;
 

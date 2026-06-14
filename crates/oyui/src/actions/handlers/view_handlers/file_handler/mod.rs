@@ -3,6 +3,8 @@ use std::path::Path;
 use crate::actions::handlers::AppActionsHandler;
 use crate::actions::*;
 use crate::diff_cache::DiffCache;
+use crate::tree::TreeNode;
+use crate::worker::tasks;
 
 pub mod file_staging_handler;
 
@@ -239,5 +241,55 @@ impl ViewFileFoldActionsHandler for AppActionsHandler {
             let next_offset = Some(next_selected.saturating_sub(ctx.cursor_screen_offset));
             update_scroll_state(&mut view, &ctx.path, next_selected, next_offset);
         }
+    }
+}
+
+impl ViewFileInlineDiffActionsHandler for AppActionsHandler {
+    fn toggle(&self) {
+        let enabled = {
+            let mut flag = self.inline_diff.write();
+            *flag = !*flag;
+            *flag
+        };
+        tracing::debug!(enabled, "Toggled inline diff");
+
+        let path = self.view.file_view.read().current_path.clone();
+        if let Some(path) = path {
+            self.cache.write().diffs.mark_started(path.clone());
+
+            let tree_read = self.tree.read();
+            fn find_paths(
+                nodes: &[TreeNode],
+                path: &std::path::Path,
+            ) -> Option<(Option<std::path::PathBuf>, Option<std::path::PathBuf>)> {
+                for node in nodes {
+                    match node {
+                        TreeNode::File(f) => {
+                            if f.path == path {
+                                return Some((f.left_path.clone(), f.right_path.clone()));
+                            }
+                        }
+                        TreeNode::Directory(d) => {
+                            if let Some(paths) = find_paths(&d.children, path) {
+                                return Some(paths);
+                            }
+                        }
+                    }
+                }
+                None
+            }
+            if let Some((left_path, right_path)) = find_paths(&tree_read.nodes, &path) {
+                let _ = self.worker.send(tasks::full_diff::FullDiffReq {
+                    node_path: path,
+                    left_path,
+                    right_path,
+                });
+            }
+        }
+    }
+
+    fn set(&self, val: bool) {
+        *self.inline_diff.write() = val;
+        tracing::debug!(val, "Set inline diff");
     }
 }
