@@ -342,6 +342,22 @@ fn render_tree_row<'a>(
     spans.push(Span::raw(" "));
 
     // 4. File/Dir Name and Icon
+    let left_name = row
+        .left_path
+        .as_ref()
+        .and_then(|p| p.file_name())
+        .map(|s| s.to_string_lossy());
+    let right_name = row
+        .right_path
+        .as_ref()
+        .and_then(|p| p.file_name())
+        .map(|s| s.to_string_lossy());
+
+    let name_differ = match (&left_name, &right_name) {
+        (Some(l), Some(r)) => l != r,
+        _ => false,
+    };
+
     if row.is_dir {
         let arrow = if row.is_folded { "▸ " } else { "▾ " };
         spans.push(Span::styled(arrow, Style::default().fg(theme.fg.into())));
@@ -350,6 +366,15 @@ fn render_tree_row<'a>(
             row.name.as_str(),
             Style::default().fg(theme.dir.into()).bold(),
         ));
+    } else if name_differ {
+        let l_name = left_name.as_ref().unwrap().to_string();
+        let r_name = right_name.as_ref().unwrap().to_string();
+
+        spans.push(Span::styled("[ ", Style::default().fg(theme.dim.into())));
+        spans.push(Span::styled(l_name, Style::default().fg(base_fg)));
+        spans.push(Span::styled(" → ", Style::default().fg(theme.dim.into())));
+        spans.push(Span::styled(r_name, Style::default().fg(base_fg)));
+        spans.push(Span::styled(" ]", Style::default().fg(theme.dim.into())));
     } else {
         let icon = icon_provider.get_file_icon(&row.name);
 

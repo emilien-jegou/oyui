@@ -7,7 +7,7 @@ use crate::{
     config::UiTheme,
     diff::{DiffResult, HunkMarker},
     diff_cache::DiffCache,
-    tree::FileTree,
+    tree::{FileTree, TreeNode},
 };
 use line::LineRenderer;
 use separator::render_separator;
@@ -40,12 +40,94 @@ impl FileViewData {
         ])
         .areas(area);
 
-        let mut header_spans = vec![Span::styled(
-            format!(" {} ", path.display()),
-            Style::default()
-                .bg(theme.cursor_bg.into())
-                .fg(theme.fg.into()),
-        )];
+        // Find left and right paths to check if names differ
+        let mut left_path = None;
+        let mut right_path = None;
+
+        fn find_paths(
+            nodes: &[TreeNode],
+            target: &std::path::Path,
+        ) -> Option<(Option<std::path::PathBuf>, Option<std::path::PathBuf>)> {
+            for node in nodes {
+                match node {
+                    TreeNode::File(f) => {
+                        if f.path == target {
+                            return Some((f.left_path.clone(), f.right_path.clone()));
+                        }
+                    }
+                    TreeNode::Directory(d) => {
+                        if let Some(res) = find_paths(&d.children, target) {
+                            return Some(res);
+                        }
+                    }
+                }
+            }
+            None
+        }
+
+        if let Some((l, r)) = find_paths(&tree.nodes, path) {
+            left_path = l;
+            right_path = r;
+        }
+
+        let left_name = left_path
+            .as_ref()
+            .and_then(|p| p.file_name())
+            .map(|s| s.to_string_lossy());
+        let right_name = right_path
+            .as_ref()
+            .and_then(|p| p.file_name())
+            .map(|s| s.to_string_lossy());
+
+        let name_differ = match (&left_name, &right_name) {
+            (Some(l), Some(r)) => l != r,
+            _ => false,
+        };
+
+        let mut header_spans = Vec::new();
+
+        if name_differ {
+            let l_name = left_name.as_ref().unwrap().to_string();
+            let r_name = right_name.as_ref().unwrap().to_string();
+
+            header_spans.push(Span::styled(
+                " [ ",
+                Style::default()
+                    .bg(theme.cursor_bg.into())
+                    .fg(theme.dim.into()),
+            ));
+            header_spans.push(Span::styled(
+                l_name,
+                Style::default()
+                    .bg(theme.cursor_bg.into())
+                    .fg(theme.fg.into()),
+            ));
+            header_spans.push(Span::styled(
+                " → ",
+                Style::default()
+                    .bg(theme.cursor_bg.into())
+                    .fg(theme.dim.into()),
+            ));
+            header_spans.push(Span::styled(
+                r_name,
+                Style::default()
+                    .bg(theme.cursor_bg.into())
+                    .fg(theme.fg.into()),
+            ));
+            header_spans.push(Span::styled(
+                " ] ",
+                Style::default()
+                    .bg(theme.cursor_bg.into())
+                    .fg(theme.dim.into()),
+            ));
+        } else {
+            header_spans.push(Span::styled(
+                format!(" {} ", path.display()),
+                Style::default()
+                    .bg(theme.cursor_bg.into())
+                    .fg(theme.fg.into()),
+            ));
+        }
 
         if let Some(stats) = cache.stats.get(path).value() {
             header_spans.push(Span::raw("  "));

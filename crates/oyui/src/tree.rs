@@ -46,6 +46,7 @@ pub enum TreeNode {
 #[derive(Clone, Debug, Default)]
 pub struct FileTree {
     pub nodes: Vec<TreeNode>,
+    pub is_file_diff: bool,
 }
 
 impl FileTree {
@@ -82,7 +83,98 @@ impl FileTree {
         left_dir: &Path,
         right_dir: &Path,
     ) -> (Self, Vec<(PathBuf, PathBuf, PathBuf)>) {
-        let mut tree = Self::default();
+        let left_exists = left_dir.exists();
+        let right_exists = right_dir.exists();
+
+        let is_left_file = left_exists && left_dir.is_file();
+        let is_right_file = right_exists && right_dir.is_file();
+        let is_left_dir = left_exists && left_dir.is_dir();
+        let is_right_dir = right_exists && right_dir.is_dir();
+
+        let mut is_file_diff = false;
+        let mut left_resolved = left_dir.to_path_buf();
+        let mut right_resolved = right_dir.to_path_buf();
+
+        if is_left_file && is_right_file {
+            is_file_diff = true;
+        } else if is_left_dir && is_right_file {
+            is_file_diff = true;
+            if let Some(name) = right_dir.file_name() {
+                left_resolved = left_dir.join(name);
+            }
+        } else if is_left_file && is_right_dir {
+            is_file_diff = true;
+            if let Some(name) = left_dir.file_name() {
+                right_resolved = right_dir.join(name);
+            }
+        } else if is_left_file && !right_exists {
+            is_file_diff = true;
+        } else if is_right_file && !left_exists {
+            is_file_diff = true;
+        } else if is_left_dir && !right_exists {
+            if right_dir.extension().is_some() {
+                is_file_diff = true;
+                if let Some(name) = right_dir.file_name() {
+                    left_resolved = left_dir.join(name);
+                }
+            }
+        } else if is_right_dir && !left_exists {
+            if left_dir.extension().is_some() {
+                is_file_diff = true;
+                if let Some(name) = left_dir.file_name() {
+                    right_resolved = right_dir.join(name);
+                }
+            }
+        }
+
+        if is_file_diff {
+            let mut tree = Self {
+                nodes: Vec::new(),
+                is_file_diff: true,
+            };
+            let mut files_to_stat = Vec::new();
+
+            let left_res_exists = left_resolved.exists();
+            let right_res_exists = right_resolved.exists();
+
+            let rel_path_buf = if right_res_exists {
+                PathBuf::from(right_resolved.file_name().unwrap_or_else(|| std::ffi::OsStr::new("file")))
+            } else if left_res_exists {
+                PathBuf::from(left_resolved.file_name().unwrap_or_else(|| std::ffi::OsStr::new("file")))
+            } else {
+                PathBuf::from("file")
+            };
+
+            let left_path = if left_res_exists { Some(left_resolved.clone()) } else { None };
+            let right_path = if right_res_exists { Some(right_resolved.clone()) } else { None };
+
+            let mut should_insert = true;
+            if left_res_exists && right_res_exists {
+                if files_are_identical(&left_resolved, &right_resolved) {
+                    should_insert = false;
+                }
+            }
+
+            if should_insert {
+                tree.insert_file(
+                    rel_path_buf.clone(),
+                    left_path.clone(),
+                    right_path.clone(),
+                );
+                files_to_stat.push((
+                    rel_path_buf,
+                    left_resolved,
+                    right_resolved,
+                ));
+            }
+
+            return (tree, files_to_stat);
+        }
+
+        let mut tree = Self {
+            nodes: Vec::new(),
+            is_file_diff: false,
+        };
         let mut files_to_stat = Vec::new();
 
         let mut added_count = 0;

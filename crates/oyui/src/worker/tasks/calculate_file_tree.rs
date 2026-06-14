@@ -53,9 +53,9 @@ impl Listener<CalculateFileTreeRes, crate::worker::EventSender> for CalculateFil
         tx: crate::worker::EventSender,
     ) -> eyre::Result<()> {
         if event.tree.nodes.is_empty() {
-            tracing::error!("No modifications found between directories. Nothing to split.");
+            tracing::error!("No modifications found. Nothing to split.");
             *ctx.config_error.write() =
-                Some("No modifications found between directories. Nothing to split.".into());
+                Some("No modifications found. Nothing to split.".into());
         } else {
             *ctx.tree.write() = event.tree;
             let _ = tx.send(crate::worker::tasks::stats::StatsReq {
