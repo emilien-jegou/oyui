@@ -11,35 +11,9 @@ pub fn confirm_and_write(
     right_dir: &Path,
     cache: &DiffCache,
 ) -> Result<ExitAction, Box<dyn Error>> {
-    let has_staged_changes = is_anything_staged(&tree.nodes);
-
-    if !has_staged_changes {
-        return Ok(ExitAction::QuitWithReason(
-            "No changes staged. Aborting merge.".into(),
-        ));
-    }
-
     apply_tree_changes(&tree.nodes, right_dir, cache, tree.is_file_diff)?;
     *should_quit = true;
     Ok(ExitAction::KeepRunning)
-}
-
-fn is_anything_staged(nodes: &[TreeNode]) -> bool {
-    for node in nodes {
-        match node {
-            TreeNode::File(f) => {
-                if f.state == StagingState::Staged || f.state == StagingState::PartiallyStaged {
-                    return true;
-                }
-            }
-            TreeNode::Directory(d) => {
-                if is_anything_staged(&d.children) {
-                    return true;
-                }
-            }
-        }
-    }
-    false
 }
 
 fn apply_tree_changes(
