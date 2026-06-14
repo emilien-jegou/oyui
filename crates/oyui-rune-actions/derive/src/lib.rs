@@ -5,10 +5,7 @@ use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
 use syn::{
-    braced, parenthesized,
-    parse::{Parse, ParseStream},
-    punctuated::Punctuated,
-    Expr, Ident, Result, Token, Type,
+    Expr, Ident, Result, Token, Type, braced, parenthesized, parse::{Parse, ParseStream}, punctuated::Punctuated
 };
 
 struct ActionTree {
@@ -161,12 +158,13 @@ pub fn define_actions(input: TokenStream) -> TokenStream {
         generate_from_impls(node, &mut path_idents, &mut from_impls);
     }
 
-    // Generate leaf Traits (including Arc delegation implementation)
+    // Generate leaf Traits (including Arc delegation implementation and unit type implementations)
     let mut traits = Vec::new();
     for (path, getset, leaves) in &active_branches {
         let trait_name = path_to_trait_name(path);
         let mut trait_methods = Vec::new();
         let mut arc_methods = Vec::new();
+        let mut unit_methods = Vec::new();
 
         for leaf in leaves {
             let leaf_ident = &leaf.ident;
@@ -181,6 +179,12 @@ pub fn define_actions(input: TokenStream) -> TokenStream {
             arc_methods.push(quote! {
                 fn #leaf_ident(&self, #(#arg_names: #args),*) -> #ret_type {
                     (**self).#leaf_ident(#(#arg_names),*)
+                }
+            });
+
+            unit_methods.push(quote! {
+                fn #leaf_ident(&self, #(#arg_names: #args),*) -> #ret_type {
+                    ::std::default::Default::default()
                 }
             });
         }
@@ -199,6 +203,13 @@ pub fn define_actions(input: TokenStream) -> TokenStream {
                     (**self).set(val)
                 }
             });
+
+            unit_methods.push(quote! {
+                fn get(&self) -> #ty {
+                    ::std::default::Default::default()
+                }
+                fn set(&self, _val: #ty) {}
+            });
         }
 
         traits.push(quote! {
@@ -208,6 +219,10 @@ pub fn define_actions(input: TokenStream) -> TokenStream {
 
             impl<T: #trait_name + ?Sized> #trait_name for ::std::sync::Arc<T> {
                 #(#arc_methods)*
+            }
+
+            impl #trait_name for () {
+                #(#unit_methods)*
             }
         });
     }
@@ -219,6 +234,7 @@ pub fn define_actions(input: TokenStream) -> TokenStream {
     let mut trait_bounds = Vec::new();
     let mut erased_types = Vec::new();
     let mut erased_instantiations = Vec::new();
+    let mut empty_fields = Vec::new();
 
     for (path, _, _) in &active_branches {
         let field_name = path_to_field_name(path);
@@ -239,6 +255,9 @@ pub fn define_actions(input: TokenStream) -> TokenStream {
         erased_instantiations.push(quote! {
             #field_name: Box::new(self.#field_name) as Box<dyn #trait_name + Send + Sync + 'static>
         });
+        empty_fields.push(quote! {
+            #field_name: Box::new(()) as Box<dyn #trait_name + Send + Sync + 'static>
+        });
     }
 
     // Create single-type instantiation helper
@@ -257,7 +276,7 @@ pub fn define_actions(input: TokenStream) -> TokenStream {
         quote! {}
     };
 
-    // 5.5 Generate dispatch method implementation arms for BoxedHandler
+    // Generate dispatch method implementation arms for BoxedHandler
     let mut dispatch_arms = Vec::new();
     for (path, _getset, leaves) in &active_branches {
         let field_name = path_to_field_name(path);
@@ -310,6 +329,12 @@ pub fn define_actions(input: TokenStream) -> TokenStream {
         );
 
         impl BoxedHandler {
+            pub fn empty() -> Self {
+                BoxedHandler(::std::sync::Arc::new(Handler {
+                    #(#empty_fields),*
+                }))
+            }
+
             pub fn dispatch(&self, action: &Action) {
                 match &action.0 {
                     #(#dispatch_arms,)*
