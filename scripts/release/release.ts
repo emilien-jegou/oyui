@@ -1,144 +1,157 @@
-#!/usr/bin/env bun
-import { join } from "node:path";
+import { join } from 'node:path';
+import { stdin as input, stdout as output } from 'node:process';
+import readline from 'node:readline/promises';
+
+import { Effect, pipe } from 'effect';
 import {
   prepare,
-  cargoDeps,
-  regexUpdate,
-  changelogUpdate,
   prettyPrint,
   run,
-  JjVcsProvider,
-} from "relacher";
-import type { ChangelogContext } from "relacher";
+  makeRCVersionManager,
+  VersionManagerService,
+  VcsProviderService,
+  makeJjVcsProvider,
+  printDependencyList,
+  log,
+  init,
+} from 'relacher';
 
-const c = {
-  red: (s: string) => `\x1b[31m${s}\x1b[0m`,
-  green: (s: string) => `\x1b[32m${s}\x1b[0m`,
-  yellow: (s: string) => `\x1b[33m${s}\x1b[0m`,
-  blue: (s: string) => `\x1b[34m${s}\x1b[0m`,
-  bold: (s: string) => `\x1b[1m${s}\x1b[0m`,
-};
-
-const step = (msg: string) => console.log(`\n${c.bold(c.blue(`▶ ${msg}`))}`);
-const ok = (msg: string) => console.log(`  ${c.green("✓")} ${msg}`);
-const warn = (msg: string) => console.log(`  ${c.yellow("⚠")} ${msg}`);
-const die = (msg: string): never => {
-  console.error(`\n${c.red(`✗ ${msg}`)}`);
-  process.exit(1);
-};
-
+import { depsBuilder } from './deps';
+// ── Argument Parsing & Validation ──────────────────────────────────────────
 const args = process.argv.slice(2);
-const dryRun = args.includes("--dry-run");
-const root = join(import.meta.dir, "../..");
+const dryRun = args.includes('--dry-run');
+const root = join(import.meta.dir, '../..');
 
-function groupBy<T, K extends keyof T>(arr: T[], key: K): Record<string, T[]> {
-  return arr.reduce(
-    (acc, item) => {
-      const group = String(item[key]);
-      if (!acc[group]) acc[group] = [];
-      acc[group].push(item);
-      return acc;
-    },
-    {} as Record<string, T[]>,
+const workspaceDeps = depsBuilder(root);
+
+const positionalArgs = args.filter((arg) => !arg.startsWith('-'));
+const mode = positionalArgs[0];
+
+if (!mode || !['pre-release', 'release', 'init'].includes(mode)) {
+  log.error(
+    [
+      'Invalid or missing mode.',
+      '',
+      'Usage:',
+      '  dev relacher pre-release [--dry-run]',
+      '  dev relacher release     [--dry-run]',
+      '  dev relacher init',
+    ].join('\n'),
   );
+  process.exit(1);
 }
 
-// Replicates the cliff.toml output template in pure TypeScript
-function cliffTemplate({ version, date, commits }: ChangelogContext): string {
-  const cleanVersion = version ? version.replace(/^v/, "") : "Unreleased";
-  const lines = ['', `## [${cleanVersion}] - ${date}`];
+const vcs = makeJjVcsProvider(root);
 
-  const grouped = groupBy(commits, "type");
 
-  for (const [group, groupList] of Object.entries(grouped)) {
-    if (groupList.length === 0) continue;
-    lines.push(`\n### ${group.charAt(0).toUpperCase() + group.slice(1)}`);
-    for (const commit of groupList) {
-      const breaking = commit.isBreaking ? `[**breaking**] ` : ``;
-      const scope = commit.scope ? `**${commit.scope}:** ` : ``;
-      const desc = commit.description || commit.message;
-      const msg = desc.charAt(0).toUpperCase() + desc.slice(1);
-      lines.push(
-        `- ${breaking}${scope}${msg} — [\`${commit.shortHash}\`](https://github.com/oyui/commit/${commit.hash}) by ${commit.author}`,
-      );
-    }
-  }
-
-  return lines.join("\n");
+async function askConfirmation(query: string): Promise<boolean> {
+  const rl = readline.createInterface({ input, output });
+  const ans = await rl.question(query);
+  rl.close();
+  return ans.trim().toLowerCase() === 'y';
 }
 
-// ── Execution ───────────────────────────────────────────────────────────────
-step("Preflight checks");
+if (mode === 'init') {
+  const runInit = Effect.gen(function*() {
+    log.step(
+      `Preflight checks & Workspace Discovery (${pipe(mode.toUpperCase(), log.c.bold, log.c.magenta)} mode)`,
+    );
 
-const vcs = new JjVcsProvider(root);
-ok("Jujutsu VCS provider initialized");
+    log.step(`Scanned ${workspaceDeps.length} dependencies`);
+    printDependencyList(workspaceDeps, true);
 
-const config = cargoDeps(root).on("oyui", (dep) =>
-  dep
-    .update(
-      regexUpdate("./flake.nix", {
-        search: 'version = "[^"]+"',
-        replace: 'version = "{{version}}"',
-      }),
-    )
-    .update(changelogUpdate('./crates/oyui/CHANGELOG.md', {}))
-    .update(
-      changelogUpdate("./CHANGELOG.md", {
-        global: true,
-        template: cliffTemplate,
-      }),
-    ))
-  .on("oyui-tasker", (dep) => dep
-    .update(changelogUpdate('./crates/oyui-tasker/CHANGELOG.md', {})))
-  .on("oyui-rune-actions", (dep) => dep
-    .update(changelogUpdate('./crates/oyui-rune-actions/CHANGELOG.md', {})))
+    yield* init(workspaceDeps, {
+      cwd: root,
+    }).pipe(Effect.provideService(VcsProviderService, vcs));
+  });
 
-  .couple('oyui-rune-actions', 'oyui-rune-actions-derive')
-  .couple('oyui-tasker', 'oyui-tasker-derive');
-
-step("Evaluating updates");
-const updates = await prepare(config, vcs, {
-  cwd: root,
-  excludeNestedWatches: true,
-  sizes: {
-    major: { pattern: "^[a-z]+(?:\\([^)]+\\))?!|^[a-z]+\\([^)]+\\)!:|^BREAKING CHANGE", },
-    minor: { pattern: "^(feat|revert|refactor|perf)" },
-    patch: { pattern: "^(fix|bugfix|patch|deps)" },
-    skip: { pattern: "^(release|chore|infra|docs|test|ci|build|nit|style)" },
-  },
-  cascade: {
-    patch: {
-      skip: "patch",
-      patch: "patch",
-      minor: "minor",
-      major: "minor",
-    },
-  },
-});
-
-const activeUpdates = updates.filter((u) => u.bump !== "skip");
-if (activeUpdates.length === 0) {
-  warn("No package modifications detected. Everything is up to date.");
-  process.exit(0);
-}
-
-prettyPrint(updates);
-
-let liveRun = !dryRun;
-if (liveRun) {
-  const ans = prompt(`\nProceed with staging and committing release? [y/N]`);
-  if (ans?.trim().toLowerCase() !== "y") {
-    liveRun = false;
-    warn("Aborting release run.");
-    process.exit(0);
-  }
-}
-
-if (liveRun) {
-  step("Applying updates and creating commit/tags");
-  await run(updates, vcs, { cwd: root });
-  ok("Versions bumped, changelogs written, and tags set.");
+  Effect.runPromise(runInit).catch((err) => {
+    log.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  });
 } else {
-  step("Dry run mode active");
-  warn("No modifications written to disk.");
+  const isPreRelease = mode === 'pre-release';
+
+  // ── Execution Flow ─────────────────────────────────────────────────────────
+  const runRelease = Effect.gen(function*() {
+
+    log.step(
+      `Preflight checks & Workspace Discovery (${pipe(mode.toUpperCase(), log.c.bold, log.c.magenta)} mode)`,
+    );
+
+    log.step(`Scanned ${workspaceDeps.length} dependencies`);
+    printDependencyList(workspaceDeps, true);
+
+    const vm = makeRCVersionManager(vcs, {
+      upgradeReady: !isPreRelease,
+      sizes: {
+
+        major: { pattern: "^[a-z]+(?:\\([^)]+\\))?!|^[a-z]+\\([^)]+\\)!:|^BREAKING CHANGE", },
+        minor: { pattern: "^(feat|revert|refactor|perf)" },
+        patch: { pattern: "^(fix|bugfix|patch|deps)" },
+        skip: { pattern: "^(release|chore|infra|docs|test|ci|build|nit|style)" },
+      },
+      cascade: {
+        skip: 'skip',
+        patch: 'patch',
+        minor: 'minor',
+        major: 'minor',
+      },
+    });
+
+    const updates = yield* prepare(workspaceDeps, {
+      cwd: root,
+    }).pipe(Effect.provideService(VersionManagerService, vm));
+
+    log.step('Proposed Updates');
+    prettyPrint(updates);
+
+    let liveRun = !dryRun;
+    if (liveRun) {
+      const confirmed = yield* Effect.promise(() =>
+        askConfirmation(`\nProceed with staging and committing ${mode} updates? [y/N] `),
+      );
+      if (!confirmed) {
+        liveRun = false;
+        log.warn('Aborting execution flow.');
+        return;
+      }
+    }
+
+    if (liveRun) {
+      log.step('Applying updates and writing changes');
+      yield* run(updates, {
+        cwd: root,
+        commitTitle: (_: string, bumps: Record<string, string>) => {
+          let itemCounts = Object.keys(bumps).length;
+          if ('oyui' in bumps) {
+            let s = '';
+            s += `oyui-v${bumps['oyui']}`;
+            let othersCount = itemCounts - 1;
+            if (othersCount > 0) {
+              s += ` (+${othersCount} lib)`
+            }
+
+            return 'release: ' + s;
+          } else if (itemCounts > 0) {
+            let libs = Object.entries(bumps)
+              .map(([k, v]) => `${k}-v${v}`).join(', ');
+            return 'release(libs):' + libs;
+          } else {
+            return 'release: ?'
+          }
+
+        }
+      }).pipe(Effect.provideService(VcsProviderService, vcs));
+      log.ok(`Updates completed successfully under ${mode} mode.`);
+    } else {
+      log.step('Dry run mode active');
+      log.warn('No modifications written to disk.');
+    }
+  });
+
+  Effect.runPromise(runRelease).catch((err) => {
+    log.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  });
 }
