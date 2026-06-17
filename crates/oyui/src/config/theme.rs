@@ -63,6 +63,16 @@ impl Color {
             _ => None,
         }
     }
+
+    #[allow(unused)]
+    pub fn is_dark(&self) -> bool {
+        let (r, g, b) = match self {
+            Color::Rgb(r, g, b) => (*r, *g, *b),
+            _ => (0, 0, 0),
+        };
+        let luminance = 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32;
+        luminance < 128.0
+    }
 }
 
 #[allow(unused)] // due to build.rs

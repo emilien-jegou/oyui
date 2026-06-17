@@ -1,6 +1,6 @@
 use crate::{
     config::{theme::Color, LineHighlightMode, UiTheme},
-    view::file::utils::colors::{darken_color, is_dark, lighten_color, safe_lerp_color},
+    view::file::utils::colors::{darken_color, lighten_color, safe_lerp_color},
 };
 use ratatui::style::Style;
 
@@ -247,7 +247,7 @@ impl LineBgCalculator {
             // Apply cursor/selection background on top of the final background color.
             // Blend with cursor_bg, then lighten or darken based on the theme.
             let blend = safe_lerp_color(&self.cursor_bg, &final_bg_neutral, 0.2);
-            if is_dark(&self.bg) {
+            if self.bg.is_dark() {
                 lighten_color(&blend, 0.08)
             } else {
                 darken_color(&blend, 0.08)

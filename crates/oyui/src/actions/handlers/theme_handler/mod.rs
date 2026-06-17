@@ -21,10 +21,6 @@ pub struct AppThemeActionsHandler {
 }
 
 impl ThemeActionsHandler for AppThemeActionsHandler {
-    fn get(&self) -> String {
-        self.state.theme.read().theme_name.clone()
-    }
-
     fn set(&self, name: String) {
         let (base_ui, tm) = if let Some(path_str) = name.strip_prefix("path:") {
             match std::fs::File::open(path_str) {
@@ -60,13 +56,50 @@ impl ThemeActionsHandler for AppThemeActionsHandler {
 
         let mut theme = self.state.theme.write();
         theme.ui = base_ui.clone();
-        theme.theme_name = name;
         theme.tm_theme = tm.clone();
-        let _ = self.worker.send(ThemeUpdate { ui: base_ui, tm });
+        let _ = self.worker.send(ThemeUpdate::Full(base_ui, tm));
     }
 
     fn toggle_gradient(&self) {
         unimplemented!();
+    }
+
+    fn syntax(&self, name: String) {
+        let tm = if let Some(path_str) = name.strip_prefix("path:") {
+            match std::fs::File::open(path_str) {
+                Ok(file) => {
+                    let mut reader = std::io::BufReader::new(file);
+                    match syntect::highlighting::ThemeSet::load_from_reader(&mut reader) {
+                        Ok(tm_theme) => Some(tm_theme),
+                        Err(e) => {
+                            tracing::error!("Failed to parse tmTheme at '{}': {}", path_str, e);
+                            return;
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("Failed to open tmTheme file at '{}': {}", path_str, e);
+                    return;
+                }
+            }
+        } else {
+            match config::get_theme(&name) {
+                Some(t) => t.1,
+                None => {
+                    tracing::error!("Invalid theme name given: {}", name);
+                    return;
+                }
+            }
+        };
+
+        let mut theme = self.state.theme.write();
+        theme.tm_theme = tm.clone();
+        let _ = self.worker.send(ThemeUpdate::Tm(tm));
+    }
+
+    fn is_dark(&self) -> bool {
+        let theme = self.state.theme.read();
+        theme.ui.bg.is_dark()
     }
 }
 

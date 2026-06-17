@@ -60,12 +60,3 @@ pub fn lighten_color(c: &Color, factor: f32) -> Color {
         (b as f32 + (255.0 - b as f32) * factor).clamp(0.0, 255.0) as u8,
     )
 }
-
-pub fn is_dark(bg: &Color) -> bool {
-    let (r, g, b) = match bg {
-        Color::Rgb(r, g, b) => (*r, *g, *b),
-        _ => (0, 0, 0),
-    };
-    let luminance = 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32;
-    luminance < 128.0
-}

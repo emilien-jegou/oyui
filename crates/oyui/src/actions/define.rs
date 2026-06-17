@@ -11,8 +11,13 @@ define_actions! {
         confirm_merge_window_enabled { @getset(bool) }
     }
     theme {
-        @getset(String)
+        set(String)
         toggle_gradient()
+        is_dark(|| -> bool)
+
+        // Replace current syntax theme with an embedded
+        // theme or via a provided path.
+        syntax(String)
 
         bg { @getset(String) }
         fg { @getset(String) }
