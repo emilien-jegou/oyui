@@ -2,9 +2,9 @@ use crate::config::UiTheme;
 use syntect::highlighting::Theme;
 
 #[derive(Clone)]
-pub struct ThemeUpdate {
-    pub ui: UiTheme,
-    pub tm: Option<Theme>,
+pub enum ThemeUpdate {
+    Full(UiTheme, Option<Theme>),
+    Tm(Option<Theme>)
 }
 
 impl std::fmt::Debug for ThemeUpdate {

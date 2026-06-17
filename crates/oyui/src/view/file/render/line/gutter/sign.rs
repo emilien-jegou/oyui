@@ -1,6 +1,6 @@
 use crate::config::UiTheme;
 use crate::view::file::render::style::LineBgCalculator;
-use crate::view::file::utils::colors::{darken_color, desaturate_color, is_dark, lighten_color};
+use crate::view::file::utils::colors::{darken_color, desaturate_color, lighten_color};
 use ratatui::{
     style::Style,
     text::{Line, Span},
@@ -24,7 +24,7 @@ pub struct GutterSign<'a> {
 
 impl<'a> GutterSign<'a> {
     pub fn compute_base_style(&self) -> Style {
-        let is_theme_dark = is_dark(&self.theme.bg);
+        let is_theme_dark = self.theme.bg.is_dark();
         let mut prefix_style = self.row_style;
 
         if self.is_add {

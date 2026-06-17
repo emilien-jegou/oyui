@@ -85,7 +85,6 @@ fn default_fallbacks(color_mode: &TerminalColorMode) -> (Color, Color, Color, Co
 }
 
 pub struct ThemeState {
-    pub theme_name: String,
     pub ui: UiTheme,
     pub tm_theme: Option<syntect::highlighting::Theme>,
 }
@@ -94,11 +93,7 @@ impl ThemeState {
     pub fn new(color_mode: &TerminalColorMode) -> Self {
         let ui = ansi_default_theme(color_mode);
 
-        Self {
-            theme_name: "ansi".into(),
-            ui,
-            tm_theme: None,
-        }
+        Self { ui, tm_theme: None }
     }
 }
 
