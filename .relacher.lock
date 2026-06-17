@@ -1,0 +1,28 @@
+{
+  "packages": {
+    "oyui-tasker": {
+      "version": "0.0.7",
+      "lastStableVersion": "0.0.7"
+    },
+    "oyui-rune-actions": {
+      "version": "0.0.8",
+      "lastStableVersion": "0.0.8"
+    },
+    "oyui-syndiff": {
+      "version": "0.0.7",
+      "lastStableVersion": "0.0.7"
+    },
+    "oyui": {
+      "version": "0.1.0",
+      "lastStableVersion": "0.1.0"
+    },
+    "oyui-tasker-derive": {
+      "version": "0.0.7",
+      "lastStableVersion": "0.0.7"
+    },
+    "oyui-rune-actions-derive": {
+      "version": "0.0.8",
+      "lastStableVersion": "0.0.8"
+    }
+  }
+}
