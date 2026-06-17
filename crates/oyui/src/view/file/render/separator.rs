@@ -29,13 +29,15 @@ pub fn render_separator<'a>(
         } else {
             safe_lerp_color(&theme.dim, &theme.dir, 0.8)
         };
+        // Removed leading space before '@@'
         spans.push(Span::styled(
-            format!(" @@ -{} +{} @@ ", old + 1, new + 1),
+            format!("@@ -{} +{} @@  ", old + 1, new + 1),
             style.fg(fgc.into()),
         ));
     }
+    // Removed leading/trailing spaces around '⋯'
     spans.push(Span::styled(
-        format!(" ⋯ {} hidden lines ⋯ ", hidden_count),
+        format!("⋯ {} hidden lines ⋯", hidden_count),
         style,
     ));
 
