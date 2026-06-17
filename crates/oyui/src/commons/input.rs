@@ -24,12 +24,11 @@ impl Keybind {
         let mut key = String::new();
 
         for part in parts {
-            let lower = part.to_lowercase();
-            match lower.as_str() {
+            match part.to_lowercase().as_str() {
                 "ctrl" => ctrl = true,
                 "alt" => alt = true,
                 "shift" => shift = true,
-                k => key = k.to_string(),
+                _ => key = part.to_string(), // Preserve the original case of the character/code key
             }
         }
 
@@ -81,7 +80,11 @@ impl Keybind {
         match self {
             Keybind::Char(s) => {
                 if let Some(c) = s.chars().next() {
-                    event.code == KeyCode::Char(c) && mods.is_empty()
+                    if event.code == KeyCode::Char(c) {
+                        mods.is_empty() || mods == KeyModifiers::SHIFT
+                    } else {
+                        false
+                    }
                 } else {
                     false
                 }
@@ -109,7 +112,12 @@ impl Keybind {
             }
             Keybind::Combination(Modifier::Shift, s) => {
                 if let Some(c) = s.chars().next() {
-                    event.code == KeyCode::Char(c) && mods.contains(KeyModifiers::SHIFT)
+                    if let KeyCode::Char(event_c) = event.code {
+                        let matches_char = event_c == c || (c.is_alphabetic() && event_c == c.to_ascii_uppercase());
+                        matches_char && mods.contains(KeyModifiers::SHIFT)
+                    } else {
+                        false
+                    }
                 } else {
                     false
                 }
