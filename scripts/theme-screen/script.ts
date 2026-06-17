@@ -5,13 +5,15 @@ import { existsSync, mkdirSync, rmSync, readdirSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
+const root = join(import.meta.dir, '../..');
+
 const TERMINAL_CMD = ["alacritty", "--class", "oyui-screens", "-e"];
 const WINDOW_WIDTH = 1400;
 // this is really font-size dependent, we just don't want a black bar at the bottom on the screen
 const WINDOW_HEIGHT = 703;
 
-const THEMES_DIR = "crates/oyui/themes";
-const ISSUES_FILE = "scripts/theme-screen/theme-issues.json";
+const THEMES_DIR = join(root, "crates/oyui/themes");
+const ISSUES_FILE = join(root, "scripts/theme-screen/theme-issues.json");
 
 export type Success<T> = { ok: true; value: T };
 export type Failure<E> = { ok: false; error: E };
@@ -42,7 +44,7 @@ function getSeverityScore(theme: Theme): number {
 async function loadThemes(): Promise<Result<Theme[], Error>> {
   const dirRes = safeSync(() => readdirSync(THEMES_DIR));
   if (!dirRes.ok) {
-    return err(new Error(`Could not read themes directory '${THEMES_DIR}'. Are you running this from the repo root?`));
+    return err(new Error(`Could not read themes directory '${THEMES_DIR}'.`));
   }
 
   const themeFiles = dirRes.value.filter(file => file.endsWith(".tmTheme"));
@@ -81,8 +83,8 @@ async function checkSystemRequirements(): Promise<Result<void, Error>> {
     if (!Bun.which(tool)) return err(new Error(`Required tool '${tool}' is not installed.`));
   }
 
-  if (!existsSync("./target/release/oyui")) return err(new Error("./target/release/oyui does not exist. Please build it."));
-  if (!existsSync("scripts/theme-screen/diff_target.zip")) return err(new Error("Zip file 'scripts/theme-screen/diff_target.zip' must exist."));
+  if (!existsSync(join(root, "target/release/oyui"))) return err(new Error("./target/release/oyui does not exist. Please build it."));
+  if (!existsSync(join(root, "scripts/theme-screen/diff_target.zip"))) return err(new Error("Zip file 'scripts/theme-screen/diff_target.zip' must exist."));
 
   return ok(undefined);
 }
@@ -96,6 +98,7 @@ async function setupHyprlandRules(): Promise<Result<void, Error>> {
   ];
 
   for (const rule of rules) {
+    console.log(`> hyprctl keyword windowrulev2 ${rule}`);
     const res = await safeAsync($`hyprctl keyword windowrulev2 ${rule}`.quiet());
     if (!res.ok) return err(res.error);
   }
@@ -103,6 +106,7 @@ async function setupHyprlandRules(): Promise<Result<void, Error>> {
 }
 
 async function getTerminalGeometry(): Promise<Result<string, Error>> {
+  console.log(`> hyprctl activewindow -j`);
   const hyprctlRes = await safeAsync($`hyprctl activewindow -j`.json());
   if (!hyprctlRes.ok) return err(hyprctlRes.error);
 
@@ -114,6 +118,7 @@ async function takeScreenshot(outputPath: string): Promise<Result<void, Error>> 
   const geomRes = await getTerminalGeometry();
   if (!geomRes.ok) return err(geomRes.error);
 
+  console.log(`> grim -g ${geomRes.value} ${outputPath}`);
   const grimRes = await safeAsync($`grim -g ${geomRes.value} ${outputPath}`.quiet());
   if (!grimRes.ok) return err(grimRes.error);
 
@@ -121,6 +126,7 @@ async function takeScreenshot(outputPath: string): Promise<Result<void, Error>> 
 }
 
 async function pressKey(key: string): Promise<Result<void, Error>> {
+  console.log(`> wtype ${key}`);
   const typeRes = await safeAsync($`wtype ${key}`.quiet());
   if (!typeRes.ok) return err(typeRes.error);
   return ok(undefined);
@@ -150,7 +156,9 @@ async function generateThemeScreenshots(themes: Theme[], assetsFolderPath: strin
   if (!diffMkdirRes.ok) return err(diffMkdirRes.error);
 
   try {
-    const unzipRes = await safeAsync($`unzip -q scripts/theme-screen/diff_target.zip -d ${diffDir}`.quiet());
+    const zipPath = join(root, "scripts/theme-screen/diff_target.zip");
+    console.log(`> unzip -q ${zipPath} -d ${diffDir}`);
+    const unzipRes = await safeAsync($`unzip -q ${zipPath} -d ${diffDir}`.quiet());
     if (!unzipRes.ok) return err(unzipRes.error);
 
     const dir0 = join(diffDir, "0");
@@ -159,12 +167,15 @@ async function generateThemeScreenshots(themes: Theme[], assetsFolderPath: strin
     for (const theme of themes) {
       console.log(`Processing theme: ${theme.name}...`);
 
-      const configPath = join(tmpdir(), `oyui-config-${theme.name}-${Date.now()}.toml`);
-      const writeRes = await safeAsync(Bun.write(configPath, `chosen_theme = "${theme.name}"\n`));
+      const configPath = join(tmpdir(), `oyui-config-${theme.name}-${Date.now()}.rn`);
+      const configContent = `pub fn config() {\n  theme::set("${theme.name}");\n}\n`;
+      const writeRes = await safeAsync(Bun.write(configPath, configContent));
       if (!writeRes.ok) return err(writeRes.error);
 
+      const spawnArgs = [...TERMINAL_CMD, join(root, "target/release/oyui"), "--config", configPath, "diff", dir0, dir1];
+      console.log(`> ${spawnArgs.join(" ")}`);
       const spawnRes = safeSync(() => Bun.spawn(
-        [...TERMINAL_CMD, "./target/release/oyui", "--config", configPath, dir0, dir1],
+        spawnArgs,
         { stdin: "ignore", stdout: "ignore", stderr: "ignore" }
       ));
 
@@ -174,12 +185,15 @@ async function generateThemeScreenshots(themes: Theme[], assetsFolderPath: strin
       try {
         let windowReady = false;
         for (let i = 0; i < 20; i++) {
+          console.log(`> hyprctl activewindow -j`);
           const activeRes = await safeAsync($`hyprctl activewindow -j`.json());
 
           if (activeRes.ok && activeRes.value.class === "oyui-screens") {
             windowReady = true;
             if (activeRes.value.floating === false) {
+              console.log(`> hyprctl dispatch togglefloating`);
               await safeAsync($`hyprctl dispatch togglefloating`);
+              console.log(`> hyprctl dispatch resizeactive exact ${WINDOW_WIDTH} ${WINDOW_HEIGHT}`);
               await safeAsync($`hyprctl dispatch resizeactive exact ${WINDOW_WIDTH} ${WINDOW_HEIGHT}`);
             }
             break;
@@ -224,7 +238,7 @@ async function generateThemeScreenshots(themes: Theme[], assetsFolderPath: strin
   return ok(undefined);
 }
 
-async function generateReadme(themes: Theme[], themeMarkdownPath: string, assetsFolderPath: string): Promise<Result<void, Error>> {
+async function generateReadme(themes: Theme[], themeMarkdownPath: string, assetsFolderRel: string): Promise<Result<void, Error>> {
   const header = `# Builtin themes\n\nMany of the themes in this list have issues, feel free to provide upgrades or to provide your own themes.\n\n> This document was auto generated via \`dev theme-screens\`\n`;
 
   const bodyBlocks = themes.map((theme) => {
@@ -233,7 +247,7 @@ async function generateReadme(themes: Theme[], themeMarkdownPath: string, assets
 ### \`${theme.name}\`
 | Tree view | File View |
 | :---: | :---: |
-| <img style="min-width:400px;" src="/${assetsFolderPath}${theme.name}-1.png" width="400"> | <img style="min-width:400px;" src="/${assetsFolderPath}${theme.name}.png" width="400"> |
+| <img style="min-width:400px;" src="/${assetsFolderRel}${theme.name}-1.png" width="400"> | <img style="min-width:400px;" src="/${assetsFolderRel}${theme.name}.png" width="400"> |
 
 ${issuesBlock}`;
   });
@@ -244,7 +258,10 @@ ${issuesBlock}`;
   return ok(undefined);
 }
 
-async function main(themeMarkdownPath: string, assetsFolderPath: string) {
+async function main(themeMarkdownRel: string, assetsFolderRel: string) {
+  const themeMarkdownPath = join(root, themeMarkdownRel);
+  const assetsFolderPath = join(root, assetsFolderRel);
+
   const themesRes = await loadThemes();
   if (!themesRes.ok) {
     console.error("❌ Failed to load themes:", themesRes.error.message);
@@ -259,7 +276,7 @@ async function main(themeMarkdownPath: string, assetsFolderPath: string) {
     process.exit(1);
   }
 
-  const mdRes = await generateReadme(themes, themeMarkdownPath, assetsFolderPath);
+  const mdRes = await generateReadme(themes, themeMarkdownPath, assetsFolderRel);
   if (!mdRes.ok) {
     console.error("❌ Failed to write Markdown:", mdRes.error.message);
     process.exit(1);
