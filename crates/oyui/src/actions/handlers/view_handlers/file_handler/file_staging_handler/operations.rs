@@ -15,10 +15,29 @@ pub fn toggle_hunk(session: &StagingSession, hunk_idx: usize) {
 
 pub fn toggle_stage_at_cursor(session: &StagingSession) {
     let view_read = session.view.read();
-    let hidx = view_read
-        .row_to_hunk
-        .get(&session.path)
-        .and_then(|mapping| mapping.get(session.current_row_idx).copied().flatten());
+    let mappings = view_read.row_to_hunk.get(&session.path);
+    let mut hidx =
+        mappings.and_then(|mapping| mapping.get(session.current_row_idx).copied().flatten());
+
+    if hidx.is_none() {
+        if let Some(mapping) = mappings {
+            let r = session.current_row_idx;
+            for d in 1..=4 {
+                if let Some(row) = r.checked_add(d) {
+                    if let Some(&Some(hunk_idx)) = mapping.get(row) {
+                        hidx = Some(hunk_idx);
+                        break;
+                    }
+                }
+                if let Some(row) = r.checked_sub(d) {
+                    if let Some(&Some(hunk_idx)) = mapping.get(row) {
+                        hidx = Some(hunk_idx);
+                        break;
+                    }
+                }
+            }
+        }
+    }
     drop(view_read);
 
     if let Some(hunk_idx) = hidx {
