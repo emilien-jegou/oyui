@@ -25,7 +25,7 @@
       exec = "bun install";
     }
     {
-      cmd = "release";
+      cmd = "relacher";
       desc = "Generate release commit and git tags";
       deps = ["release:prepare"];
       exec = "bun ./scripts/release/release.ts";
