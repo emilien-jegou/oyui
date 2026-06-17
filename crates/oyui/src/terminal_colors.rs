@@ -32,29 +32,57 @@ impl TerminalColorMode {
     }
 }
 
-/// Helper to parse "rgb:ee00/5300/9600" or "rgb:ee/53/96"
+/// Parses color specifications returned by terminals in response to OSC 4, 10, or 11 queries.
+///
+/// ### References:
+///   [Invisible Island xterm ctlseqs](https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h2-Operating-System-Commands)
+///   [XFree86 XParseColor Documentation](https://www.xfree86.org/current/XParseColor.3.html)
+///   [iTerm2 Proprietary Escape Codes](https://iterm2.com/documentation-escape-codes.html)
 fn parse_osc_rgb(s: &str) -> Option<(u8, u8, u8)> {
-    let hex_part = s.split(':').nth(1)?;
-    let mut parts = hex_part.split('/');
+    let s = s.trim();
 
-    let r_str = parts.next()?;
-    let g_str = parts.next()?;
-    let b_str = parts.next()?;
+    // "rgb:r/g/b" format (most common in modern VTE, Kitty, Alacritty, xterm)
+    if let Some(rgb_part) = s.strip_prefix("rgb:") {
+        let mut parts = rgb_part.split('/');
+        let r = parse_channel(parts.next()?)?;
+        let g = parse_channel(parts.next()?)?;
+        let b = parse_channel(parts.next()?)?;
+        return Some((r, g, b));
+    }
 
-    let parse_channel = |c: &str| -> Option<u8> {
-        let val = u16::from_str_radix(c, 16).ok()?;
-        if c.len() > 2 {
-            Some((val >> 8) as u8)
-        } else {
-            Some(val as u8)
+    // X11 raw hex format (e.g., "#rrggbb" or "#rrrrggggbbbb")
+    if let Some(hex_part) = s.strip_prefix('#') {
+        let len = hex_part.len();
+        if len % 3 != 0 {
+            return None;
         }
-    };
+        let chunk_size = len / 3;
+        let r = parse_channel(&hex_part[0..chunk_size])?;
+        let g = parse_channel(&hex_part[chunk_size..chunk_size * 2])?;
+        let b = parse_channel(&hex_part[chunk_size * 2..])?;
+        return Some((r, g, b));
+    }
 
-    Some((
-        parse_channel(r_str)?,
-        parse_channel(g_str)?,
-        parse_channel(b_str)?,
-    ))
+    // rest is not supported yet...
+
+    None
+}
+
+/// Helper function to parse a hex string channel of arbitrary length
+/// (1 to 4 characters) and scale it correctly to a single u8 (0 to 255).
+fn parse_channel(c: &str) -> Option<u8> {
+    let len = c.len();
+    if len == 0 {
+        return None;
+    }
+    let val = u32::from_str_radix(c, 16).ok()?;
+    match len {
+        1 => Some((val * 17) as u8),               // Scale 4-bit (0x3 -> 0x33)
+        2 => Some(val as u8),                      // 8-bit (no scale needed)
+        3 => Some((val >> 4) as u8),               // Scale 12-bit to 8-bit
+        4 => Some((val >> 8) as u8),               // Scale 16-bit to 8-bit
+        _ => Some((val >> ((len - 2) * 4)) as u8), // Generic downscale for arbitrarily long values
+    }
 }
 
 /// Reads all incoming terminal response bytes until a quiet period is detected.
