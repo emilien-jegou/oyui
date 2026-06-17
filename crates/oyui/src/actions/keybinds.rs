@@ -222,7 +222,7 @@ pub fn default_keybinds() -> KeybindRegistry {
                 Keybinds::code(KeyCode::PageDown),
                 ViewFileCursorActions::page_down,
             )
-            .register(Keybinds::new().with_shift('G'), ViewFileCursorActions::bottom)
+            .register(Keybinds::char('G'), ViewFileCursorActions::bottom)
             .register(Keybinds::char('g'), ViewFileCursorActions::top)
             .register(Keybinds::char('n'), ViewFileNavActions::next_hunk)
             .register(Keybinds::char('N'), ViewFileNavActions::prev_hunk)
@@ -265,7 +265,7 @@ pub fn default_keybinds() -> KeybindRegistry {
                 Keybinds::char('k').with_code(KeyCode::Up),
                 ViewTreeCursorActions::up(1),
             )
-            .register(Keybinds::new().with_shift('G'), ViewTreeCursorActions::bottom)
+            .register(Keybinds::char('G'), ViewTreeCursorActions::bottom)
             .register(Keybinds::char('g'), ViewTreeCursorActions::top)
             .register(
                 Keybinds::char('l').with_code(KeyCode::Right),
