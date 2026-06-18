@@ -1,3 +1,151 @@
+## [0.2.0] - 2026-06-18
+
+This version is focused on fixing accessibility issues and strengthening themes customizations.
+
+### Breaking changes
+
+- Removed the `theme::get()` action.
+- Default theme changed from "weywot" to "ansi"
+- +/- icons are no longer dimmed by default in tree view
+- Default gradients got changed
+
+To get closer to `0.1.0` appearance add this to your config:
+```rust
+theme::set("weywot");
+theme::file_staged_highlight::set(LineHighlightMode::Gradient(0.08));
+theme::file_staged_highlight_opacity::set(0.3);
+theme::file_change_highlight::set(LineHighlightMode::Gradient(0.2));
+theme::tree_progressive_change_dim::set(true);
+```
+
+### Theming
+
+#### Ansi theming
+
+The default theme now follow the terminal colors, it doesn't come with syntax
+builtin, but you got a new action to pick only the syntax from the
+embedded theme you like.
+
+
+| Action  | Theme overwrite  | Syntax  overwrite |
+|--------------------|--------|--------|
+| `theme::set`     | ✅     | ✅     |
+| `theme::syntax`    | ❌     | ✅     |
+
+
+In your config.rn:
+```rust
+pub fn config() {
+  // This theme is the new default but you can enable it manually.
+  theme::set("ansi");
+  theme::syntax("weywot"); // pick only syntax highlighting from "weywot" theme.
+}
+```
+
+#### Path prefix
+
+Added support for loading external themes via a `path:` prefix. e.g.:
+
+```rust
+theme::set("quaoar"); // classic builtin
+theme::set("path:/tmp/aura-dark.tmTheme"); // with custom file
+
+theme::syntax("path:/tmp/aura-dark.tmTheme"); // works with syntax command too!
+```
+
+#### Color parsing
+
+Improved color value parsing, including better support for color extraction,
+notably from the TextMate theme.
+
+Here is a full demo of all supported color formats:
+```rust
+theme::bg::set("theme:fg"); // get ref to theme fg
+theme::bg::set("red"); // ansi red (term color)
+theme::bg::set("ansi:9");
+theme::bg::set("ansi256:129");
+theme::bg::set("tm:accent"); // from TextMate syntax file
+theme::bg::set("rgb(41,41,41)");
+theme::bg::set("#f4f4f4");
+```
+
+#### new `is_dark` action
+
+
+`theme::is_dark` main purpose is conditional rendering depending on terminal
+color scheme. It works by examining the luminance of the ansi background color.
+
+The following config become possible:
+
+```rust
+pub fn config() {
+  theme::set("ansi");
+
+  if theme::is_dark() {
+    theme::syntax("quaoar");
+  } else {
+    theme::syntax("dayfox");
+  }
+```
+
+#### new confirm window
+
+A new confirmation window was added, and can be enable in your config (disabled by default).
+![confirm window](./docs/assets/changelog/confirm_window.png)
+
+To enable it:
+```rust
+  global::confirm_merge_window_enabled::set(true);
+```
+
+#### Display tab and trailing chars
+
+Properly display dot characters for tabs and trailing spaces.
+
+```rust
+theme::char_tab_fg::set("red");
+theme::char_tab::set("❘");
+
+theme::char_trailing_space_fg::set("red");
+theme::char_trailing_space::set("༞");
+```
+
+#### New actions to change char scroll character
+
+```rust
+theme::char_scroll_fg::set("red");
+theme::char_scroll_both::set("↔");
+theme::char_scroll_left::set("↤");
+theme::char_scroll_right::set("↦");
+```
+
+![Tabs and trailing chars](./docs/assets/changelog/tabs_and_trailing.png)
+
+
+### Feat
+- Theme ansi detection and tmTheme loading — [`4d4e2c4`](https://github.com/emilien-jegou/oyui/commit/4d4e2c4f356101cbb4b0757ea3f3f82252af6364) by emilien-jegou
+- **oyui-rune-actions:** Simplify handler creation — [`dc39cba`](https://github.com/emilien-jegou/oyui/commit/dc39cbae2c0de65e00a047b7b5487a0d0ec5f2eb) by emilien-jegou
+- Improve OSC theme parsing — [`7d5f546`](https://github.com/emilien-jegou/oyui/commit/7d5f546219f9f397f597a84d9389d9bd71c3b724) by emilien-jegou
+- New theme actions (theme::syntax & theme::is_dark) — [`e6af5c5`](https://github.com/emilien-jegou/oyui/commit/e6af5c524ff9fba8427d7f57b0e1b7637bc45d9c) by emilien-jegou
+- Diff between files — [`2f03d6e`](https://github.com/emilien-jegou/oyui/commit/2f03d6e286b493c7cc8e63bc1801eedf30e10071) by emilien-jegou
+- Display trailing whitespace and tabs — [`49c493a`](https://github.com/emilien-jegou/oyui/commit/49c493a34e65dd4963294bfb4a8fdb0df4d82d52) by emilien-jegou
+- Reinstate merge confirm window — [`f590ed9`](https://github.com/emilien-jegou/oyui/commit/f590ed918bbd87e395dc24a19e6d88b1b0a46fc5) by emilien-jegou
+
+### Refactor
+- Concurrent hashmap and shared event receivers — [`539a9d4`](https://github.com/emilien-jegou/oyui/commit/539a9d401e13e5808ab8d06fe6322db0870f83f1) by emilien-jegou
+- Allow empty action handlers — [`935c3cc`](https://github.com/emilien-jegou/oyui/commit/935c3cced5b3e996e2f2ee716bf143913040f215) by emilien-jegou
+
+### Chore
+- Add licenses files to crates root — [`357f49f`](https://github.com/emilien-jegou/oyui/commit/357f49f0fa3888a63d9c41ccdee84ed1956df5c2) by emilien-jegou
+
+### Fix
+- Unescessary padding on separator — [`0948c9f`](https://github.com/emilien-jegou/oyui/commit/0948c9f532f31f48fa5de20c1aa67f3adb56dbf5) by emilien-jegou
+- Regression on line toggling behaviour — [`e0a77bc`](https://github.com/emilien-jegou/oyui/commit/e0a77bc90bbdfb64634538c7172e7aa0e61d9d30) by emilien-jegou
+- Broken capitalized keybinds — [`8ffa90e`](https://github.com/emilien-jegou/oyui/commit/8ffa90ec8596d9cc59358876361b4ee90333df73) by emilien-jegou
+- Allow empty merge — [`4c4334f`](https://github.com/emilien-jegou/oyui/commit/4c4334f2def68f58d7bf3008a0b81a49c5bae2e6) by emilien-jegou
+
+---
+
 ## [0.1.0] - 2026-06-08
 
 ### Refactor
@@ -9,11 +157,16 @@
 - Add per-line staging toggle with `t` key — [`3e2cf1e`](https://github.com/emilien-jegou/oyui/commit/3e2cf1e950ab0aa9d1975de322204b475bb77ba4) by Gaëtan Lehmann
 - Add page up/down key bindings for file and tree views — [`1bde194`](https://github.com/emilien-jegou/oyui/commit/1bde19465499bc93f03f99504d9f145a7b1ace0d) by Gaëtan Lehmann
 
+---
+
 ## [0.0.7] - 2026-06-02
 
 ### Bug Fixes
 
 - Broken command mode — [`eb09ae4`](https://github.com/emilien-jegou/oyui/commit/eb09ae412ef6437c6ba0535ae47ce6947ac1bf60) by Emilien, 2026-06-02
+
+
+---
 
 ## [0.0.3] - 2026-06-02
 
