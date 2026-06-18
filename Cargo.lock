@@ -1463,7 +1463,7 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "oyui"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "crossterm",
@@ -1499,7 +1499,7 @@ dependencies = [
 
 [[package]]
 name = "oyui-rune-actions"
-version = "0.0.8"
+version = "0.1.0"
 dependencies = [
  "oyui-rune-actions-derive",
  "rune",
@@ -1507,7 +1507,7 @@ dependencies = [
 
 [[package]]
 name = "oyui-rune-actions-derive"
-version = "0.0.8"
+version = "0.1.0"
 dependencies = [
  "heck",
  "proc-macro2",
@@ -1548,7 +1548,7 @@ dependencies = [
 
 [[package]]
 name = "oyui-tasker"
-version = "0.0.7"
+version = "0.1.0"
 dependencies = [
  "async-channel",
  "eyre",
@@ -1559,7 +1559,7 @@ dependencies = [
 
 [[package]]
 name = "oyui-tasker-derive"
-version = "0.0.7"
+version = "0.1.0"
 dependencies = [
  "quote",
  "syn",
