@@ -19,10 +19,6 @@
           extensions = [ "rustc" "cargo" ];
         };
 
-        devToolchain = pkgs.rust-bin.nightly.latest.minimal.override {
-          extensions = [ "rustc" "cargo" "clippy" "rustfmt" "rust-analyzer" "rust-src" ];
-        };
-
         rustPlatform = pkgs.makeRustPlatform {
           cargo = buildToolchain;
           rustc = buildToolchain;
@@ -33,8 +29,8 @@
           cargoLock = {
             lockFile = ./Cargo.lock;
           };
-          nativeBuildInputs = [ pkgs.pkg-config pkgs.makeWrapper ];
-          buildInputs = [ pkgs.openssl pkgs.wmctrl ];
+          nativeBuildInputs = [ pkgs.pkg-config ];
+          buildInputs = [ pkgs.openssl ];
           doCheck = false;
         };
 
@@ -43,11 +39,6 @@
           oyui = rustPlatform.buildRustPackage (commonBuildArgs // {
             pname = "oyui";
             version = "0.2.0";
-
-            postInstall = ''
-              wrapProgram $out/bin/oyui \
-                --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.wmctrl ]}
-            '';
           });
 
           default = pkgs.symlinkJoin {
@@ -56,22 +47,6 @@
               self.packages.${system}.oyui
             ];
           };
-        };
-
-        devShells.default = pkgs.mkShell {
-          buildInputs = with pkgs; [
-            devToolchain
-            openssl
-            pkg-config
-            wmctrl
-            bacon
-            jujutsu
-          ];
-
-          shellHook = ''
-            export PATH="$PATH:$(pwd)/bin/";
-            [ -f .localrc ] && source .localrc
-          '';
         };
       });
 }
