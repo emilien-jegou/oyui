@@ -5,7 +5,7 @@
 ![Cargo Downloads](https://img.shields.io/crates/d/oyui?label=cargo)
 ![GitHub Downloads](https://img.shields.io/github/downloads/emilien-jegou/oyui/total?label=github)
 [![Nix Flake](https://img.shields.io/badge/nix-flake-5277C3?logo=nixos&logoColor=white)](https://github.com/emilien-jegou/oyui)
-[![dependency status](https://deps.rs/repo/github/emilien-jegou/oyui/status.svg)](https://deps.rs/repo/github/emilien-jegou/oyui)
+[![dependency status](https://deps.rs/crate/oyui/latest/status.svg)](https://deps.rs/crate/oyui/latest)
 
 **Oyui** is a modern TUI merge tool and staging interface for [Jujutsu](https://github.com/martinvonz/jj) and Git.
 
