@@ -21,7 +21,9 @@ export const depsBuilder = (root: string) =>
     .onPackageBump("oyui-tasker", genChangelog('./crates/oyui-tasker'))
     .onPackageBump("oyui-rune-actions", genChangelog('./crates/oyui-rune-actions'))
     .couple('oyui-rune-actions', 'oyui-rune-actions-derive')
-    .couple('oyui-tasker', 'oyui-tasker-derive');
+    .couple('oyui-tasker', 'oyui-tasker-derive')
+    .addWatchFiles('oyui', './scripts/release/release-gh.ts');
+
 
 
 function cliffTemplate({ version, date, commits }: ChangelogContext): string {

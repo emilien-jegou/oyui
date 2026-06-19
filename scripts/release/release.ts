@@ -88,8 +88,8 @@ if (mode === 'init') {
 
         major: { pattern: "^[a-z]+(?:\\([^)]+\\))?!|^[a-z]+\\([^)]+\\)!:|^BREAKING CHANGE", },
         minor: { pattern: "^(feat|revert|refactor|perf)" },
-        patch: { pattern: "^(fix|bugfix|patch|deps)" },
-        skip: { pattern: "^(release|chore|infra|docs|test|ci|build|nit|style)" },
+        patch: { pattern: "^(fix|bugfix|patch|deps|build)" },
+        skip: { pattern: "^(release|chore|infra|docs|test|ci|nit|style)" },
       },
       cascade: {
         skip: 'skip',
