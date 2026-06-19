@@ -2,133 +2,115 @@
 // Usage:
 //   bun release-gh.ts
 
-import { join, basename } from "node:path";
-import { existsSync, readdirSync, statSync, readFileSync } from "node:fs";
+import { join, basename, resolve } from "node:path";
+import { existsSync, readdirSync, statSync, readFileSync, rmSync, mkdirSync, cpSync } from "node:fs";
+import { $, which } from "bun";
 
-const root = join(import.meta.dir, "../..");
+// ── Configuration ────────────────────────────────────────────────────────────
 
-const c = {
-  red: (s: string) => `\x1b[31m${s}\x1b[0m`,
-  green: (s: string) => `\x1b[32m${s}\x1b[0m`,
-  yellow: (s: string) => `\x1b[33m${s}\x1b[0m`,
-  blue: (s: string) => `\x1b[34m${s}\x1b[0m`,
-  bold: (s: string) => `\x1b[1m${s}\x1b[0m`,
+const ROOT = resolve(join(import.meta.dir, "../.."));
+const DIST_DIR = join(ROOT, "dist");
+const WORKSPACE_CRATES = ["oyui", "syndiff"];
+const DOC_FILES = ["README.md", "LICENSE", "LICENSE-MIT", "LICENSE-APACHE", "CHANGELOG.md"];
+
+const DOCKER_IMAGE = "joseluisq/rust-linux-darwin-builder:1.89.0";
+
+interface TargetConfig {
+  name: string;        // Suffix used in the package name (using LLVM target triple)
+  rustTarget: string;  // Target triple for the Rust compiler
+  env?: Record<string, string>; // Environment variables for target compilers
+}
+
+const TARGETS: TargetConfig[] = [
+  { name: "x86_64-unknown-linux-gnu", rustTarget: "x86_64-unknown-linux-gnu" },
+  { name: "aarch64-unknown-linux-gnu", rustTarget: "aarch64-unknown-linux-gnu" },
+  {
+    name: "x86_64-apple-darwin",
+    rustTarget: "x86_64-apple-darwin",
+    env: {
+      CC: "o64-clang",
+      CXX: "o64-clang++"
+    }
+  },
+  {
+    name: "aarch64-apple-darwin",
+    rustTarget: "aarch64-apple-darwin",
+    env: {
+      CC: "oa64-clang",
+      CXX: "oa64-clang++"
+    }
+  },
+];
+
+$.cwd(ROOT);
+
+// ── Loggers ──────────────────────────────────────────────────────────────────
+
+const log = {
+  step: (msg: string) => console.log(`\n\x1b[1m\x1b[34m▶ ${msg}\x1b[0m`),
+  ok: (msg: string) => console.log(`  \x1b[32m✓\x1b[0m ${msg}`),
+  warn: (msg: string) => console.log(`  \x1b[33m⚠\x1b[0m ${msg}`),
+  error: (msg: string) => console.error(`\n\x1b[31m✗ ${msg}\x1b[0m`),
   gray: (s: string) => `\x1b[90m${s}\x1b[0m`,
+  bold: (s: string) => `\x1b[1m${s}\x1b[0m`,
   cyan: (s: string) => `\x1b[36m${s}\x1b[0m`,
+  blue: (s: string) => `\x1b[34m${s}\x1b[0m`,
+  yellow: (s: string) => `\x1b[33m${s}\x1b[0m`,
 };
 
-const step = (msg: string) => console.log(`\n${c.bold(c.blue(`▶ ${msg}`))}`);
-const ok = (msg: string) => console.log(`  ${c.green("✓")} ${msg}`);
-const warn = (msg: string) => console.log(`  ${c.yellow("⚠")} ${msg}`);
-const die = (msg: string): never => {
-  console.error(`\n${c.red(`✗ ${msg}`)}`);
+function die(msg: string): never {
+  log.error(msg);
   process.exit(1);
-};
+}
 
-async function runCommand(cmd: string[], opts: { cwd?: string } = {}) {
-  const proc = Bun.spawn(cmd, { cwd: opts.cwd ?? root, stdout: "pipe", stderr: "pipe" });
-  const stdout = await new Response(proc.stdout).text();
-  const stderr = await new Response(proc.stderr).text();
-  await proc.exited;
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
-  if (proc.exitCode !== 0) {
-    die(`Command failed: ${cmd.join(" ")}\n${stderr.trim()}`);
+async function checkPreflights() {
+  log.step("Preflight Verification");
+
+  if (!await which("gh")) die("GitHub CLI (gh) is missing.");
+  if (!await which("docker")) die("Docker is required to cross-compile the targets.");
+
+  try {
+    await $`gh auth status`.quiet();
+  } catch {
+    die("GitHub CLI is unauthenticated. Log in first via 'gh auth login'.");
   }
-  return stdout.trim();
+
+  log.ok("GitHub CLI and Docker verified and authenticated.");
 }
 
-function extractChangelogSection(changelogPath: string, version: string): string {
-  if (!existsSync(changelogPath)) return "";
-  const lines = readFileSync(changelogPath, "utf-8").split("\n");
-
-  let captures: string[] = [];
-  let found = false;
-
-  for (const line of lines) {
-    if (line.startsWith("## [") || line.startsWith("## ")) {
-      if (found) break;
-      if (line.includes(version)) {
-        found = true;
-        continue;
-      }
-    }
-    if (found) {
-      captures.push(line);
-    }
+async function getVersion(): Promise<string> {
+  const cargoTomlPath = join(ROOT, "crates/oyui/Cargo.toml");
+  if (!existsSync(cargoTomlPath)) {
+    die(`Cargo.toml not found at path: ${cargoTomlPath}`);
   }
-  return captures.join("\n").trim();
+  const content = await Bun.file(cargoTomlPath).text();
+  const version = content.match(/^version = "(.+?)"/m)?.[1];
+  if (!version) {
+    die("Unable to identify current version in crates/oyui/Cargo.toml.");
+  }
+  return version;
 }
 
-// Basic markdown formatter for terminal presentation
-function renderMarkdownTerminal(md: string): string {
-  if (!md) return c.gray("No release notes found.");
-  
-  return md
-    .split("\n")
-    .map((line) => {
-      // Headers
-      if (line.startsWith("### ")) {
-        return `\n${c.bold(c.cyan(line.replace("### ", "⬢ ")))}`;
-      }
-      if (line.startsWith("## ")) {
-        return `\n${c.bold(c.blue(line.replace("## ", "■ ")))}\n`;
-      }
-      // Lists
-      if (line.trim().startsWith("- ") || line.trim().startsWith("* ")) {
-        const indent = line.match(/^\s*/)?.[0] ?? "";
-        const cleanLine = line.trim().substring(2);
-        return `${indent}  ${c.yellow("•")} ${cleanLine}`;
-      }
-      // Inline Code blocks
-      return line.replace(/`([^`]+)`/g, (_, code) => c.gray(code));
-    })
-    .join("\n");
+async function buildTarget(target: TargetConfig) {
+  log.ok(`Preparing and building inside container (${DOCKER_IMAGE})...`);
+
+  let envPrefix = "";
+  if (target.env) {
+    envPrefix = Object.entries(target.env)
+      .map(([key, val]) => `${key}=${val}`)
+      .join(" ") + " ";
+  }
+
+  const buildCmd = `rm -rf target/${target.rustTarget} && ${envPrefix}cargo build --release --target ${target.rustTarget}`;
+
+  await $`docker run --rm -v ${ROOT}:/root/src -w /root/src ${DOCKER_IMAGE} sh -c ${buildCmd}`;
 }
 
-// ── Execution Flow ───────────────────────────────────────────────────────────
-
-// 1. Preflight & GitHub Verification
-step("Preflight Verification");
-
-try {
-  await runCommand(["which", "gh"]);
-} catch {
-  die("GitHub CLI (gh) is missing.");
-}
-
-const authCheck = await runCommand(["gh", "auth", "status"]).catch(() => null);
-if (!authCheck) {
-  die("GitHub CLI is unauthenticated. Log in first via 'gh auth login'.");
-}
-ok("GitHub CLI verified and authenticated");
-
-// 2. Identify Version
-const oyuiCargo = await Bun.file(join(root, "crates/oyui/Cargo.toml")).text();
-const nextVersion = oyuiCargo.match(/^version = "(.+?)"/m)?.[1];
-if (!nextVersion) {
-  die("Unable to identify current package version inside crates/oyui/Cargo.toml.");
-}
-console.log(`Working with Release Version: v${nextVersion}`);
-
-// 3. Compile and Package
-step("Compiling and packaging binaries");
-
-const hostTarget = (await runCommand(["rustc", "-vV"])).match(/^host:\s+(.+)$/m)?.[1] ?? "unknown-target";
-const targets = [hostTarget];
-const distDir = join(root, "dist");
-const workspaceCrates = ["oyui", "syndiff"];
-
-if (existsSync(distDir)) {
-  await runCommand(["rm", "-rf", distDir]);
-}
-await runCommand(["mkdir", "-p", distDir]);
-
-for (const target of targets) {
-  console.log(`  Target architecture: ${c.bold(target)}`);
-  await runCommand(["cargo", "build", "--release", "--target", target]);
-
-  const releaseDir = join(root, "target", target, "release");
-  if (!existsSync(releaseDir)) continue;
+async function packageTarget(target: TargetConfig, version: string) {
+  const releaseDir = join(ROOT, "target", target.rustTarget, "release");
+  if (!existsSync(releaseDir)) return;
 
   const files = readdirSync(releaseDir);
   for (const file of files) {
@@ -136,100 +118,135 @@ for (const target of targets) {
     const stat = statSync(fullPath);
     if (!stat.isFile()) continue;
 
-    const isExecutable = target.includes("windows") ? file.endsWith(".exe") : (stat.mode & 0x49) !== 0;
-    const stem = file.replace(/\.exe$/i, "");
+    const isExecutable = (stat.mode & 0x49) !== 0;
+    if (isExecutable && WORKSPACE_CRATES.includes(file)) {
+      const packageDirName = `${file}-v${version}-${target.name}`;
+      const packagePath = join(DIST_DIR, packageDirName);
 
-    if (isExecutable && workspaceCrates.includes(stem)) {
-      const packageDirName = `${stem}-v${nextVersion}-${target}`;
-      const packagePath = join(distDir, packageDirName);
-      await runCommand(["mkdir", "-p", packagePath]);
+      rmSync(packagePath, { recursive: true, force: true });
+      mkdirSync(packagePath, { recursive: true });
 
-      // Copy executable and documentation files
-      await runCommand(["cp", fullPath, join(packagePath, file)]);
-      for (const doc of ["README.md", "LICENSE", "LICENSE-MIT", "LICENSE-APACHE", "CHANGELOG.md"]) {
-        const docPath = join(root, doc);
+      cpSync(fullPath, join(packagePath, file));
+
+      for (const doc of DOC_FILES) {
+        const docPath = join(ROOT, doc);
         if (existsSync(docPath)) {
-          await runCommand(["cp", docPath, join(packagePath, doc)]);
+          cpSync(docPath, join(packagePath, doc));
         }
       }
 
-      const archiveExt = target.includes("windows") ? ".zip" : ".tar.gz";
-      const archiveTarget = join(distDir, `${packageDirName}${archiveExt}`);
-
-      if (archiveExt === ".zip") {
-        if (process.platform === "win32") {
-          await runCommand(["powershell", "-Command", `Compress-Archive -Path "${packagePath}" -DestinationPath "${archiveTarget}" -Force`]);
-        } else {
-          await runCommand(["zip", "-r", archiveTarget, packageDirName], { cwd: distDir });
-        }
-      } else {
-        await runCommand(["tar", "-czf", archiveTarget, "-C", distDir, packageDirName]);
-      }
-      ok(`Package built: ${packageDirName}${archiveExt}`);
+      const archiveTarget = `${packageDirName}.tar.gz`;
+      await $`tar -czf ${join(DIST_DIR, archiveTarget)} -C ${DIST_DIR} ${packageDirName}`.quiet();
+      log.ok(`Package built: ${archiveTarget}`);
     }
   }
 }
 
-// 4. Locate Assets for Release
-step(`Locating Release Assets for v${nextVersion}`);
-const assets: string[] = [];
+function extractChangelog(version: string): string {
+  const path = join(ROOT, "CHANGELOG.md");
+  if (!existsSync(path)) return "";
 
-if (existsSync(distDir)) {
-  const files = readdirSync(distDir);
-  for (const file of files) {
-    if (file.endsWith(".zip") || file.endsWith(".tar.gz")) {
-      assets.push(join(distDir, file));
+  const lines = readFileSync(path, "utf-8").split("\n");
+  const captures: string[] = [];
+  let tracking = false;
+
+  for (const line of lines) {
+    if (line.startsWith("## [") || line.startsWith("## ")) {
+      if (tracking) break;
+      if (line.includes(version)) {
+        tracking = true;
+        continue;
+      }
+    }
+    if (tracking) {
+      captures.push(line);
     }
   }
+  return captures.join("\n").trim();
 }
 
-if (assets.length === 0) {
-  die(`No packaging assets found under 'dist/' for version v${nextVersion}.`);
-}
-ok(`Identified ${assets.length} assets to upload`);
-
-// 5. Extract Release Notes
-step("Extracting Release Notes");
-const notes = extractChangelogSection(join(root, "CHANGELOG.md"), nextVersion);
-if (!notes) {
-  warn("No explicit changelog entry matched. Reverting to default fallback header.");
-} else {
-  ok("Release details successfully extracted");
-}
-
-// 6. Review Draft and Prompt User
-step("Review Release Properties");
-
-console.log(`\n${c.bold("Target Tag:")} v${nextVersion}`);
-
-console.log(`\n${c.bold("Assets to Upload:")}`);
-for (const asset of assets) {
-  console.log(`  ${c.gray("-")} ${basename(asset)}`);
+function renderMarkdown(md: string): string {
+  if (!md) return log.gray("No release notes found.");
+  return md
+    .split("\n")
+    .map((line) => {
+      if (line.startsWith("### ")) return `\n${log.bold(log.cyan(line.replace("### ", "⬢ ")))}`;
+      if (line.startsWith("## ")) return `\n${log.bold(log.blue(line.replace("## ", "■ ")))}\n`;
+      if (line.trim().startsWith("- ") || line.trim().startsWith("* ")) {
+        const indent = line.match(/^\s*/)?.[0] ?? "";
+        return `${indent}  ${log.yellow("•")} ${line.trim().substring(2)}`;
+      }
+      return line.replace(/`([^`]+)`/g, (_, code) => log.gray(code));
+    })
+    .join("\n");
 }
 
-console.log(`\n${c.bold("Changelog Preview:")}`);
-console.log(c.gray("─".repeat(50)));
-console.log(renderMarkdownTerminal(notes || `Release v${nextVersion}`));
-console.log(c.gray("─".repeat(50)) + "\n");
+// ── Main Pipeline ────────────────────────────────────────────────────────────
 
-const confirmInput = prompt("Proceed to publish release to GitHub? (y/N):");
-if (confirmInput?.trim().toLowerCase() !== "y" && confirmInput?.trim().toLowerCase() !== "yes") {
-  die("Release process aborted by user request.");
+async function main() {
+  await checkPreflights();
+
+  const version = await getVersion();
+  console.log(`Working with Release Version: v${version}`);
+
+  // 1. Compile & Package
+  log.step("Compiling and packaging binaries");
+  rmSync(DIST_DIR, { recursive: true, force: true });
+  mkdirSync(DIST_DIR, { recursive: true });
+
+  for (const target of TARGETS) {
+    console.log(`\n  Target: ${log.bold(target.name)} (${target.rustTarget})`);
+    try {
+      await buildTarget(target);
+      await packageTarget(target, version);
+    } catch (e) {
+      log.error(`Failed to build target ${target.name}. Error: ${e}`);
+    }
+  }
+
+  // 2. Locate Assets
+  log.step(`Locating Release Assets for v${version}`);
+  const assets = readdirSync(DIST_DIR)
+    .filter(file => file.endsWith(".tar.gz"))
+    .map(file => join(DIST_DIR, file));
+
+  if (assets.length === 0) {
+    die(`No package assets found under 'dist/' for version v${version}.`);
+  }
+  log.ok(`Identified ${assets.length} assets to upload.`);
+
+  // 3. Extract Changelog
+  log.step("Extracting Release Notes");
+  const notes = extractChangelog(version);
+  if (!notes) {
+    log.warn("No explicit changelog entry matched. Reverting to fallback header.");
+  } else {
+    log.ok("Release details successfully extracted.");
+  }
+
+  // 4. Confirmation Prompt
+  log.step("Review Release Properties");
+  console.log(`\n${log.bold("Target Tag:")} v${version}`);
+  console.log(`\n${log.bold("Assets to Upload:")}`);
+  assets.forEach(asset => console.log(`  ${log.gray("-")} ${basename(asset)}`));
+  console.log(`\n${log.bold("Changelog Preview:")}`);
+  console.log(log.gray("─".repeat(50)));
+  console.log(renderMarkdown(notes || `Release v${version}`));
+  console.log(log.gray("─".repeat(50)) + "\n");
+
+  const input = prompt("Proceed to publish release to GitHub? (y/N):");
+  if (input?.trim().toLowerCase() !== "y" && input?.trim().toLowerCase() !== "yes") {
+    die("Release process aborted by user.");
+  }
+
+  // 5. GitHub Publish
+  log.step("Publishing Release to GitHub");
+  const tag = `v${version}`;
+  await $`gh release create ${tag} ${assets} --title ${tag} --notes ${notes || `Release ${tag}`}`;
+
+  log.ok(`GitHub release ${tag} successfully published.`);
 }
 
-// 7. Publish Release to GitHub
-step("Publishing Release to GitHub");
-const tag = `v${nextVersion}`;
-await runCommand([
-  "gh",
-  "release",
-  "create",
-  tag,
-  ...assets,
-  "--title",
-  tag,
-  "--notes",
-  notes || `Release ${tag}`,
-]);
-
-ok(`GitHub release ${tag} successfully published.`);
+main().catch((err) => {
+  die(err instanceof Error ? err.message : String(err));
+});
