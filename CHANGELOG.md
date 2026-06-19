@@ -1,3 +1,20 @@
+## [0.2.1] - 2026-06-19
+
+Github release x86 target was broken in `0.1.0` & `0.2.0`. This commit fixes the issue.
+related Issue: https://github.com/emilien-jegou/oyui/issues/14
+
+added 3 new targets in github releases:
+- aarch64-unknown-linux-gnu
+- x86_64-apple-darwin
+- aarch64-apple-darwin
+
+Built via `joseluisq/rust-linux-darwin-builder` 
+
+### Build
+- Add aarch & darwin target to github releases — [`b22d4c1`](https://github.com/emilien-jegou/oyui/commit/b22d4c1e7672b78fe94b9a79af2d45feaed9aeec) by emilien-jegou
+
+---
+
 ## [0.2.0] - 2026-06-18
 
 This version is focused on fixing accessibility issues and strengthening themes customizations.

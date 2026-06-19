@@ -1,3 +1,8 @@
+## [0.2.1] - 2026-06-19
+
+### Other Changes
+- b22d4c1 build: add aarch & darwin target to github releases
+
 ## [0.2.0] - 2026-06-18
 
 ### Features

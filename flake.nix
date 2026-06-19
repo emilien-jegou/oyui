@@ -38,7 +38,7 @@
         packages = {
           oyui = rustPlatform.buildRustPackage (commonBuildArgs // {
             pname = "oyui";
-            version = "0.2.0";
+            version = "0.2.1";
           });
 
           default = pkgs.symlinkJoin {
