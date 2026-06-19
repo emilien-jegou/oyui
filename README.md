@@ -23,6 +23,11 @@
 
 ![Redesign screenshot](./docs/assets/themes/weywot.png)
 
+### Command support
+
+- Full support: `jj commit -i`, `jj squash -i`, `jj split`, `jj diffedit`, `jj restore -i`
+- Partial support: `git difftool`, `jj diff`, `jj interdiff` 🚧
+- Planned features: `jj resolve`, `git mergetool`
 
 ## Why Another merge editor?
 
@@ -105,6 +110,12 @@ diff-instructions = false
 program = "oyui"
 edit-args = ["diff", "$left", "$right"]
 ```
+
+Oyui currently does not support `jj resolve` command.
+
+### Usage with Git
+
+More documentation on git integration will come soon once difftool/mergetool integration have stabilized. Some info [available here](https://github.com/emilien-jegou/oyui/issues/10#issuecomment-4754957273)
 
 ### Enabling config LSP with neovim
 
