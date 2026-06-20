@@ -181,7 +181,11 @@ impl FileTree {
 
         // 1. Walk right_dir (Modified and Added files)
         tracing::debug!("Walking right directory to discover modified/added files");
-        for entry in WalkDir::new(right_dir).into_iter().filter_map(|e| e.ok()) {
+        for entry in WalkDir::new(right_dir)
+            .follow_links(true)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
             if entry.file_type().is_file() {
                 let right_path = entry.path().to_path_buf();
                 if let Ok(rel_path) = right_path.strip_prefix(right_dir) {
@@ -212,7 +216,11 @@ impl FileTree {
 
         // 2. Walk left_dir (Deleted files missing in right_dir)
         tracing::debug!("Walking left directory to discover deleted files");
-        for entry in WalkDir::new(left_dir).into_iter().filter_map(|e| e.ok()) {
+        for entry in WalkDir::new(left_dir)
+            .follow_links(true)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
             if entry.file_type().is_file() {
                 let left_path = entry.path().to_path_buf();
                 if let Ok(rel_path) = left_path.strip_prefix(left_dir) {
