@@ -9,11 +9,11 @@ pub mod define_default_theme;
 pub mod script;
 pub mod theme;
 
-pub use builtin::{get_theme, get_embedded_themes};
+pub use builtin::{get_embedded_themes, get_theme};
 pub use define_default_theme::derive_ui_theme;
 pub use theme::{LineHighlightMode, UiTheme};
 
-use crate::actions::BoxedHandler;
+use crate::actions::{BoxedHandler, KeybindRegistry};
 use crate::worker::tasks::watch_config;
 use crate::worker::EventRegistry;
 
@@ -69,11 +69,16 @@ pub fn load_config(path: &Path, handler: BoxedHandler) -> Result<(), Box<dyn std
 
     info!("Config file found. Preparing to compile.");
 
-    ACTIVE_REGISTRY.with(|r| *r.borrow_mut() = crate::actions::keybinds::default_keybinds());
+    ACTIVE_REGISTRY.with(|r| *r.borrow_mut() = KeybindRegistry::new());
 
     let context = script::build_context(handler)?;
     let mut vm = script::build_vm(path, context)?;
     script::run_config_script(&mut vm)?;
+
+    ACTIVE_REGISTRY.with(|r| {
+        r.borrow_mut()
+            .with_defaults(crate::actions::keybinds::default_keybinds())
+    });
 
     info!("Config loaded successfully");
     Ok(())

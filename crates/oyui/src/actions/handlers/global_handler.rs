@@ -40,6 +40,9 @@ impl GlobalActionsHandler for AppActionsHandler {
     fn open_command_mode(&self) {
         *self.state.command_mode.write() = CommandMode::Active(String::new());
     }
+
+    /// noop
+    fn unset(&self) {}
 }
 
 impl GlobalConfirmMergeWindowEnabledActionsHandler for AppActionsHandler {
