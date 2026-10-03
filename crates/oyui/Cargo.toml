@@ -51,5 +51,4 @@ syntect = { workspace = true }
 serde = { workspace = true }
 toml = { workspace = true }
 typed-builder = { workspace = true }
-rune = { workspace = true }
 eyre = { workspace = true }

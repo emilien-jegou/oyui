@@ -1,6 +1,4 @@
 use crossterm::event::{KeyCode, KeyEvent};
-use rune::runtime::Function;
-use std::rc::Rc;
 
 use crate::actions::{
     Action, GlobalActions, ViewFileActions, ViewFileCursorActions, ViewFileFoldActions,
@@ -8,6 +6,7 @@ use crate::actions::{
     ViewTreeCursorActions, ViewTreeDirectoryActions, ViewTreeStagingActions,
 };
 use crate::commons::input::{Keybind, Keybinds};
+use crate::script::CallbackId;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum View {
@@ -21,10 +20,12 @@ pub enum KeybindMode {
     View(View),
 }
 
+/// A bound key resolves to either a compiled action or, for bindings the
+/// script registered, a handle the [`crate::script::ScriptHost`] can run.
 #[derive(Clone)]
 pub enum ActionTarget {
     Static(Action),
-    Dynamic(Rc<Function>),
+    Dynamic(CallbackId),
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -97,19 +98,19 @@ impl KeybindRegistry {
         self
     }
 
-    pub fn register_fn<K>(mut self, kb: K, func: Rc<Function>) -> Self
+    pub fn register_fn<K>(mut self, kb: K, id: CallbackId) -> Self
     where
         K: Into<KeySource>,
     {
-        self.add_binding(KeybindMode::Global, kb.into(), ActionTarget::Dynamic(func));
+        self.add_binding(KeybindMode::Global, kb.into(), ActionTarget::Dynamic(id));
         self
     }
 
-    pub fn register_fn_mode<K>(mut self, mode: KeybindMode, kb: K, func: Rc<Function>) -> Self
+    pub fn register_fn_mode<K>(mut self, mode: KeybindMode, kb: K, id: CallbackId) -> Self
     where
         K: Into<KeySource>,
     {
-        self.add_binding(mode, kb.into(), ActionTarget::Dynamic(func));
+        self.add_binding(mode, kb.into(), ActionTarget::Dynamic(id));
         self
     }
 
@@ -163,11 +164,11 @@ impl ModeRegistryBuilder {
         self
     }
 
-    pub fn register_fn<K>(mut self, kb: K, func: Rc<Function>) -> Self
+    pub fn register_fn<K>(mut self, kb: K, id: CallbackId) -> Self
     where
         K: Into<KeySource>,
     {
-        self.add_binding(kb.into(), ActionTarget::Dynamic(func));
+        self.add_binding(kb.into(), ActionTarget::Dynamic(id));
         self
     }
 }

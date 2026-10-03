@@ -1,126 +1,188 @@
-use crate::commons::lazy::{CacheVersion, Lazy};
-use scc::HashMap;
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
+//! Concurrent path-keyed cache with in-flight dedup and generation invalidation.
 
+use parking_lot::Mutex;
+use scc::HashMap;
+use std::collections::HashSet;
+use std::path::PathBuf;
+use std::sync::Arc;
+
+/// In-flight paths paired with the invalidation generation they were claimed under.
+#[derive(Default)]
+struct CacheState {
+    in_flight: HashSet<PathBuf>,
+    generation: u64,
+    /// Bumped on every accepted `set`/`clear`; observers poll it to notice
+    /// asynchronous writes without holding a lock on the map.
+    version: u64,
+}
+
+/// A cache keyed by path, with duplicate-work suppression.
+///
+/// Values are stored as `Arc<T>` to avoid deep clones on read. Computation for a
+/// path is claimed via `mark_started` and completed via `set`; `clear` bumps the
+/// generation so claims and writes made beforehand are rejected instead of
+/// clobbering the cleared cache.
 #[derive(Clone)]
 pub struct CacheMap<T> {
-    inner: HashMap<PathBuf, Lazy<T>>,
-    generation: std::sync::Arc<AtomicUsize>,
+    inner: HashMap<PathBuf, Arc<T>>,
+    state: Arc<Mutex<CacheState>>,
 }
 
 impl<T> Default for CacheMap<T> {
     fn default() -> Self {
         Self {
             inner: HashMap::new(),
-            generation: std::sync::Arc::new(AtomicUsize::new(0)),
+            state: Arc::new(Mutex::new(CacheState::default())),
         }
     }
 }
 
-impl<T: Clone> CacheMap<T> {
+impl<T> CacheMap<T> {
+    /// Drops all values; in-flight work claimed under an older generation is rejected.
     pub fn clear(&self) {
+        // Lock order state -> scc: the wipe must be ordered after any `set`
+        // that already validated its generation, or it would erase-and-lose.
+        let mut state = self.state.lock();
+        state.in_flight.clear();
+        state.generation += 1;
+        state.version += 1;
         self.inner.clear_sync();
     }
 
-    pub fn get(&self, path: &PathBuf) -> Lazy<T> {
-        let res = self.inner.read_sync(path, |_, v| Lazy::<T>::clone(v));
-        res.unwrap_or(Lazy::Uninitialized)
+    /// Current invalidation generation, for work that never calls `mark_started`.
+    pub fn generation(&self) -> u64 {
+        self.state.lock().generation
     }
 
-    /// Retrieves the current global invalidation generation.
-    pub fn current_generation(&self) -> usize {
-        self.generation.load(Ordering::SeqCst)
+    /// Monotonic write counter, bumped whenever a value is accepted or cleared.
+    pub fn version(&self) -> u64 {
+        self.state.lock().version
     }
 
-    pub fn set(&self, path: PathBuf, value: T) {
-        let version = CacheVersion {
-            generation: self.current_generation(),
-            file_generation: 1,
-        };
-        self.set_versioned(path, version, value);
+    /// Returns a clone of the cached value, or `None` if not present.
+    pub fn get(&self, path: &PathBuf) -> Option<Arc<T>> {
+        self.inner.read_sync(path, |_, v| v.clone())
     }
 
-    /// Atomically updates the cache value if the target version is up-to-date.
-    /// Returns `true` if the write succeeded, or `false` if it was rejected as stale.
-    pub fn set_versioned(&self, path: PathBuf, target_version: CacheVersion, value: T) -> bool {
-        if target_version.generation < self.current_generation() {
+    /// Mutates the cached value in place when uniquely owned, cloning otherwise.
+    /// Returns `None` if the path is not cached.
+    ///
+    /// Runs while the entry is write-locked: the closure must not call `CacheMap`
+    /// methods. Callers must not hold the tree lock unless no worker listener can
+    /// hold a `CacheMap` lock while waiting on that tree lock (see `set`).
+    pub fn update<R>(&self, path: &PathBuf, f: impl FnOnce(&mut T) -> R) -> Option<R>
+    where
+        T: Clone,
+    {
+        self.inner.update_sync(path, |_, v| f(Arc::make_mut(v)))
+    }
+
+    /// Completes a claim made by `mark_started`, unless `generation` is stale.
+    /// Returns whether the value was written.
+    pub fn set(&self, path: PathBuf, value: Arc<T>, generation: u64) -> bool {
+        let mut state = self.state.lock();
+        if state.generation != generation {
             return false;
         }
+        state.in_flight.remove(&path);
+        // Lock order: state mutex -> scc entry. Never call this while holding the
+        // tree lock: `update` closures take the tree lock under the scc entry.
+        let _ = self.inner.insert_sync(path, value);
+        state.version += 1;
+        true
+    }
 
-        match self.inner.entry_sync(path) {
-            scc::hash_map::Entry::Occupied(mut o) => {
-                let state = o.get_mut();
-                let should_write = match state {
-                    Lazy::Uninitialized => true,
-                    Lazy::Started(current_version)
-                    | Lazy::Ready(current_version, _)
-                    | Lazy::Stale(current_version, _)
-                    | Lazy::StaleRestarted(current_version, _) => {
-                        if target_version.generation < current_version.generation {
-                            false
-                        } else if target_version.generation
-                            > current_version.generation
-                        {
-                            true
-                        } else {
-                            // Same global generation: only write if the file-level generation matches exactly
-                            current_version.file_generation == target_version.file_generation
-                        }
-                    }
-                };
-
-                if should_write {
-                    *state = Lazy::Ready(target_version, value);
-                    true
-                } else {
-                    false
-                }
-            }
-            scc::hash_map::Entry::Vacant(v) => {
-                v.insert_entry(Lazy::Ready(target_version, value));
-                true
-            }
+    /// Claims `path` for computation; returns the generation for `set`/`cancel`,
+    /// or `None` if a claim is already active.
+    pub fn mark_started(&self, path: &PathBuf) -> Option<u64> {
+        let mut state = self.state.lock();
+        if !state.in_flight.insert(path.clone()) {
+            return None;
         }
+        Some(state.generation)
     }
 
-    /// Increments the global generation counter and invalidates active entries.
-    pub fn invalidate_all(&self) {
-        self.generation.fetch_add(1, Ordering::SeqCst);
-        let _ = self.inner.iter_mut_sync(|e| {
-            let (_k, mut v) = e.consume();
-            v.invalidate();
-            true
-        });
+    /// Returns true if a path is currently being computed.
+    pub fn is_in_flight(&self, path: &PathBuf) -> bool {
+        self.state.lock().in_flight.contains(path)
     }
 
-    pub fn invalidate(&self, path: &PathBuf) {
-        self.inner.update_sync(path, |_, v| {
-            v.invalidate();
-        });
-    }
-
-    /// Attempts to start a task for a given path.
-    /// Returns `Some(CacheVersion)` if the task needs running, or `None` if it can be skipped.
-    pub fn mark_started(&self, path: PathBuf, force_new_file_gen: bool) -> Option<CacheVersion> {
-        let global_gen = self.current_generation();
-
-        match self.inner.entry_sync(path) {
-            scc::hash_map::Entry::Occupied(mut o) => {
-                o.get_mut().start(global_gen, force_new_file_gen)
-            }
-            scc::hash_map::Entry::Vacant(v) => {
-                let ver = CacheVersion {
-                    generation: global_gen,
-                    file_generation: 1,
-                };
-                v.insert_entry(Lazy::Started(ver.clone()));
-                Some(ver)
-            }
+    /// Releases a claim unless `generation` is stale. Returns whether released.
+    pub fn cancel(&self, path: &PathBuf, generation: u64) -> bool {
+        let mut state = self.state.lock();
+        if state.generation != generation {
+            return false;
         }
+        state.in_flight.remove(path);
+        true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn claim_prevents_duplicate_work_and_set_releases_it() {
+        let map: CacheMap<u32> = CacheMap::default();
+        let path = PathBuf::from("p");
+
+        let generation = map.mark_started(&path).expect("first claim succeeds");
+        assert!(
+            map.mark_started(&path).is_none(),
+            "a second claim must be rejected while in flight"
+        );
+        assert!(map.is_in_flight(&path));
+
+        assert!(map.set(path.clone(), Arc::new(1), generation));
+        assert!(!map.is_in_flight(&path), "set must release the claim");
+        assert_eq!(map.get(&path).map(|v| *v), Some(1));
     }
 
-    pub fn inner(&self) -> &HashMap<PathBuf, Lazy<T>> {
-        &self.inner
+    #[test]
+    fn clear_rejects_stale_writes_and_claims() {
+        let map: CacheMap<u32> = CacheMap::default();
+        let path = PathBuf::from("p");
+
+        let stale_generation = map.mark_started(&path).unwrap();
+        map.clear();
+
+        assert!(
+            !map.set(path.clone(), Arc::new(99), stale_generation),
+            "a write from before clear must be rejected"
+        );
+        assert!(
+            map.get(&path).is_none(),
+            "stale write must not survive the wipe"
+        );
+        assert!(
+            !map.cancel(&path, stale_generation),
+            "stale cancel must not touch newer state"
+        );
+
+        let generation = map.mark_started(&path).expect("claim works after clear");
+        assert!(map.set(path.clone(), Arc::new(1), generation));
+        assert_eq!(map.get(&path).map(|v| *v), Some(1));
+    }
+
+    #[test]
+    fn update_mutates_cached_values() {
+        let map: CacheMap<u32> = CacheMap::default();
+        let path = PathBuf::from("p");
+
+        assert_eq!(
+            map.update(&path, |v| *v += 1),
+            None,
+            "update of a missing path yields None"
+        );
+
+        map.set(path.clone(), Arc::new(1), map.generation());
+        assert_eq!(
+            map.update(&path, |v| {
+                *v += 41;
+            }),
+            Some(())
+        );
+        assert_eq!(map.get(&path).map(|v| *v), Some(42));
     }
 }

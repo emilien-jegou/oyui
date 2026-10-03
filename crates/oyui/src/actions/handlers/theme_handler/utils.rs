@@ -3,6 +3,8 @@ use crate::config::theme::{Color, UiTheme};
 use crate::terminal_colors::TerminalColorMode;
 use syntect::highlighting::Theme as SynTheme;
 
+pub use crate::theme::resolve_color_for_mode;
+
 /// Helper to determine if a string is a hex color code without the '#' prefix.
 fn is_hex_string(s: &str) -> bool {
     let len = s.len();
@@ -17,55 +19,6 @@ fn parse_rgb_parentheses(val: &str) -> Option<Color> {
     let g = parts.next()?.trim().parse::<u8>().ok()?;
     let b = parts.next()?.trim().parse::<u8>().ok()?;
     Some(Color::Rgb(r, g, b))
-}
-
-/// Resolves an ANSI color to its RGB value if the terminal is in TrueColor mode
-/// and has the corresponding palette entry populated.
-pub fn resolve_color_for_mode(color: Color, color_mode: &TerminalColorMode) -> Color {
-    if let TerminalColorMode::TrueColor(palette) = color_mode {
-        if color == Color::Fg {
-            if let Some((r, g, b)) = palette.fg {
-                return Color::Rgb(r, g, b);
-            }
-        }
-
-        if color == Color::Bg {
-            if let Some((r, g, b)) = palette.bg {
-                return Color::Rgb(r, g, b);
-            }
-        }
-
-        let index = match color {
-            Color::Ansi(i) => Some(i as usize),
-            Color::Ansi256(i) => Some(i as usize),
-            Color::Black => Some(0),
-            Color::Red => Some(1),
-            Color::Green => Some(2),
-            Color::Yellow => Some(3),
-            Color::Blue => Some(4),
-            Color::Magenta => Some(5),
-            Color::Cyan => Some(6),
-            Color::Gray => Some(7),
-            Color::DarkGray => Some(8),
-            Color::LightRed => Some(9),
-            Color::LightGreen => Some(10),
-            Color::LightYellow => Some(11),
-            Color::LightBlue => Some(12),
-            Color::LightMagenta => Some(13),
-            Color::LightCyan => Some(14),
-            Color::White => Some(15),
-            _ => None,
-        };
-
-        if let Some(idx) = index {
-            if idx < palette.ansi.len() {
-                if let Some((r, g, b)) = palette.ansi[idx] {
-                    return Color::Rgb(r, g, b);
-                }
-            }
-        }
-    }
-    color
 }
 
 pub fn parse_color_val(

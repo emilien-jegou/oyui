@@ -5,7 +5,10 @@ use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
 use syn::{
-    Expr, Ident, Result, Token, Type, braced, parenthesized, parse::{Parse, ParseStream}, punctuated::Punctuated
+    braced, parenthesized,
+    parse::{Parse, ParseStream},
+    punctuated::Punctuated,
+    Expr, Ident, Result, Token, Type,
 };
 
 struct ActionTree {
@@ -392,11 +395,15 @@ pub fn define_actions(input: TokenStream) -> TokenStream {
         }
 
         if let Some(ty) = getset {
+            // The core type stays engine-agnostic; the host supplies the
+            // concrete script-side representation through `ScriptRepr`.
             let reg_set = quote! {
                 {
                     let handler_clone = handler.0.clone();
-                    let func = move |a0: #ty| {
-                        handler_clone.#field_name.set(a0);
+                    let func = move |a0: <#ty as ::oyui_rune_actions::ScriptRepr>::Repr| {
+                        handler_clone.#field_name.set(
+                            <#ty as ::oyui_rune_actions::ScriptRepr>::from_repr(a0),
+                        );
                     };
                     m.function("set", func).build()?;
                 }
@@ -404,8 +411,10 @@ pub fn define_actions(input: TokenStream) -> TokenStream {
             let reg_get = quote! {
                 {
                     let handler_clone = handler.0.clone();
-                    let func = move || -> #ty {
-                        handler_clone.#field_name.get()
+                    let func = move || -> <#ty as ::oyui_rune_actions::ScriptRepr>::Repr {
+                        <#ty as ::oyui_rune_actions::ScriptRepr>::into_repr(
+                            handler_clone.#field_name.get(),
+                        )
                     };
                     m.function("get", func).build()?;
                 }
@@ -465,7 +474,9 @@ pub fn define_actions(input: TokenStream) -> TokenStream {
 
         #build_handler_macro
 
-        #[derive(Clone, Debug, ::oyui_rune_actions::reexport::rune::Any)]
+        // Pure structural action wrapper: no engine types, so keybind storage,
+        // input dispatch and tests can use it without pulling a script engine in.
+        #[derive(Clone, Debug)]
         pub struct Action(pub Actions);
 
         impl From<Actions> for Action {
@@ -582,7 +593,11 @@ pub fn __internal_build_handler(input: TokenStream) -> TokenStream {
 
     let mut flat_user_entries = Vec::new();
     let mut current_path = Vec::new();
-    flatten_user_entries(&input.user_entries, &mut current_path, &mut flat_user_entries);
+    flatten_user_entries(
+        &input.user_entries,
+        &mut current_path,
+        &mut flat_user_entries,
+    );
 
     let mut field_assignments = Vec::new();
 

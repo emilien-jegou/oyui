@@ -23,7 +23,8 @@ fn main() {
     let mut ts = ThemeSet::new();
 
     if Path::new("themes").exists() {
-        ts.add_from_folder("themes").expect("Failed to load tmThemes");
+        ts.add_from_folder("themes")
+            .expect("Failed to load tmThemes");
     }
 
     // Derive a UiTheme for every .tmTheme and embed the pair.

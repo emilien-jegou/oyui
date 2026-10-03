@@ -113,7 +113,8 @@ impl Keybind {
             Keybind::Combination(Modifier::Shift, s) => {
                 if let Some(c) = s.chars().next() {
                     if let KeyCode::Char(event_c) = event.code {
-                        let matches_char = event_c == c || (c.is_alphabetic() && event_c == c.to_ascii_uppercase());
+                        let matches_char = event_c == c
+                            || (c.is_alphabetic() && event_c == c.to_ascii_uppercase());
                         matches_char && mods.contains(KeyModifiers::SHIFT)
                     } else {
                         false

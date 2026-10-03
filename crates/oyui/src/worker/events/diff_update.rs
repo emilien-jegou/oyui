@@ -1,3 +1,4 @@
+//! Notification that a file's cached diff was recomputed.
 use std::path::PathBuf;
 
 use crate::diff::DiffResult;
@@ -7,12 +8,4 @@ use crate::diff::DiffResult;
 pub struct DiffUpdate {
     pub path: PathBuf,
     pub diff_result: DiffResult,
-}
-
-impl std::fmt::Debug for DiffUpdate {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CalculateFileTreeReq")
-            .field("path", &self.path)
-            .finish()
-    }
 }

@@ -1,21 +1,23 @@
+use parking_lot::{Mutex, RwLock};
 use std::sync::Arc;
 
-use crate::actions::state::{ansi_default_theme, TuiState};
+use crate::actions::*;
+use crate::app::UiState;
 use crate::config::{self, LineHighlightMode};
 use crate::diff_cache::DiffCache;
 use crate::terminal_colors::TerminalColorMode;
+use crate::theme::{ansi_default_theme, ThemeState};
 use crate::worker::events::theme_update::ThemeUpdate;
 use crate::worker::EventRegistry;
-use crate::{actions::*, view};
 
 pub mod macros;
 pub mod utils;
 
 #[derive(Clone)]
 pub struct AppThemeActionsHandler {
-    pub state: Arc<TuiState>,
+    pub theme: Arc<RwLock<ThemeState>>,
     pub cache: DiffCache,
-    pub view: view::View,
+    pub ui: Arc<Mutex<UiState>>,
     pub color_mode: TerminalColorMode,
     pub worker: Arc<EventRegistry>,
 }
@@ -54,10 +56,11 @@ impl ThemeActionsHandler for AppThemeActionsHandler {
             }
         };
 
-        let mut theme = self.state.theme.write();
+        let open_file = self.ui.lock().file_view.current_path.clone();
+        let mut theme = self.theme.write();
         theme.ui = base_ui.clone();
         theme.tm_theme = tm.clone();
-        let _ = self.worker.send(ThemeUpdate::Full(base_ui, tm));
+        let _ = self.worker.send(ThemeUpdate::Full(base_ui, tm, open_file));
     }
 
     fn toggle_gradient(&self) {
@@ -92,13 +95,14 @@ impl ThemeActionsHandler for AppThemeActionsHandler {
             }
         };
 
-        let mut theme = self.state.theme.write();
+        let open_file = self.ui.lock().file_view.current_path.clone();
+        let mut theme = self.theme.write();
         theme.tm_theme = tm.clone();
-        let _ = self.worker.send(ThemeUpdate::Tm(tm));
+        let _ = self.worker.send(ThemeUpdate::Tm(tm, open_file));
     }
 
     fn is_dark(&self) -> bool {
-        let theme = self.state.theme.read();
+        let theme = self.theme.read();
         theme.ui.bg.is_dark()
     }
 }
@@ -139,40 +143,40 @@ macros::impl_ty_getset!(char_tab, String);
 // Highlight modes
 impl ThemeFileStagedHighlightActionsHandler for AppThemeActionsHandler {
     fn get(&self) -> LineHighlightMode {
-        self.state.theme.read().ui.file_staged_highlight
+        self.theme.read().ui.file_staged_highlight
     }
 
     fn set(&self, val: LineHighlightMode) {
-        self.state.theme.write().ui.file_staged_highlight = val;
+        self.theme.write().ui.file_staged_highlight = val;
     }
 }
 
 impl ThemeFileStagedHighlightOpacityActionsHandler for AppThemeActionsHandler {
     fn get(&self) -> f64 {
-        self.state.theme.read().ui.file_staged_highlight_opacity
+        self.theme.read().ui.file_staged_highlight_opacity
     }
 
     fn set(&self, val: f64) {
-        self.state.theme.write().ui.file_staged_highlight_opacity = val;
+        self.theme.write().ui.file_staged_highlight_opacity = val;
     }
 }
 
 impl ThemeFileChangeHighlightActionsHandler for AppThemeActionsHandler {
     fn get(&self) -> LineHighlightMode {
-        self.state.theme.read().ui.file_change_highlight
+        self.theme.read().ui.file_change_highlight
     }
 
     fn set(&self, val: LineHighlightMode) {
-        self.state.theme.write().ui.file_change_highlight = val;
+        self.theme.write().ui.file_change_highlight = val;
     }
 }
 
 impl ThemeFileChangeHighlightOpacityActionsHandler for AppThemeActionsHandler {
     fn get(&self) -> f64 {
-        self.state.theme.read().ui.file_change_highlight_opacity
+        self.theme.read().ui.file_change_highlight_opacity
     }
 
     fn set(&self, val: f64) {
-        self.state.theme.write().ui.file_change_highlight_opacity = val;
+        self.theme.write().ui.file_change_highlight_opacity = val;
     }
 }

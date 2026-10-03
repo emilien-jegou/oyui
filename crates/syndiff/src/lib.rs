@@ -157,10 +157,10 @@ use arrayvec::ArrayVec;
 use crate::syntax_graph::{SyntaxEdge, SyntaxRoute};
 use crate::syntax_tree::{SyntaxHint, SyntaxNode};
 
+mod diff_source;
 mod syntax_delimiters;
 mod syntax_graph;
 mod syntax_tree;
-mod diff_source;
 
 pub use diff_source::*;
 

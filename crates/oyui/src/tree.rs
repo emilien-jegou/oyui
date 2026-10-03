@@ -47,9 +47,22 @@ pub enum TreeNode {
 pub struct FileTree {
     pub nodes: Vec<TreeNode>,
     pub is_file_diff: bool,
+    /// Mutation counter bumped by every write method; views cache against it.
+    version: u64,
 }
 
 impl FileTree {
+    /// Returns the current mutation counter.
+    pub fn version(&self) -> u64 {
+        self.version
+    }
+
+    /// Replaces every node while keeping this tree's version monotonic.
+    pub fn replace(&mut self, new: FileTree) {
+        let version = self.version + 1;
+        *self = new;
+        self.version = version;
+    }
     pub fn is_empty(&self) -> bool {
         self.nodes.iter().all(|node| match node {
             TreeNode::File(_) => false,
@@ -58,24 +71,120 @@ impl FileTree {
     }
 
     pub fn get_file_state(&self, target_path: &Path) -> Option<StagingState> {
-        fn find(nodes: &[TreeNode], target: &Path) -> Option<StagingState> {
+        self.file(target_path).map(|f| f.state)
+    }
+
+    /// Returns a reference to the file node at the given path.
+    pub fn file(&self, target_path: &Path) -> Option<&TreeNodeFile> {
+        fn find_file<'a>(nodes: &'a [TreeNode], target: &Path) -> Option<&'a TreeNodeFile> {
             for node in nodes {
                 match node {
-                    TreeNode::File(f) => {
-                        if f.path == target {
-                            return Some(f.state);
-                        }
-                    }
+                    TreeNode::File(f) if f.path == target => return Some(f),
                     TreeNode::Directory(d) => {
-                        if let Some(s) = find(&d.children, target) {
-                            return Some(s);
+                        if let Some(f) = find_file(&d.children, target) {
+                            return Some(f);
                         }
                     }
+                    _ => {}
                 }
             }
             None
         }
-        find(&self.nodes, target_path)
+        find_file(&self.nodes, target_path)
+    }
+
+    /// Returns a mutable reference to the file node at the given path.
+    pub fn file_mut(&mut self, target_path: &Path) -> Option<&mut TreeNodeFile> {
+        fn find_file_mut<'a>(
+            nodes: &'a mut [TreeNode],
+            target: &Path,
+        ) -> Option<&'a mut TreeNodeFile> {
+            for node in nodes {
+                match node {
+                    TreeNode::File(f) if f.path == target => return Some(f),
+                    TreeNode::Directory(d) => {
+                        if let Some(f) = find_file_mut(&mut d.children, target) {
+                            return Some(f);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            None
+        }
+        let found = find_file_mut(&mut self.nodes, target_path);
+        if found.is_some() {
+            self.version += 1;
+        }
+        found
+    }
+
+    /// Returns an iterator over all file nodes in the tree.
+    pub fn files(&self) -> impl Iterator<Item = &TreeNodeFile> {
+        fn collect_files<'a>(nodes: &'a [TreeNode], files: &mut Vec<&'a TreeNodeFile>) {
+            for node in nodes {
+                match node {
+                    TreeNode::File(f) => files.push(f),
+                    TreeNode::Directory(d) => collect_files(&d.children, files),
+                }
+            }
+        }
+        let mut files = Vec::new();
+        collect_files(&self.nodes, &mut files);
+        files.into_iter()
+    }
+
+    /// Returns an iterator over all file nodes with mutable access.
+    pub fn files_mut(&mut self) -> impl Iterator<Item = &mut TreeNodeFile> {
+        fn collect_files_mut<'a>(nodes: &'a mut [TreeNode], files: &mut Vec<&'a mut TreeNodeFile>) {
+            for node in nodes {
+                match node {
+                    TreeNode::File(f) => files.push(f),
+                    TreeNode::Directory(d) => collect_files_mut(&mut d.children, files),
+                }
+            }
+        }
+        self.version += 1;
+        let mut files = Vec::new();
+        collect_files_mut(&mut self.nodes, &mut files);
+        files.into_iter()
+    }
+
+    /// Sets the staging state for a file or directory at the given path.
+    /// If the path is a directory, all children are updated recursively.
+    pub fn set_state_for_path(&mut self, target_path: &Path, new_state: StagingState) {
+        fn set_state(nodes: &mut [TreeNode], target: &Path, new_state: StagingState) -> bool {
+            for node in nodes {
+                match node {
+                    TreeNode::File(f) if f.path == target => {
+                        f.state = new_state;
+                        return true;
+                    }
+                    TreeNode::Directory(d) if d.path == target => {
+                        for child in &mut d.children {
+                            child.set_state_recursive(new_state);
+                        }
+                        return true;
+                    }
+                    TreeNode::Directory(d) => {
+                        if set_state(&mut d.children, target, new_state) {
+                            return true;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            false
+        }
+        if set_state(&mut self.nodes, target_path, new_state) {
+            self.version += 1;
+        }
+    }
+
+    /// Finds the left and right paths for a file at the given path.
+    pub fn find_paths(&self, target_path: &Path) -> Option<(Option<PathBuf>, Option<PathBuf>)> {
+        self.file(target_path)
+            .map(|f| (f.left_path.clone(), f.right_path.clone()))
     }
 
     #[tracing::instrument(skip_all)]
@@ -118,18 +227,18 @@ impl FileTree {
                     left_resolved = left_dir.join(name);
                 }
             }
-        } else if is_right_dir && !left_exists
-            && left_dir.extension().is_some() {
-                is_file_diff = true;
-                if let Some(name) = left_dir.file_name() {
-                    right_resolved = right_dir.join(name);
-                }
+        } else if is_right_dir && !left_exists && left_dir.extension().is_some() {
+            is_file_diff = true;
+            if let Some(name) = left_dir.file_name() {
+                right_resolved = right_dir.join(name);
             }
+        }
 
         if is_file_diff {
             let mut tree = Self {
                 nodes: Vec::new(),
                 is_file_diff: true,
+                ..Default::default()
             };
             let mut files_to_stat = Vec::new();
 
@@ -137,33 +246,43 @@ impl FileTree {
             let right_res_exists = right_resolved.exists();
 
             let rel_path_buf = if right_res_exists {
-                PathBuf::from(right_resolved.file_name().unwrap_or_else(|| std::ffi::OsStr::new("file")))
+                PathBuf::from(
+                    right_resolved
+                        .file_name()
+                        .unwrap_or_else(|| std::ffi::OsStr::new("file")),
+                )
             } else if left_res_exists {
-                PathBuf::from(left_resolved.file_name().unwrap_or_else(|| std::ffi::OsStr::new("file")))
+                PathBuf::from(
+                    left_resolved
+                        .file_name()
+                        .unwrap_or_else(|| std::ffi::OsStr::new("file")),
+                )
             } else {
                 PathBuf::from("file")
             };
 
-            let left_path = if left_res_exists { Some(left_resolved.clone()) } else { None };
-            let right_path = if right_res_exists { Some(right_resolved.clone()) } else { None };
+            let left_path = if left_res_exists {
+                Some(left_resolved.clone())
+            } else {
+                None
+            };
+            let right_path = if right_res_exists {
+                Some(right_resolved.clone())
+            } else {
+                None
+            };
 
             let mut should_insert = true;
-            if left_res_exists && right_res_exists
-                && files_are_identical(&left_resolved, &right_resolved) {
-                    should_insert = false;
-                }
+            if left_res_exists
+                && right_res_exists
+                && files_are_identical(&left_resolved, &right_resolved)
+            {
+                should_insert = false;
+            }
 
             if should_insert {
-                tree.insert_file(
-                    rel_path_buf.clone(),
-                    left_path.clone(),
-                    right_path.clone(),
-                );
-                files_to_stat.push((
-                    rel_path_buf,
-                    left_resolved,
-                    right_resolved,
-                ));
+                tree.insert_file(rel_path_buf.clone(), left_path.clone(), right_path.clone());
+                files_to_stat.push((rel_path_buf, left_resolved, right_resolved));
             }
 
             return (tree, files_to_stat);
@@ -172,6 +291,7 @@ impl FileTree {
         let mut tree = Self {
             nodes: Vec::new(),
             is_file_diff: false,
+            ..Default::default()
         };
         let mut files_to_stat = Vec::new();
 
@@ -253,6 +373,7 @@ impl FileTree {
         left_path: Option<PathBuf>,
         right_path: Option<PathBuf>,
     ) {
+        self.version += 1;
         let components: Vec<_> = rel_path
             .iter()
             .map(|c| c.to_string_lossy().into_owned())

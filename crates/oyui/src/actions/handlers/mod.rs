@@ -1,11 +1,11 @@
-use crate::actions::state::TuiState;
 use crate::actions::*;
+use crate::app::UiState;
 use crate::diff_cache::DiffCache;
 use crate::terminal_colors::TerminalColorMode;
+use crate::theme::ThemeState;
 use crate::tree::FileTree;
-use crate::view::View;
 use crate::worker::EventRegistry;
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use std::path::PathBuf;
 use std::sync::Arc;
 use typed_builder::TypedBuilder;
@@ -16,10 +16,10 @@ pub mod view_handlers;
 
 #[derive(TypedBuilder, Clone)]
 pub struct AppActionsHandler {
-    pub state: Arc<TuiState>,
+    pub ui: Arc<Mutex<UiState>>,
+    pub theme: Arc<RwLock<ThemeState>>,
     pub tree: Arc<RwLock<FileTree>>,
     pub cache: DiffCache,
-    pub view: View,
     pub right_path: PathBuf,
     pub worker: Arc<EventRegistry>,
     pub color_mode: TerminalColorMode,
@@ -27,8 +27,8 @@ pub struct AppActionsHandler {
 
 pub fn generate(actions_handler: AppActionsHandler) -> BoxedHandler {
     let theme_handler = theme_handler::AppThemeActionsHandler {
-        state: actions_handler.state.clone(),
-        view: actions_handler.view.clone(),
+        theme: actions_handler.theme.clone(),
+        ui: actions_handler.ui.clone(),
         cache: actions_handler.cache.clone(),
         color_mode: actions_handler.color_mode.clone(),
         worker: actions_handler.worker.clone(),

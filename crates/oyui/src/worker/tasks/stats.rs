@@ -1,3 +1,4 @@
+//! Batch diff-stat computation listener and its cache-writing consumer.
 use crate::diff::DiffStats;
 use crate::diff_cache::DiffCache;
 use imara_diff::{Algorithm, Diff, InternedInput};
@@ -5,6 +6,7 @@ use oyui_tasker::{Listener, TaskerContext};
 use rayon::prelude::*;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 pub struct Stats;
 
@@ -13,23 +15,9 @@ pub struct StatsReq {
     pub files: Vec<(PathBuf, PathBuf, PathBuf)>,
 }
 
-impl std::fmt::Debug for StatsReq {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("StatsReq")
-            .field("file_count", &self.files.len())
-            .finish()
-    }
-}
-
 #[derive(Clone)]
 pub struct StatsRes {
     pub stats: Vec<(PathBuf, DiffStats)>,
-}
-
-impl std::fmt::Debug for StatsRes {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("StatsRes").finish()
-    }
 }
 
 fn get_file_info(path: &Path) -> (bool, isize, Option<String>) {
@@ -62,7 +50,8 @@ fn get_file_info(path: &Path) -> (bool, isize, Option<String>) {
     (is_binary || text.is_none(), size, text)
 }
 
-impl Listener<StatsReq, crate::worker::EventSender> for Stats {
+impl Listener<StatsReq> for Stats {
+    type Sender = crate::worker::EventSender;
     type Context = ();
 
     #[tracing::instrument(skip_all)]
@@ -118,7 +107,8 @@ pub struct StatsResCtx {
 }
 
 pub struct StatsResListener;
-impl Listener<StatsRes, crate::worker::EventSender> for StatsResListener {
+impl Listener<StatsRes> for StatsResListener {
+    type Sender = crate::worker::EventSender;
     type Context = StatsResCtx;
 
     async fn handle(
@@ -127,8 +117,10 @@ impl Listener<StatsRes, crate::worker::EventSender> for StatsResListener {
         _tx: crate::worker::EventSender,
     ) -> eyre::Result<()> {
         tracing::debug!("Applied Stats cache");
+        // Stats are never cleared mid-flight; pin the current generation.
+        let generation = ctx.cache.stats.generation();
         for (node_path, stats) in event.stats {
-            ctx.cache.stats.set(node_path, stats);
+            ctx.cache.stats.set(node_path, Arc::new(stats), generation);
         }
         Ok(())
     }

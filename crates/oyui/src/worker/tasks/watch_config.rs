@@ -1,22 +1,24 @@
+//! Config file poll listener with mtime debounce.
 use oyui_tasker::Listener;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
 pub struct WatchConfig;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct WatchConfigReq {
     pub path: PathBuf,
     pub last_mtime: Option<SystemTime>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct WatchConfigRes {
     pub path: PathBuf,
     pub last_mtime: Option<SystemTime>,
 }
 
-impl Listener<WatchConfigReq, crate::worker::EventSender> for WatchConfig {
+impl Listener<WatchConfigReq> for WatchConfig {
+    type Sender = crate::worker::EventSender;
     type Context = ();
 
     #[tracing::instrument(skip_all, fields(path = %event.path.display()))]

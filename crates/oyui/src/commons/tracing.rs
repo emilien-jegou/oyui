@@ -97,9 +97,7 @@ impl Tracer {
         let mut file_guard = None;
 
         if self.log_enable {
-            let path = self
-                .log_save_path
-                .unwrap_or_else(|| "/tmp/oyui.log".into());
+            let path = self.log_save_path.unwrap_or_else(|| "/tmp/oyui.log".into());
 
             let file = std::fs::OpenOptions::new()
                 .create(true)

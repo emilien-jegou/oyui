@@ -70,7 +70,6 @@ impl SystemFgActionsHandler for MySystemFgHandler {
     }
 }
 
-
 struct AllInOneHandler {
     fg: Mutex<String>,
     executed: Arc<AtomicU32>,
@@ -135,10 +134,12 @@ fn test_direct_rust_modular_handler_execution() {
     let cursor_down_val = Arc::new(AtomicU32::new(0));
 
     let handler = Handler {
-        view_file_scroll: MyScrollHandler { executed: executed.clone() },
-        view_file_cursor: MyCursorHandler { 
-            cursor_up_called: cursor_up_called.clone(), 
-            cursor_down_val: cursor_down_val.clone() 
+        view_file_scroll: MyScrollHandler {
+            executed: executed.clone(),
+        },
+        view_file_cursor: MyCursorHandler {
+            cursor_up_called: cursor_up_called.clone(),
+            cursor_down_val: cursor_down_val.clone(),
         },
         system: MySystemHandler,
         system_fg: MySystemFgHandler {
@@ -172,16 +173,19 @@ fn test_rune_modular_module_execution() -> Result<(), Box<dyn std::error::Error>
     let cursor_down_val = Arc::new(AtomicU32::new(0));
 
     let handler = Handler {
-        view_file_scroll: MyScrollHandler { executed: executed.clone() },
-        view_file_cursor: MyCursorHandler { 
-            cursor_up_called: cursor_up_called.clone(), 
-            cursor_down_val: cursor_down_val.clone() 
+        view_file_scroll: MyScrollHandler {
+            executed: executed.clone(),
+        },
+        view_file_cursor: MyCursorHandler {
+            cursor_up_called: cursor_up_called.clone(),
+            cursor_down_val: cursor_down_val.clone(),
         },
         system: MySystemHandler,
         system_fg: MySystemFgHandler {
             fg: Mutex::new(String::new()),
         },
-    }.build();
+    }
+    .build();
 
     register_actions(&mut context, handler)?;
 
@@ -251,7 +255,8 @@ fn test_rune_all_in_one_module_execution() -> Result<(), Box<dyn std::error::Err
         view_file_cursor: all_in_one.clone(),
         system: all_in_one.clone(),
         system_fg: all_in_one,
-    }.build();
+    }
+    .build();
 
     register_actions(&mut context, handler)?;
 
@@ -321,7 +326,8 @@ fn test_boxed_handler_dispatch() {
         view_file_cursor: all_in_one.clone(),
         system: all_in_one.clone(),
         system_fg: all_in_one,
-    }.build();
+    }
+    .build();
 
     // Verify dispatch with nested inner action constructed via automatic `.into()` trait
     let action_left: Action = ViewFileScrollActions::left(123).into();

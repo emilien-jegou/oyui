@@ -1,4 +1,4 @@
-use crate::app::{App, CommandMode};
+use crate::app::{merge_stats, App, CommandMode};
 use crate::config::UiTheme;
 use crate::view::ViewKind;
 use ratatui::{
@@ -18,42 +18,40 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     ])
     .areas(area);
 
-    let theme_guard = app.state.theme.read();
-    let theme = theme_guard.ui.clone();
-    drop(theme_guard);
+    let theme = app.theme.read().ui.clone();
 
-    let diff_summary = app.get_diff_summary();
-    let tree_guard = app.tree.read();
+    let diff_summary = merge_stats::diff_summary(&app.tree);
 
-    // 1. Draw the underlying view first
-    app.view.draw(
-        frame,
-        view_area,
-        &tree_guard,
-        &app.cache,
-        app.base_path.as_ref(),
-        diff_summary,
-        &theme,
-        &app.color_mode
-    );
+    // Scoped: the guard must be released before anything below re-locks the
+    // tree, because a queued writer turns a second read into a deadlock.
+    {
+        let tree_guard = app.tree.read();
+        // 1. Draw the underlying view first
+        app.ui.lock().draw(
+            frame,
+            view_area,
+            &tree_guard,
+            &app.cache,
+            app.base_path.as_ref(),
+            diff_summary,
+            &theme,
+            &app.color_mode,
+        );
+    }
 
     // 2. Draw the config error on top of the view if it exists
     if let Some(ref err) = *app.config.error.read() {
         crate::view::config_error::draw(frame, view_area, err, &theme);
     }
 
-    draw_hint_bar(
-        frame,
-        hint_area,
-        &app.command_mode,
-        &app.view.current.read(),
-        &theme,
-    );
-    draw_command_bar(frame, cmd_area, &app.command_mode, &theme);
+    let cmd_mode = app.ui.lock().command_mode.clone();
 
-    if let CommandMode::ConfirmMerge = app.command_mode {
-        let merge_stats = app.get_merge_stats();
-        crate::view::confirm_window::draw(frame, &theme, merge_stats);
+    draw_hint_bar(frame, hint_area, &cmd_mode, &app.ui.lock().current, &theme);
+    draw_command_bar(frame, cmd_area, &cmd_mode, &theme);
+
+    if let CommandMode::ConfirmMerge = cmd_mode {
+        let stats = merge_stats::merge_stats(&app.tree, &app.cache);
+        crate::view::confirm_window::draw(frame, &theme, stats);
     }
 }
 

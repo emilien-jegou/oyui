@@ -2,7 +2,10 @@ pub mod gutter;
 pub mod text;
 
 use super::style::get_line_style;
-use crate::{config::UiTheme, diff::{HunkMarker, InlineChange}};
+use crate::{
+    config::UiTheme,
+    diff::{HunkMarker, InlineChange},
+};
 use gutter::{GutterConfig, GutterRenderer};
 use ratatui::{
     layout::Constraint,

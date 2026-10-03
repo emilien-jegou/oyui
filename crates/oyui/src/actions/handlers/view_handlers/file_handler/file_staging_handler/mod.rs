@@ -5,7 +5,6 @@ pub mod hunk_mutations;
 pub mod operations;
 pub mod staging_session;
 pub mod staging_sync;
-pub mod utils;
 
 use staging_session::StagingSession;
 
@@ -33,11 +32,9 @@ impl ViewFileStagingActionsHandler for AppActionsHandler {
 
 impl AppActionsHandler {
     fn with_staging_session<F: FnOnce(&StagingSession)>(&self, f: F) {
-        if let Some(s) = StagingSession::try_new(
-            self.tree.clone(),
-            self.cache.clone(),
-            self.view.file_view.clone(),
-        ) {
+        if let Some(s) =
+            StagingSession::try_new(self.tree.clone(), self.cache.clone(), self.ui.clone())
+        {
             f(&s);
         }
     }

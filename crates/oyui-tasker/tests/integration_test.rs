@@ -22,7 +22,8 @@ pub struct MathResult {
 
 pub struct EchoListener;
 
-impl Listener<Echo, EventSender> for EchoListener {
+impl Listener<Echo> for EchoListener {
+    type Sender = EventSender;
     type Context = ();
 
     async fn handle(event: Echo, _ctx: Self::Context, tx: EventSender) -> eyre::Result<()> {
@@ -35,7 +36,8 @@ impl Listener<Echo, EventSender> for EchoListener {
 
 pub struct MathListener;
 
-impl Listener<Math, EventSender> for MathListener {
+impl Listener<Math> for MathListener {
+    type Sender = EventSender;
     type Context = i32;
 
     async fn handle(event: Math, ctx: Self::Context, tx: EventSender) -> eyre::Result<()> {
@@ -43,6 +45,17 @@ impl Listener<Math, EventSender> for MathListener {
             value: (event.values.0 + event.values.1) * ctx,
         })?;
         Ok(())
+    }
+}
+
+pub struct ExplodingListener;
+
+impl Listener<Math> for ExplodingListener {
+    type Sender = EventSender;
+    type Context = ();
+
+    async fn handle(_: Math, _: Self::Context, _: EventSender) -> eyre::Result<()> {
+        eyre::bail!("intentional listener failure")
     }
 }
 
@@ -60,7 +73,7 @@ tasker_registry! {
     ],
     listeners = [
         Echo => [EchoListener],
-        Math => [MathListener],
+        Math => [MathListener, ExplodingListener],
     ],
 }
 
@@ -109,4 +122,37 @@ async fn test_split_registry() {
     assert!(matches);
 
     sender.shutdown().unwrap();
+}
+
+/// A listener that always fails must not stop the dispatch loop: subsequent
+/// events still reach their listeners and the mirrored stream keeps flowing.
+#[tokio::test]
+async fn listener_failure_does_not_stop_dispatch() {
+    let ctx = AppContext { multiplier: 3 };
+    let registry = EventRegistry::spawn(ctx);
+
+    registry
+        .send(Math { values: (4, 5) })
+        .expect("first event queued");
+    registry
+        .send(Math { values: (1, 1) })
+        .expect("second event queued");
+
+    // Two input echoes plus two results, in no particular order.
+    let mut results = 0;
+    for _ in 0..4 {
+        let event = tokio::time::timeout(std::time::Duration::from_secs(5), registry.recv())
+            .await
+            .expect("dispatch loop stalled after a listener error")
+            .expect("registry closed unexpectedly");
+        if matches!(event, Event::MathResult(_)) {
+            results += 1;
+        }
+    }
+    assert_eq!(
+        results, 2,
+        "both events must yield results despite the failing listener"
+    );
+
+    registry.shutdown().await.unwrap();
 }

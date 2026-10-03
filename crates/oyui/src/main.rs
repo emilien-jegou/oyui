@@ -10,8 +10,10 @@ pub mod commons;
 pub mod config;
 pub mod diff;
 pub mod diff_cache;
+pub mod script;
 pub mod syntax;
 pub mod terminal_colors;
+pub mod theme;
 pub mod tree;
 pub mod ui_state;
 pub mod view;
@@ -38,11 +40,6 @@ async fn main() -> Result<ExitCode, Box<dyn Error>> {
     tracing::info!("Starting oyui...");
 
     let result = commands::run(RunOptions { args, color_mode }).await;
-
-    // Explicitly clear the thread-local registry to prevent TLS drop order
-    // issues with scc::HashMap when the main thread terminates.
-    // Kept as a security.
-    crate::config::clear_registry();
 
     match result {
         Ok(()) => Ok(ExitCode::SUCCESS),

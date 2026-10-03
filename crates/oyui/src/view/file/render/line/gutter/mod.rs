@@ -30,7 +30,6 @@ impl Default for GutterConfig {
     }
 }
 
-
 #[derive(TypedBuilder)]
 pub struct GutterRenderer<'a> {
     pub config: GutterConfig,

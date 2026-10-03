@@ -1,3 +1,4 @@
+//! File view navigation, scrolling, and fold actions on the app handler.
 use std::path::Path;
 
 use crate::actions::handlers::AppActionsHandler;
@@ -14,13 +15,9 @@ struct FileContext {
     cursor_screen_offset: usize,
 }
 
-fn get_file_context(view: &crate::view::file::FileViewData) -> Option<FileContext> {
+fn get_file_context(view: &mut crate::view::file::FileViewData) -> Option<FileContext> {
     let path = view.current_path.clone()?;
-    let max_idx = view
-        .row_counts
-        .get(&path)
-        .map(|&c| c.saturating_sub(1))
-        .unwrap_or(0);
+    let max_idx = view.row_count(&path).saturating_sub(1);
 
     let (current_row_idx, current_offset) = {
         let s = view.scroll_states.get(&path);
@@ -60,7 +57,7 @@ fn handle_hscroll(
 ) {
     let mut max_line_len = 0;
 
-    if let Some(DiffResult::Text(diff)) = cache.diffs.get(path).value() {
+    if let Some(DiffResult::Text(diff)) = cache.diffs.get(path).as_deref() {
         let old_max = diff
             .old_file_content
             .lines()
@@ -85,22 +82,23 @@ fn handle_hscroll(
 
 impl ViewFileActionsHandler for AppActionsHandler {
     fn close(&self) {
-        *self.view.current.write() = crate::view::ViewKind::Tree;
-        self.view.file_view.write().current_path = None;
+        let mut ui = self.ui.lock();
+        ui.current = crate::view::ViewKind::Tree;
+        ui.file_view.current_path = None;
     }
 }
 
 impl ViewFileScrollActionsHandler for AppActionsHandler {
     fn left(&self, val: u32) {
-        let mut view = self.view.file_view.write();
-        if let Some(ctx) = get_file_context(&view) {
+        let mut view = &mut self.ui.lock().file_view;
+        if let Some(ctx) = get_file_context(&mut view) {
             handle_hscroll(&mut view, &ctx.path, -(val as isize * 4), &self.cache);
         }
     }
 
     fn right(&self, val: u32) {
-        let mut view = self.view.file_view.write();
-        if let Some(ctx) = get_file_context(&view) {
+        let mut view = &mut self.ui.lock().file_view;
+        if let Some(ctx) = get_file_context(&mut view) {
             handle_hscroll(&mut view, &ctx.path, val as isize * 4, &self.cache);
         }
     }
@@ -108,8 +106,8 @@ impl ViewFileScrollActionsHandler for AppActionsHandler {
 
 impl ViewFileCursorActionsHandler for AppActionsHandler {
     fn up(&self, val: u32) {
-        let mut view = self.view.file_view.write();
-        if let Some(ctx) = get_file_context(&view) {
+        let mut view = &mut self.ui.lock().file_view;
+        if let Some(ctx) = get_file_context(&mut view) {
             let target_row = (ctx.current_row_idx as isize - val as isize)
                 .clamp(0, ctx.max_idx as isize) as usize;
             update_scroll_state(&mut view, &ctx.path, target_row, None);
@@ -117,8 +115,8 @@ impl ViewFileCursorActionsHandler for AppActionsHandler {
     }
 
     fn down(&self, val: u32) {
-        let mut view = self.view.file_view.write();
-        if let Some(ctx) = get_file_context(&view) {
+        let mut view = &mut self.ui.lock().file_view;
+        if let Some(ctx) = get_file_context(&mut view) {
             let target_row = (ctx.current_row_idx as isize + val as isize)
                 .clamp(0, ctx.max_idx as isize) as usize;
             update_scroll_state(&mut view, &ctx.path, target_row, None);
@@ -134,8 +132,8 @@ impl ViewFileCursorActionsHandler for AppActionsHandler {
     }
 
     fn page_up(&self) {
-        let mut view = self.view.file_view.write();
-        if let Some(ctx) = get_file_context(&view) {
+        let mut view = &mut self.ui.lock().file_view;
+        if let Some(ctx) = get_file_context(&mut view) {
             let page_size = view.last_height.saturating_sub(2);
             let target_row = (ctx.current_row_idx as isize - page_size as isize)
                 .clamp(0, ctx.max_idx as isize) as usize;
@@ -144,8 +142,8 @@ impl ViewFileCursorActionsHandler for AppActionsHandler {
     }
 
     fn page_down(&self) {
-        let mut view = self.view.file_view.write();
-        if let Some(ctx) = get_file_context(&view) {
+        let mut view = &mut self.ui.lock().file_view;
+        if let Some(ctx) = get_file_context(&mut view) {
             let page_size = view.last_height.saturating_sub(2);
             let target_row = (ctx.current_row_idx as isize + page_size as isize)
                 .clamp(0, ctx.max_idx as isize) as usize;
@@ -154,15 +152,15 @@ impl ViewFileCursorActionsHandler for AppActionsHandler {
     }
 
     fn top(&self) {
-        let mut view = self.view.file_view.write();
-        if let Some(ctx) = get_file_context(&view) {
+        let mut view = &mut self.ui.lock().file_view;
+        if let Some(ctx) = get_file_context(&mut view) {
             update_scroll_state(&mut view, &ctx.path, 0, None);
         }
     }
 
     fn bottom(&self) {
-        let mut view = self.view.file_view.write();
-        if let Some(ctx) = get_file_context(&view) {
+        let mut view = &mut self.ui.lock().file_view;
+        if let Some(ctx) = get_file_context(&mut view) {
             update_scroll_state(&mut view, &ctx.path, ctx.max_idx, None);
         }
     }
@@ -170,10 +168,10 @@ impl ViewFileCursorActionsHandler for AppActionsHandler {
 
 impl ViewFileNavActionsHandler for AppActionsHandler {
     fn next_hunk(&self) {
-        let mut view = self.view.file_view.write();
-        if let Some(ctx) = get_file_context(&view) {
+        let mut view = &mut self.ui.lock().file_view;
+        if let Some(ctx) = get_file_context(&mut view) {
             let last_height = view.last_height;
-            if let Some(starts) = view.hunk_starts.get(&ctx.path) {
+            if let Some(starts) = view.hunk_starts(&ctx.path) {
                 let target = starts
                     .iter()
                     .find(|&&idx| idx > ctx.current_row_idx)
@@ -189,10 +187,10 @@ impl ViewFileNavActionsHandler for AppActionsHandler {
     }
 
     fn prev_hunk(&self) {
-        let mut view = self.view.file_view.write();
-        if let Some(ctx) = get_file_context(&view) {
+        let mut view = &mut self.ui.lock().file_view;
+        if let Some(ctx) = get_file_context(&mut view) {
             let last_height = view.last_height;
-            if let Some(starts) = view.hunk_starts.get(&ctx.path) {
+            if let Some(starts) = view.hunk_starts(&ctx.path) {
                 let target = starts
                     .iter()
                     .rev()
@@ -211,17 +209,18 @@ impl ViewFileNavActionsHandler for AppActionsHandler {
 
 impl ViewFileFoldActionsHandler for AppActionsHandler {
     fn toggle(&self) {
-        let mut view = self.view.file_view.write();
-        if let Some(ctx) = get_file_context(&view) {
+        let mut view = &mut self.ui.lock().file_view;
+        if let Some(ctx) = get_file_context(&mut view) {
             let mut target_logical = 0;
-            if let Some(mapping) = view.line_mapping.get(&ctx.path) {
+            if let Some(mapping) = view.line_mapping(&ctx.path) {
                 target_logical = mapping.get(ctx.current_row_idx).copied().unwrap_or(0);
             }
 
             view.is_folded = !view.is_folded;
+            view.mark_dirty();
 
             let next_selected = if let Some(crate::diff::DiffResult::Text(diff)) =
-                self.cache.diffs.get(&ctx.path).value()
+                self.cache.diffs.get(&ctx.path).as_deref()
             {
                 let new_lines_len = diff.new_file_content.lines().count();
                 let new_map = view.get_line_map(diff, new_lines_len);

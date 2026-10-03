@@ -3,7 +3,7 @@ macro_rules! impl_opt_color_getset {
         paste::paste! {
             impl [< Theme $field:camel ActionsHandler >] for AppThemeActionsHandler {
                 fn get(&self) -> String {
-                    if let Some(color) = self.state.theme.read().ui.$field {
+                    if let Some(color) = self.theme.read().ui.$field {
                         color.to_string_val()
                     } else {
                         String::new()
@@ -12,14 +12,14 @@ macro_rules! impl_opt_color_getset {
 
                 fn set(&self, val: String) {
                     if val.is_empty() || val == "none" {
-                        self.state.theme.write().ui.$field = None;
+                        self.theme.write().ui.$field = None;
                     } else {
                         let parsed = {
-                            let theme = self.state.theme.read();
+                            let theme = self.theme.read();
                             utils::parse_color_val(&val, &theme.ui, &theme.tm_theme, &self.color_mode)
                         };
                         if let Some(c) = parsed {
-                            self.state.theme.write().ui.$field = Some(c);
+                            self.theme.write().ui.$field = Some(c);
                         }
                     }
                 }
@@ -33,17 +33,17 @@ macro_rules! impl_color_getset {
         paste::paste! {
             impl [< Theme $field:camel ActionsHandler >] for AppThemeActionsHandler {
                 fn get(&self) -> String {
-                    let color = self.state.theme.read().ui.$field;
+                    let color = self.theme.read().ui.$field;
                     color.to_string_val()
                 }
 
                 fn set(&self, val: String) {
                     let parsed = {
-                        let theme = self.state.theme.read();
+                        let theme = self.theme.read();
                         utils::parse_color_val(&val, &theme.ui, &theme.tm_theme, &self.color_mode)
                     };
                     if let Some(c) = parsed {
-                        self.state.theme.write().ui.$field = c;
+                        self.theme.write().ui.$field = c;
                     }
                 }
             }
@@ -56,17 +56,17 @@ macro_rules! impl_ty_getset {
         paste::paste! {
             impl [< Theme $field:camel ActionsHandler >] for AppThemeActionsHandler {
                 fn get(&self) -> $ty {
-                    self.state.theme.read().ui.$field.clone()
+                    self.theme.read().ui.$field.clone()
                 }
 
                 fn set(&self, val: $ty) {
-                    self.state.theme.write().ui.$field = val;
+                    self.theme.write().ui.$field = val;
                 }
             }
         }
     };
 }
 
-pub(crate) use impl_opt_color_getset;
 pub(crate) use impl_color_getset;
+pub(crate) use impl_opt_color_getset;
 pub(crate) use impl_ty_getset;

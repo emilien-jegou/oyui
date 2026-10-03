@@ -1,4 +1,3 @@
-use rune::Any;
 use serde::{Deserialize, Serialize};
 use typed_builder::TypedBuilder;
 
@@ -89,15 +88,14 @@ impl TryFrom<Color> for ColorRgb {
     }
 }
 
-#[derive(Default, Debug, Clone, Copy, Serialize, Deserialize, Any)]
+/// Highlight applied to a whole line; crosses the script boundary through the
+/// host's `ScriptRepr` bridge rather than deriving any engine trait here.
+#[derive(Default, Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum LineHighlightMode {
-    #[rune(constructor)]
     #[default]
     None,
-    #[rune(constructor)]
     Solid,
-    #[rune(constructor)]
-    Gradient(#[rune(get)] f64),
+    Gradient(f64),
 }
 
 impl PartialEq for LineHighlightMode {

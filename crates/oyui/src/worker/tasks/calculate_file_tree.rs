@@ -1,3 +1,4 @@
+//! Directory diff walk task and its tree-installation listener.
 use crate::tree::FileTree;
 use oyui_tasker::{Listener, TaskerContext};
 use parking_lot::RwLock;
@@ -12,25 +13,14 @@ pub struct CalculateFileTreeReq {
     pub right: PathBuf,
 }
 
-impl std::fmt::Debug for CalculateFileTreeReq {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CalculateFileTreeReq").finish()
-    }
-}
-
 #[derive(Clone)]
 pub struct CalculateFileTreeRes {
     pub tree: FileTree,
     pub files_to_stat: Vec<(PathBuf, PathBuf, PathBuf)>,
 }
 
-impl std::fmt::Debug for CalculateFileTreeRes {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CalculateFileTreeRes").finish()
-    }
-}
-
-impl Listener<CalculateFileTreeReq, crate::worker::EventSender> for CalculateFileTree {
+impl Listener<CalculateFileTreeReq> for CalculateFileTree {
+    type Sender = crate::worker::EventSender;
     type Context = ();
 
     #[tracing::instrument(skip_all, fields(left = %event.left.display(), right = %event.right.display()))]
@@ -40,7 +30,12 @@ impl Listener<CalculateFileTreeReq, crate::worker::EventSender> for CalculateFil
         tx: crate::worker::EventSender,
     ) -> eyre::Result<()> {
         tracing::debug!("Calculating file tree...");
-        let (tree, files_to_stat) = FileTree::build_from_dir_diff(&event.left, &event.right);
+        let left = event.left;
+        let right = event.right;
+        let (tree, files_to_stat) =
+            tokio::task::spawn_blocking(move || FileTree::build_from_dir_diff(&left, &right))
+                .await
+                .map_err(|e| eyre::eyre!("file tree task panicked: {e}"))?;
         tx.send(CalculateFileTreeRes {
             tree,
             files_to_stat,
@@ -56,7 +51,8 @@ pub struct CalcTreeResCtx {
 }
 
 pub struct CalculateFileTreeResListener;
-impl Listener<CalculateFileTreeRes, crate::worker::EventSender> for CalculateFileTreeResListener {
+impl Listener<CalculateFileTreeRes> for CalculateFileTreeResListener {
+    type Sender = crate::worker::EventSender;
     type Context = CalcTreeResCtx;
 
     async fn handle(
@@ -68,7 +64,7 @@ impl Listener<CalculateFileTreeRes, crate::worker::EventSender> for CalculateFil
             tracing::error!("No modifications found. Nothing to split.");
             *ctx.config_error.write() = Some("No modifications found. Nothing to split.".into());
         } else {
-            *ctx.tree.write() = event.tree;
+            ctx.tree.write().replace(event.tree);
             let _ = tx.send(crate::worker::tasks::stats::StatsReq {
                 files: event.files_to_stat,
             });

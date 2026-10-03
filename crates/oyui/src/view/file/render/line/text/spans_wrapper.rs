@@ -89,8 +89,7 @@ impl<'a> SpansWrapper<'a> {
             }
         }
 
-        let indicator_style =
-            Style::default().fg(theme.char_scroll_fg.into());
+        let indicator_style = Style::default().fg(theme.char_scroll_fg.into());
 
         if has_left && !capped_spans.is_empty() {
             let first_span = capped_spans.remove(0);

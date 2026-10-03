@@ -2,6 +2,11 @@ use std::fmt;
 use std::ops::Range;
 use std::sync::Arc;
 
+pub mod line_selections;
+pub mod staging;
+
+pub use line_selections::LineSelections;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DiffStats {
     Text { insertions: usize, deletions: usize },
@@ -71,7 +76,7 @@ pub struct FileDiff {
     pub hunks: Vec<Hunk>,
 
     /// Tracks which hunks/lines are staged/selected by the user
-    pub line_selections: Vec<bool>,
+    pub line_selections: LineSelections,
 }
 
 impl fmt::Debug for FileDiff {

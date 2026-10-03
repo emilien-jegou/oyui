@@ -1,5 +1,6 @@
+//! Tree view rendering backed by a cached flattened row view model.
 use crate::commons::file_icon::FileIconProvider;
-use crate::commons::lazy;
+
 use crate::config::UiTheme;
 use crate::diff_cache::DiffCache;
 use crate::terminal_colors::TerminalColorMode;
@@ -33,6 +34,63 @@ pub struct TreeRow {
     pub right_path: Option<PathBuf>,
 }
 
+/// Pre-computed flat rows for tree rendering.
+#[derive(Default)]
+pub struct TreeViewModel {
+    rows: Vec<TreeRow>,
+    total_ins: usize,
+    total_del: usize,
+}
+
+impl TreeViewModel {
+    /// Recomputes the flat rows for the tree.
+    pub fn recompute(&mut self, tree: &FileTree, cache: &DiffCache, ui_state: &TreeUiState) {
+        let mut rows = Vec::new();
+        let count = tree.nodes.len();
+        for (i, node) in tree.nodes.iter().enumerate() {
+            let is_last = i == count - 1;
+            flatten_recursive(node, 0, is_last, &Vec::new(), ui_state, cache, &mut rows);
+        }
+
+        let mut total_ins = 0;
+        let mut total_del = 0;
+        for row in &rows {
+            if let Some(DiffStats::Text {
+                insertions,
+                deletions,
+            }) = &row.stats
+            {
+                total_ins += *insertions;
+                total_del += *deletions;
+            }
+        }
+
+        self.rows = rows;
+        self.total_ins = total_ins;
+        self.total_del = total_del;
+    }
+
+    /// Returns the flat rows.
+    pub fn rows(&self) -> &[TreeRow] {
+        &self.rows
+    }
+
+    /// Returns the row at the given index.
+    pub fn row(&self, idx: usize) -> Option<&TreeRow> {
+        self.rows.get(idx)
+    }
+
+    /// Returns the total insertions across all files.
+    pub fn total_insertions(&self) -> usize {
+        self.total_ins
+    }
+
+    /// Returns the total deletions across all files.
+    pub fn total_deletions(&self) -> usize {
+        self.total_del
+    }
+}
+
 #[derive(Default)]
 pub struct TreeViewData {
     pub selected_index: usize,
@@ -40,31 +98,52 @@ pub struct TreeViewData {
     pub scrolloff: usize,
     pub list_state: ListState,
     pub last_height: usize,
+    view_model: TreeViewModel,
+    view_model_dirty: bool,
+    cached_tree_version: u64,
+    cached_stats_version: u64,
 }
 
 impl TreeViewData {
-    pub fn flat_rows(&self, tree: &FileTree, cache: &DiffCache) -> Vec<TreeRow> {
-        let mut rows = Vec::new();
-        let count = tree.nodes.len();
-        for (i, node) in tree.nodes.iter().enumerate() {
-            let is_last = i == count - 1;
-            flatten_recursive(
-                node,
-                0,
-                is_last,
-                &Vec::new(),
-                &self.ui_state,
-                cache,
-                &mut rows,
-            );
-        }
-        rows
+    /// Marks the view model as needing recomputation.
+    pub fn mark_dirty(&mut self) {
+        self.view_model_dirty = true;
     }
 
-    pub fn selected_row(&self, tree: &FileTree, cache: &DiffCache) -> Option<TreeRow> {
-        self.flat_rows(tree, cache)
-            .into_iter()
-            .nth(self.selected_index)
+    /// Recomputes rows when the fold state, tree, or async stats changed.
+    fn ensure_fresh(&mut self, tree: &FileTree, cache: &DiffCache) {
+        let stats_version = cache.stats.version();
+        if self.view_model_dirty
+            || self.cached_tree_version != tree.version()
+            || self.cached_stats_version != stats_version
+        {
+            self.view_model.recompute(tree, cache, &self.ui_state);
+            self.cached_tree_version = tree.version();
+            self.cached_stats_version = stats_version;
+            self.view_model_dirty = false;
+        }
+    }
+
+    /// Returns the flat rows, recomputing if needed.
+    pub fn flat_rows(&mut self, tree: &FileTree, cache: &DiffCache) -> &[TreeRow] {
+        self.ensure_fresh(tree, cache);
+        self.view_model.rows()
+    }
+
+    /// Returns the selected row, recomputing if needed.
+    pub fn selected_row(&mut self, tree: &FileTree, cache: &DiffCache) -> Option<TreeRow> {
+        self.ensure_fresh(tree, cache);
+        self.view_model.row(self.selected_index).cloned()
+    }
+
+    /// Returns the total insertions across all files.
+    pub fn total_insertions(&self) -> usize {
+        self.view_model.total_insertions()
+    }
+
+    /// Returns the total deletions across all files.
+    pub fn total_deletions(&self) -> usize {
+        self.view_model.total_deletions()
     }
 
     #[tracing::instrument(skip_all)]
@@ -80,9 +159,11 @@ impl TreeViewData {
         theme: &UiTheme,
         color_mode: &TerminalColorMode,
     ) {
+        // Refresh before the header reads totals so tree changes show in-frame.
+        self.ensure_fresh(tree, cache);
         let [header, body] =
             Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(area);
-        self.draw_header(frame, header, cache, base_path, diff_summary, theme);
+        self.draw_header(frame, header, base_path, diff_summary, theme);
         self.draw_tree_body(icon_provider, frame, body, tree, cache, theme, color_mode);
     }
 
@@ -90,31 +171,11 @@ impl TreeViewData {
         &self,
         frame: &mut Frame,
         area: Rect,
-        cache: &DiffCache,
         base_path: Option<&PathBuf>,
         diff_summary: (usize, usize, usize),
         theme: &UiTheme,
     ) {
         let (a, d, m) = diff_summary;
-
-        let mut tot_ins = 0;
-        let mut tot_del = 0;
-
-        let _ = cache.stats.inner().iter_sync(|_, v| {
-            if let lazy::Lazy::Ready(
-                _,
-                DiffStats::Text {
-                    insertions,
-                    deletions,
-                },
-            ) = v
-            {
-                tot_ins += insertions;
-                tot_del += deletions;
-            }
-
-            true
-        });
 
         let path = base_path
             .map(|p| p.to_string_lossy())
@@ -138,11 +199,11 @@ impl TreeViewData {
 
         let right_spans = vec![
             Span::styled(
-                format!("+{} ", tot_ins),
+                format!("+{} ", self.view_model.total_insertions()),
                 Style::default().fg(theme.add_fg.into()),
             ),
             Span::styled(
-                format!("-{} ", tot_del),
+                format!("-{} ", self.view_model.total_deletions()),
                 Style::default().fg(theme.del_fg.into()),
             ),
         ];
@@ -171,18 +232,13 @@ impl TreeViewData {
         theme: &UiTheme,
         color_mode: &TerminalColorMode,
     ) {
-        let rows = self.flat_rows(tree, cache);
-        let items: Vec<ListItem> = rows
-            .iter()
-            .map(|r| render_tree_row(icon_provider, r, theme, color_mode))
-            .collect();
-        self.list_state.select(Some(self.selected_index));
-
         let height = area.height as usize;
+        let selected = self.selected_index;
         self.last_height = height;
+
+        // Absolute scrolloff anchor, persisted in `list_state.offset`.
+        let mut offset = self.list_state.offset();
         if height > 0 {
-            let selected = self.selected_index;
-            let mut offset = self.list_state.offset();
             // Prevent scrolloff from overlapping itself if the screen is tiny
             let scrolloff = self.scrolloff.min(height.saturating_sub(1) / 2);
 
@@ -191,14 +247,38 @@ impl TreeViewData {
             } else if selected + scrolloff >= offset + height {
                 offset = (selected + scrolloff + 1).saturating_sub(height);
             }
+        }
+
+        // Build items only for the visible window; owned spans keep them
+        // 'static so the view-model borrow ends before `list_state` is reused.
+        let (items, start, end) = {
+            let rows = self.flat_rows(tree, cache);
+            let start = offset.min(rows.len().saturating_sub(1));
+            let end = (start + height).min(rows.len());
+            let items = rows[start..end]
+                .iter()
+                .map(|r| render_tree_row(icon_provider, r, theme, color_mode))
+                .collect::<Vec<ListItem>>();
+            (items, start, end)
+        };
+
+        self.list_state.select(Some(selected));
+        if height > 0 {
             *self.list_state.offset_mut() = offset;
+        }
+
+        // Window-relative state: the stored anchor stays absolute while
+        // ratatui only ever sees rows inside the slice.
+        let mut rel_state = ListState::default();
+        if end > start {
+            rel_state.select(Some(selected.clamp(start, end - 1) - start));
         }
 
         let list = List::new(items)
             .block(Block::default().style(Style::default().bg(theme.bg.into())))
             .highlight_style(Style::default().bg(theme.cursor_bg.into()));
 
-        frame.render_stateful_widget(list, area, &mut self.list_state);
+        frame.render_stateful_widget(list, area, &mut rel_state);
     }
 }
 
@@ -235,7 +315,7 @@ fn flatten_recursive(
 ) {
     match node {
         TreeNode::File(file) => {
-            let stats = cache.stats.get(&file.path).value().cloned();
+            let stats = cache.stats.get(&file.path).as_deref().cloned();
 
             rows.push(TreeRow {
                 path: file.path.clone(),
@@ -304,12 +384,12 @@ fn flatten_recursive(
     }
 }
 
-fn render_tree_row<'a>(
+fn render_tree_row(
     icon_provider: &dyn FileIconProvider,
-    row: &'a TreeRow,
-    theme: &'a UiTheme,
+    row: &TreeRow,
+    theme: &UiTheme,
     color_mode: &TerminalColorMode,
-) -> ListItem<'a> {
+) -> ListItem<'static> {
     let mut spans = Vec::new();
 
     // 1. Determine the base color for the entire row based on status
@@ -372,7 +452,7 @@ fn render_tree_row<'a>(
         spans.push(Span::styled(arrow, Style::default().fg(theme.fg.into())));
         spans.push(Span::styled(" ", Style::default().fg(theme.dir.into())));
         spans.push(Span::styled(
-            row.name.as_str(),
+            row.name.clone(),
             Style::default().fg(theme.dir.into()).bold(),
         ));
     } else if name_differ {
@@ -389,10 +469,7 @@ fn render_tree_row<'a>(
 
         spans.push(Span::styled(icon.to_string(), Style::default().fg(base_fg)));
         spans.push(Span::raw(" "));
-        spans.push(Span::styled(
-            row.name.as_str(),
-            Style::default().fg(base_fg),
-        ));
+        spans.push(Span::styled(row.name.clone(), Style::default().fg(base_fg)));
     }
 
     // 5. Dynamic Stats
@@ -435,4 +512,84 @@ fn render_tree_row<'a>(
     }
 
     ListItem::new(Line::from(spans))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tree::StagingState;
+    use std::sync::Arc;
+
+    fn tree_with_file() -> FileTree {
+        let mut tree = FileTree::default();
+        tree.insert_file(
+            PathBuf::from("a.txt"),
+            None,
+            Some(PathBuf::from("right/a.txt")),
+        );
+        tree
+    }
+
+    /// The worker populates the tree after the first frame drew an empty view;
+    /// the cached view model must pick the files up without a manual dirty mark.
+    #[test]
+    fn flat_rows_refresh_after_worker_populates_tree() {
+        let mut view = TreeViewData::default();
+        let cache = DiffCache::default();
+
+        assert!(view.flat_rows(&FileTree::default(), &cache).is_empty());
+
+        let populated = tree_with_file();
+        assert_eq!(
+            view.flat_rows(&populated, &cache).len(),
+            1,
+            "tree view must refresh after the worker populates the tree"
+        );
+    }
+
+    /// Stats are computed asynchronously after the first frame; the cached
+    /// rows must pick them up without a tree mutation.
+    #[test]
+    fn flat_rows_refresh_after_stats_arrive() {
+        let mut view = TreeViewData::default();
+        let cache = DiffCache::default();
+        let tree = tree_with_file();
+
+        assert!(view.flat_rows(&tree, &cache)[0].stats.is_none());
+
+        let stats = DiffStats::Text {
+            insertions: 12,
+            deletions: 16,
+        };
+        cache.stats.set(
+            PathBuf::from("a.txt"),
+            Arc::new(stats.clone()),
+            cache.stats.generation(),
+        );
+
+        assert_eq!(
+            view.flat_rows(&tree, &cache)[0].stats,
+            Some(stats),
+            "stats written after the first draw must invalidate the cached rows"
+        );
+    }
+
+    /// Staging toggles mutate the tree behind the view's back; cached rows
+    /// carry staging state and must be recomputed from the new tree state.
+    #[test]
+    fn flat_rows_refresh_after_staging_state_change() {
+        let mut view = TreeViewData::default();
+        let cache = DiffCache::default();
+        let mut tree = tree_with_file();
+        assert_eq!(view.flat_rows(&tree, &cache).len(), 1);
+
+        tree.set_state_for_path(&PathBuf::from("a.txt"), StagingState::Staged);
+
+        let rows = view.flat_rows(&tree, &cache);
+        assert_eq!(
+            rows[0].staging_state,
+            StagingState::Staged,
+            "staging toggle must invalidate the cached rows"
+        );
+    }
 }

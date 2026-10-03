@@ -1,9 +1,13 @@
+//! Generated event registry wiring each declared event to its listeners.
+
+#[cfg(test)]
+mod tests;
+
 pub mod context;
 
 pub mod events {
     pub mod diff_update;
     pub mod file_opened;
-    pub mod file_syntax_update;
     pub mod theme_update;
 }
 
@@ -28,7 +32,6 @@ tasker_registry! {
         WatchConfig          => tasks::watch_config::WatchConfigReq,
         WatchConfigRes       => tasks::watch_config::WatchConfigRes,
         DiffUpdate           => events::diff_update::DiffUpdate,
-        FileSyntaxUpdate     => events::file_syntax_update::FileSyntaxUpdate,
         FileOpened           => events::file_opened::FileOpened,
         ThemeUpdate          => events::theme_update::ThemeUpdate,
     ],
@@ -39,7 +42,6 @@ tasker_registry! {
         StatsRes             => [tasks::stats::StatsResListener],
         FullDiff             => [tasks::full_diff::FullDiff],
         Syntax               => [tasks::syntax::Syntax],
-        SyntaxRes            => [tasks::syntax::SyntaxResListener],
         WatchConfig          => [tasks::watch_config::WatchConfig],
         FileOpened           => [tasks::syntax::Syntax],
         DiffUpdate           => [tasks::syntax::Syntax],

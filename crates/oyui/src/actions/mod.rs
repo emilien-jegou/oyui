@@ -3,7 +3,6 @@ use crate::config::theme::Color;
 pub mod define;
 pub mod handlers;
 pub mod keybinds;
-pub mod state;
 
 pub use define::*;
 pub use keybinds::*;

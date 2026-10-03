@@ -1,57 +1,48 @@
 use crate::actions::handlers::AppActionsHandler;
 use crate::actions::{GlobalActionsHandler, GlobalConfirmMergeWindowEnabledActionsHandler};
 use crate::app::CommandMode;
-use std::sync::atomic::Ordering;
 
 impl GlobalActionsHandler for AppActionsHandler {
     fn quit(&self) {
-        self.state.should_quit.store(true, Ordering::Relaxed);
+        self.ui.lock().should_quit = true;
     }
 
     fn confirm(&self) {
-        let enabled = self
-            .state
-            .confirm_merge_window_enabled
-            .load(Ordering::Relaxed);
+        let enabled = self.ui.lock().confirm_merge_window_enabled;
         if enabled {
-            *self.state.command_mode.write() = CommandMode::ConfirmMerge;
-        } else {
-            self.execute_merge();
+            // Refresh staging counts now so rendering stays read-only.
+            crate::app::merge_stats::sync_line_selections(&self.tree, &self.cache);
+            self.ui.lock().command_mode = CommandMode::ConfirmMerge;
+            return;
         }
+        self.execute_merge();
     }
 
     fn execute_merge(&self) {
         let mut tree = self.tree.write();
-        let mut should_quit = false;
-        let res = crate::app::merge::confirm_and_write(
-            &mut tree,
-            &mut should_quit,
-            &self.right_path,
-            &self.cache,
-        );
-        if should_quit {
-            self.state.should_quit.store(true, Ordering::Relaxed);
-        }
-        if let Err(e) = res {
-            tracing::error!("Merge failed: {}", e);
+        let res = crate::app::merge::confirm_and_write(&mut tree, &self.right_path, &self.cache);
+        match res {
+            Ok(crate::app::events::ExitAction::QuitAndMerge) => {
+                self.ui.lock().should_quit = true;
+            }
+            Ok(_) => {}
+            Err(e) => {
+                tracing::error!("Merge failed: {}", e);
+            }
         }
     }
 
     fn open_command_mode(&self) {
-        *self.state.command_mode.write() = CommandMode::Active(String::new());
+        self.ui.lock().command_mode = CommandMode::Active(String::new());
     }
 }
 
 impl GlobalConfirmMergeWindowEnabledActionsHandler for AppActionsHandler {
     fn get(&self) -> bool {
-        self.state
-            .confirm_merge_window_enabled
-            .load(Ordering::Relaxed)
+        self.ui.lock().confirm_merge_window_enabled
     }
 
     fn set(&self, val: bool) {
-        self.state
-            .confirm_merge_window_enabled
-            .store(val, Ordering::Relaxed);
+        self.ui.lock().confirm_merge_window_enabled = val;
     }
 }

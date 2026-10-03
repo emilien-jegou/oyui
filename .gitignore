@@ -8,6 +8,7 @@
 !Cargo.lock
 !Cargo.toml
 !README.md
+!passover.md
 !devenv.nix
 !make.nix
 

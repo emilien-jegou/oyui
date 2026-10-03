@@ -1,3 +1,4 @@
+//! Full file diff task: async reads plus spawn_blocking hunk computation.
 use imara_diff::{Algorithm, Diff, InternedInput};
 use oyui_tasker::{Listener, TaskerContext};
 use std::ops::Range;
@@ -14,11 +15,13 @@ const MAX_FILE_SIZE: u64 = 1024 * 1024; // 1 MB limit
 
 pub struct FullDiff;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct FullDiffReq {
     pub node_path: PathBuf,
     pub left_path: Option<PathBuf>,
     pub right_path: Option<PathBuf>,
+    /// Cache generation this task's claim was made under.
+    pub generation: u64,
 }
 
 #[derive(TaskerContext)]
@@ -27,7 +30,8 @@ pub struct FullDiffContext {
     pub algorithm: DiffAlgorithm,
 }
 
-impl Listener<FullDiffReq, crate::worker::EventSender> for FullDiff {
+impl Listener<FullDiffReq> for FullDiff {
+    type Sender = crate::worker::EventSender;
     type Context = FullDiffContext;
 
     #[tracing::instrument(skip_all, fields(node_path = %event.node_path.display()))]
@@ -65,9 +69,11 @@ impl Listener<FullDiffReq, crate::worker::EventSender> for FullDiff {
             (Err(e), _) | (_, Err(e)) => e,
             (Ok(left_text), Ok(right_text)) => {
                 if left_text.is_empty() && right_text.is_empty() {
-                    ctx.cache
-                        .diffs
-                        .set(event.node_path.clone(), DiffResult::Empty);
+                    ctx.cache.diffs.set(
+                        event.node_path.clone(),
+                        Arc::new(DiffResult::Empty),
+                        event.generation,
+                    );
                     let _ = tx.send(DiffUpdate {
                         path: event.node_path,
                         diff_result: DiffResult::Empty,
@@ -75,20 +81,33 @@ impl Listener<FullDiffReq, crate::worker::EventSender> for FullDiff {
                     return Ok(());
                 }
 
-                match compute(&ctx.algorithm, &left_text, &right_text, &event.node_path) {
-                    Ok(hunks) => DiffResult::Text(FileDiff {
-                        old_file_content: Arc::from(left_text),
-                        new_file_content: Arc::from(right_text),
-                        hunks,
-                        line_selections: Default::default(),
-                    }),
-                    Err(e) => DiffResult::Error(e.to_string()),
-                }
+                let algorithm = ctx.algorithm;
+                let node_path = event.node_path.clone();
+                tokio::task::spawn_blocking(move || {
+                    match compute(&algorithm, &left_text, &right_text, &node_path) {
+                        Ok(hunks) => DiffResult::Text(FileDiff {
+                            old_file_content: Arc::from(left_text),
+                            new_file_content: Arc::from(right_text),
+                            hunks,
+                            line_selections: Default::default(),
+                        }),
+                        Err(e) => DiffResult::Error(e.to_string()),
+                    }
+                })
+                .await
+                .unwrap_or_else(|join_err| {
+                    tracing::error!(?join_err, "diff computation task panicked");
+                    DiffResult::Error(format!("diff task panicked: {join_err}"))
+                })
             }
         };
 
         tracing::trace!("Full diff computation finished");
-        ctx.cache.diffs.set(event.node_path.clone(), diff_result.clone());
+        ctx.cache.diffs.set(
+            event.node_path.clone(),
+            Arc::new(diff_result.clone()),
+            event.generation,
+        );
         let _ = tx.send(DiffUpdate {
             path: event.node_path,
             diff_result,

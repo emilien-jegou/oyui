@@ -42,7 +42,9 @@ use oyui_tasker::{Listener, EventSender};
 
 pub struct EchoListener;
 
-impl Listener<Echo, EventSender> for EchoListener {
+impl Listener<Echo> for EchoListener {
+    // The sender type: the registry's generated `EventSender`.
+    type Sender = EventSender;
     // The specific context type this listener requires.
     type Context = ();
 

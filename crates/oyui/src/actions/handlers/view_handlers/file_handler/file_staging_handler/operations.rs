@@ -1,7 +1,8 @@
-use super::hunk_mutations::{join_hunk_at, split_hunk_at};
+//! Staging action handlers that operate on the current file's diff.
+
 use super::staging_session::StagingSession;
-use super::staging_sync::*;
-use super::utils::*;
+use super::staging_sync::{invert_text_diff_staging, toggle_stage_hunk_in_diff};
+use crate::diff::staging::is_file_staged_default;
 use crate::diff::{FileDiff, HunkMarker};
 use crate::tree::FileTree;
 use parking_lot::RwLock;
@@ -14,8 +15,8 @@ pub fn toggle_hunk(session: &StagingSession, hunk_idx: usize) {
 }
 
 pub fn toggle_stage_at_cursor(session: &StagingSession) {
-    let view_read = session.view.read();
-    let mappings = view_read.row_to_hunk.get(&session.path);
+    let ui = session.ui.lock();
+    let mappings = ui.file_view.row_to_hunk(&session.path);
     let mut hidx =
         mappings.and_then(|mapping| mapping.get(session.current_row_idx).copied().flatten());
 
@@ -38,12 +39,12 @@ pub fn toggle_stage_at_cursor(session: &StagingSession) {
             }
         }
     }
-    drop(view_read);
+    drop(ui);
 
     if let Some(hunk_idx) = hidx {
         let is_line_toggle = {
             if let Some(crate::diff::DiffResult::Text(diff)) =
-                session.cache.diffs.get(&session.path).value()
+                session.cache.diffs.get(&session.path).as_deref()
             {
                 diff.hunks
                     .get(hunk_idx)
@@ -102,14 +103,14 @@ pub fn split_hunk_at_cursor(session: &StagingSession) {
             return;
         }
         if split_idx > 0 {
-            split_hunk_at(diff, hidx, split_idx, HunkMarker::HunkSplit);
+            diff.split_hunk(hidx, split_idx, HunkMarker::HunkSplit);
         }
     });
 }
 
 pub fn invert_staging(session: &StagingSession) {
     let has_text_diff = matches!(
-        session.cache.diffs.get(&session.path).value(),
+        session.cache.diffs.get(&session.path).as_deref(),
         Some(crate::diff::DiffResult::Text(_))
     );
 
@@ -118,7 +119,7 @@ pub fn invert_staging(session: &StagingSession) {
             invert_text_diff_staging(diff, tree, &session.path);
         });
     } else {
-        toggle_binary_file_staging_state(&session.tree, &session.path);
+        crate::diff::staging::toggle_binary_file_staging_state(&session.tree, &session.path);
     }
 }
 
@@ -126,8 +127,8 @@ fn check_hunk_contiguity(diff: &FileDiff, hunk_idx: usize) -> (bool, bool) {
     if diff.hunks.get(hunk_idx).is_none() {
         return (false, false);
     }
-    let cp = hunk_idx > 0 && are_hunks_contiguous(diff, hunk_idx - 1, hunk_idx);
-    let cn = hunk_idx + 1 < diff.hunks.len() && are_hunks_contiguous(diff, hunk_idx, hunk_idx + 1);
+    let cp = hunk_idx > 0 && diff.hunks_contiguous(hunk_idx - 1, hunk_idx);
+    let cn = hunk_idx + 1 < diff.hunks.len() && diff.hunks_contiguous(hunk_idx, hunk_idx + 1);
     (cp, cn)
 }
 
@@ -140,12 +141,12 @@ fn handle_untoggle_single_line(
     contiguous_next: bool,
 ) {
     let default_staged = is_file_staged_default(tree, path);
-    ensure_selection_size(diff, default_staged);
+    diff.ensure_selection_size(default_staged);
 
-    let parent_is_staged = find_parent_staging_status(diff, hidx, default_staged);
-    let start_idx = get_hunk_start_line_idx(diff, hidx);
-    set_hunk_line_staging(diff, hidx, start_idx, parent_is_staged);
-    update_tree_staging_state(tree, path, diff, default_staged);
+    let parent_is_staged = diff.parent_staging_status(hidx, default_staged);
+    let start_idx = diff.hunk_start_idx(hidx);
+    diff.set_hunk_staging(hidx, start_idx, parent_is_staged);
+    crate::diff::staging::update_tree_staging_state(tree, path, diff, default_staged);
 
     let can_join_next = contiguous_next
         && hidx + 1 < diff.hunks.len()
@@ -154,11 +155,11 @@ fn handle_untoggle_single_line(
         contiguous_prev && hidx > 0 && diff.hunks[hidx - 1].marker != HunkMarker::LineToggle;
 
     if can_join_next {
-        join_hunk_at(diff, tree, path, hidx + 1, false);
+        diff.join_hunk(hidx + 1, false, default_staged);
     }
 
     if can_join_prev {
-        join_hunk_at(diff, tree, path, hidx, false);
+        diff.join_hunk(hidx, false, default_staged);
     } else {
         diff.hunks[hidx].marker = HunkMarker::None;
     }
@@ -169,7 +170,7 @@ fn isolate_line_as_toggle_hunk(diff: &mut FileDiff, hidx: usize, line_within_hun
     let mut target_hunk_idx = hidx;
 
     if line_within_hunk > 0 {
-        split_hunk_at(diff, target_hunk_idx, line_within_hunk, HunkMarker::None);
+        diff.split_hunk(target_hunk_idx, line_within_hunk, HunkMarker::None);
         target_hunk_idx += 1;
     }
 
@@ -186,7 +187,7 @@ fn isolate_line_as_toggle_hunk(diff: &mut FileDiff, hidx: usize, line_within_hun
             } else {
                 HunkMarker::None
             };
-        split_hunk_at(diff, target_hunk_idx, 1, second_split_marker);
+        diff.split_hunk(target_hunk_idx, 1, second_split_marker);
     }
 
     diff.hunks[target_hunk_idx].marker = HunkMarker::LineToggle;
@@ -199,7 +200,7 @@ fn handle_boundary_split(
     path: &PathBuf,
     hidx: usize,
 ) {
-    if !are_hunks_contiguous(diff, hidx - 1, hidx) {
+    if !diff.hunks_contiguous(hidx - 1, hidx) {
         return;
     }
 
@@ -220,15 +221,15 @@ fn resolve_split_marker_join(
     hidx: usize,
 ) {
     if diff.hunks[hidx - 1].marker != HunkMarker::LineToggle {
-        join_hunk_at(diff, tree, path, hidx, true);
+        diff.join_hunk(hidx, true, is_file_staged_default(tree, path));
         return;
     }
 
     let default_staged = is_file_staged_default(tree, path);
-    ensure_selection_size(diff, default_staged);
+    diff.ensure_selection_size(default_staged);
 
-    let prev_is_staged = find_parent_staging_status(diff, hidx, default_staged);
+    let prev_is_staged = diff.parent_staging_status(hidx, default_staged);
     diff.hunks[hidx].marker = HunkMarker::None;
-    sync_contiguous_lines_to_parent_status(diff, hidx, prev_is_staged);
-    update_tree_staging_state(tree, path, diff, default_staged);
+    diff.sync_contiguous_to_parent(hidx, prev_is_staged);
+    crate::diff::staging::update_tree_staging_state(tree, path, diff, default_staged);
 }
