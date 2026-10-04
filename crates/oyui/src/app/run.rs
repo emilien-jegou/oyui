@@ -100,6 +100,9 @@ impl App {
             }
 
             if aborted || self.ui.lock().should_quit {
+                if let Err(e) = self.config.call_event("quit") {
+                    tracing::error!("quit event failed: {e}");
+                }
                 break;
             }
             let draw_started = std::time::Instant::now();

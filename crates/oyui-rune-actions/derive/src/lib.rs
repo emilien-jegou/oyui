@@ -378,11 +378,20 @@ pub fn define_actions(input: TokenStream) -> TokenStream {
             let ret_type = &leaf.ret_type;
             let arg_names: Vec<Ident> = (0..args.len()).map(|i| format_ident!("a{}", i)).collect();
 
+            // Leaf args and returns cross the script boundary through the
+            // same `ScriptRepr` bridge as getsets, so rich core types stay
+            // engine-agnostic while primitives keep identity conversions.
             let reg = quote! {
                 {
                     let handler_clone = handler.0.clone();
-                    let func = move |#(#arg_names: #args),*| -> #ret_type {
-                        handler_clone.#field_name.#leaf_ident(#(#arg_names),*)
+                    let func = move |#(#arg_names: <#args as ::oyui_rune_actions::ScriptRepr>::Repr),*|
+                        -> <#ret_type as ::oyui_rune_actions::ScriptRepr>::Repr
+                    {
+                        <#ret_type as ::oyui_rune_actions::ScriptRepr>::into_repr(
+                            handler_clone.#field_name.#leaf_ident(
+                                #(<#args as ::oyui_rune_actions::ScriptRepr>::from_repr(#arg_names)),*
+                            )
+                        )
                     };
                     m.function(#leaf_name, func).build()?;
                 }

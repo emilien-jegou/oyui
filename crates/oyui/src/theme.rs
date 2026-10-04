@@ -10,6 +10,8 @@ pub struct ThemeState {
     pub ui: UiTheme,
     /// Highlighting theme for syntax rendering.
     pub tm_theme: Option<syntect::highlighting::Theme>,
+    /// Name of the active builtin theme, if one was selected by name.
+    pub name: Option<String>,
 }
 
 impl ThemeState {
@@ -18,6 +20,7 @@ impl ThemeState {
         Self {
             ui: ansi_default_theme(color_mode),
             tm_theme: None,
+            name: None,
         }
     }
 }

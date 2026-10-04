@@ -42,6 +42,7 @@ eyre = "0.6.12"
 async-channel = "2.5.0"
 scc = "3.6.12"
 libc = "0.2.186"
+regex = "1.12"
 
 # Tree-sitter parsers
 tree-sitter = "0.26.3"

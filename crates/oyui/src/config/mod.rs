@@ -56,6 +56,8 @@ pub struct Config {
     pub keybinds: KeybindRegistry,
     /// Owns the engine and every script-defined callback.
     pub host: RuneHost,
+    /// Worker handle used by async script natives.
+    pub worker: Arc<EventRegistry>,
 }
 
 impl Config {
@@ -70,7 +72,9 @@ impl Config {
     /// Recompiles the config script and swaps in whatever it produced.
     pub fn handle_reload_event(&mut self, path: &Path) {
         info!("Reloading config on main thread...");
-        let outcome = self.host.load(path, self.handler.clone());
+        let outcome = self
+            .host
+            .load(path, self.handler.clone(), Some(self.worker.clone()));
         if let Some(keybinds) = outcome.keybinds {
             self.keybinds = keybinds;
         }
@@ -78,8 +82,13 @@ impl Config {
             Some(e) => {
                 tracing::error!("Config compilation error: {}", e);
                 *self.error.write() = Some(e.to_string());
+                return;
             }
             None => *self.error.write() = None,
+        }
+
+        if let Err(e) = self.host.call_event("config_reload") {
+            *self.error.write() = Some(e.to_string());
         }
     }
 
@@ -89,5 +98,24 @@ impl Config {
         id: crate::script::CallbackId,
     ) -> Result<(), crate::script::ScriptError> {
         self.host.call(id)
+    }
+
+    /// Runs a named command the script registered through `command::register`.
+    pub fn call_command(&self, name: &str, args: &str) -> Result<(), crate::script::ScriptError> {
+        self.host.call_command(name, args)
+    }
+
+    /// Runs every callback the script registered for `event` through `on`.
+    pub fn call_event(&self, event: &str) -> Result<(), crate::script::ScriptError> {
+        self.host.call_event(event)
+    }
+
+    /// Delivers an off-thread task result to its one-shot callback.
+    pub fn call_task(
+        &self,
+        task_id: u64,
+        result: String,
+    ) -> Result<(), crate::script::ScriptError> {
+        self.host.call_task(task_id, result)
     }
 }

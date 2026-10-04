@@ -12,6 +12,7 @@ pub mod events {
 }
 
 pub mod tasks {
+    pub mod analysis;
     pub mod calculate_file_tree;
     pub mod full_diff;
     pub mod stats;
@@ -34,12 +35,15 @@ tasker_registry! {
         DiffUpdate           => events::diff_update::DiffUpdate,
         FileOpened           => events::file_opened::FileOpened,
         ThemeUpdate          => events::theme_update::ThemeUpdate,
+        Analysis             => tasks::analysis::AnalysisReq,
+        AnalysisRes          => tasks::analysis::AnalysisRes,
     ],
     listeners = [
         CalculateFileTree    => [tasks::calculate_file_tree::CalculateFileTree],
         CalculateFileTreeRes => [tasks::calculate_file_tree::CalculateFileTreeResListener],
         Stats                => [tasks::stats::Stats],
         StatsRes             => [tasks::stats::StatsResListener],
+        Analysis             => [tasks::analysis::Analysis],
         FullDiff             => [tasks::full_diff::FullDiff],
         Syntax               => [tasks::syntax::Syntax],
         WatchConfig          => [tasks::watch_config::WatchConfig],

@@ -2,6 +2,7 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 
+use crate::app::ui_state::MessageLevel;
 use crate::app::{App, CommandMode};
 
 impl App {
@@ -10,6 +11,7 @@ impl App {
         // One lock for all UI state; dropped before anything that re-locks it
         // (parking_lot mutexes are not reentrant).
         let mut ui = self.ui.lock();
+        let view_before = ui.current;
         if let CommandMode::Active(buf) = &mut ui.command_mode {
             if key.kind == KeyEventKind::Press || key.kind == KeyEventKind::Repeat {
                 match key.code {
@@ -87,8 +89,17 @@ impl App {
                         tracing::debug!("Matched script keybind, executing callback");
                         if let Err(e) = self.config.call_callback(id) {
                             tracing::error!("Script keybind execution error: {}", e);
+                            // Surface runtime failures as a transient notification
+                            // rather than pinning the compile-error overlay.
+                            self.set_message(MessageLevel::Error, e.to_string());
                         }
                     }
+                }
+            }
+
+            if self.ui.lock().current != view_before {
+                if let Err(e) = self.config.call_event("view_changed") {
+                    self.set_message(MessageLevel::Error, e.to_string());
                 }
             }
         }

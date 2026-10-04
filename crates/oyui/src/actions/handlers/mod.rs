@@ -10,8 +10,13 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use typed_builder::TypedBuilder;
 
+pub mod analysis_handler;
+pub mod clipboard;
 pub mod global_handler;
+pub mod history;
+pub mod settings_handler;
 pub mod theme_handler;
+pub mod ui_handler;
 pub mod view_handlers;
 
 #[derive(TypedBuilder, Clone)]
@@ -20,9 +25,14 @@ pub struct AppActionsHandler {
     pub theme: Arc<RwLock<ThemeState>>,
     pub tree: Arc<RwLock<FileTree>>,
     pub cache: DiffCache,
+    pub left_path: PathBuf,
     pub right_path: PathBuf,
+    pub base_path: Option<PathBuf>,
+    pub algorithm: crate::cli::DiffAlgorithm,
     pub worker: Arc<EventRegistry>,
     pub color_mode: TerminalColorMode,
+    /// Shared config-error cell; action failures surface through it.
+    pub error: Arc<RwLock<Option<String>>>,
 }
 
 pub fn generate(actions_handler: AppActionsHandler) -> BoxedHandler {
@@ -32,11 +42,15 @@ pub fn generate(actions_handler: AppActionsHandler) -> BoxedHandler {
         cache: actions_handler.cache.clone(),
         color_mode: actions_handler.color_mode.clone(),
         worker: actions_handler.worker.clone(),
+        error: actions_handler.error.clone(),
     };
 
     build_handler! {
         global: actions_handler.clone(),
         theme: theme_handler.clone(),
+        settings: actions_handler.clone(),
+        analysis: actions_handler.clone(),
+        ui: actions_handler.clone(),
         view {
             tree: actions_handler.clone(),
             file: actions_handler.clone(),

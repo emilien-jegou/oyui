@@ -7,10 +7,12 @@ pub mod merge;
 pub mod merge_stats;
 pub mod run;
 pub mod ui_state;
+pub mod undo;
 
 pub use events::{CommandMode, ExitAction};
 use typed_builder::TypedBuilder;
 pub use ui_state::UiState;
+use ui_state::{Message, MessageLevel};
 
 use crate::actions::BoxedHandler;
 use crate::commands::CommandError;
@@ -51,9 +53,32 @@ impl App {
 
     /// Applies one worker event to the app state.
     fn handle_worker_event(&mut self, event: crate::worker::Event) {
-        if let crate::worker::Event::WatchConfigRes(res) = event {
-            self.config.handle_reload_event(&res.path);
+        match event {
+            crate::worker::Event::WatchConfigRes(res) => {
+                self.config.handle_reload_event(&res.path);
+            }
+            crate::worker::Event::FileOpened(_) => {
+                if let Err(e) = self.config.call_event("file_opened") {
+                    self.set_message(MessageLevel::Error, e.to_string());
+                }
+            }
+            crate::worker::Event::AnalysisRes(res) => {
+                if let Some(err) = &res.error {
+                    self.set_message(MessageLevel::Error, err.clone());
+                }
+                // A result for a task dropped by a config reload is stale, not
+                // an error worth pinning on screen.
+                if let Err(e) = self.config.call_task(res.task_id, res.matches.join("\n")) {
+                    tracing::warn!("stale analysis result: {e}");
+                }
+            }
+            _ => {}
         }
+    }
+
+    /// Shows a transient bottom-bar notification.
+    pub(crate) fn set_message(&self, level: MessageLevel, text: String) {
+        self.ui.lock().message = Some(Message::new(level, text, Message::DEFAULT_TTL));
     }
 
     /// Processes pending worker events.
@@ -70,9 +95,38 @@ impl App {
 
     #[tracing::instrument(skip_all, fields(cmd = cmd))]
     pub fn execute_command(&mut self, cmd: &str) {
-        let mut tree = self.tree.write();
-        let mut ui = self.ui.lock();
-        commands::execute(cmd, &mut tree, &mut ui.tree_view, &self.cache);
+        // Snapshot before a staging command so palette edits are undoable.
+        let is_staging = matches!(
+            cmd.trim().split_whitespace().next(),
+            Some("add" | "a" | "unstage" | "u" | "invert" | "i")
+        );
+        if is_staging {
+            let tree = self.tree.read();
+            let snap = crate::app::undo::capture(&tree, &self.cache);
+            drop(tree);
+            self.ui.lock().undo.new_action(snap);
+        }
+
+        let handled = {
+            let mut tree = self.tree.write();
+            let mut ui = self.ui.lock();
+            commands::execute(cmd, &mut tree, &mut ui.tree_view, &self.cache)
+        };
+
+        if handled {
+            return;
+        }
+
+        // Fall back to script-defined commands (`command::register`).
+        let mut parts = cmd.trim().splitn(2, char::is_whitespace);
+        let name = parts.next().unwrap_or_default();
+        if name.is_empty() {
+            return;
+        }
+        let args = parts.next().unwrap_or_default();
+        if let Err(e) = self.config.call_command(name, args) {
+            self.set_message(MessageLevel::Error, e.to_string());
+        }
     }
 
     pub fn start_tree_calculation(&self) -> eyre::Result<()> {

@@ -18,8 +18,12 @@ macro_rules! impl_opt_color_getset {
                             let theme = self.theme.read();
                             utils::parse_color_val(&val, &theme.ui, &theme.tm_theme, &self.color_mode)
                         };
-                        if let Some(c) = parsed {
-                            self.theme.write().ui.$field = Some(c);
+                        match parsed {
+                            Some(c) => self.theme.write().ui.$field = Some(c),
+                            None => self.fail(format!(
+                                "invalid color '{val}' for {}",
+                                stringify!($field)
+                            )),
                         }
                     }
                 }
@@ -42,8 +46,12 @@ macro_rules! impl_color_getset {
                         let theme = self.theme.read();
                         utils::parse_color_val(&val, &theme.ui, &theme.tm_theme, &self.color_mode)
                     };
-                    if let Some(c) = parsed {
-                        self.theme.write().ui.$field = c;
+                    match parsed {
+                        Some(c) => self.theme.write().ui.$field = c,
+                        None => self.fail(format!(
+                            "invalid color '{val}' for {}",
+                            stringify!($field)
+                        )),
                     }
                 }
             }

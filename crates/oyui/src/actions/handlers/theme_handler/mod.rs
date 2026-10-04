@@ -20,6 +20,16 @@ pub struct AppThemeActionsHandler {
     pub ui: Arc<Mutex<UiState>>,
     pub color_mode: TerminalColorMode,
     pub worker: Arc<EventRegistry>,
+    /// Shared config-error cell; action failures surface through it.
+    pub error: Arc<RwLock<Option<String>>>,
+}
+
+impl AppThemeActionsHandler {
+    /// Records a script-visible failure so the config overlay can show it.
+    fn fail(&self, message: impl std::fmt::Display) {
+        tracing::error!("{message}");
+        *self.error.write() = Some(format!("theme: {message}"));
+    }
 }
 
 impl ThemeActionsHandler for AppThemeActionsHandler {
@@ -34,13 +44,13 @@ impl ThemeActionsHandler for AppThemeActionsHandler {
                             (ui_theme, Some(tm_theme))
                         }
                         Err(e) => {
-                            tracing::error!("Failed to parse tmTheme at '{}': {}", path_str, e);
+                            self.fail(format!("failed to parse tmTheme at '{path_str}': {e}"));
                             return;
                         }
                     }
                 }
                 Err(e) => {
-                    tracing::error!("Failed to open tmTheme file at '{}': {}", path_str, e);
+                    self.fail(format!("failed to open tmTheme file at '{path_str}': {e}"));
                     return;
                 }
             }
@@ -50,7 +60,7 @@ impl ThemeActionsHandler for AppThemeActionsHandler {
             match config::get_theme(&name) {
                 Some(t) => t,
                 None => {
-                    tracing::error!("Invalid theme name given: {}", name);
+                    self.fail(format!("invalid theme name '{name}'"));
                     return;
                 }
             }
@@ -60,11 +70,13 @@ impl ThemeActionsHandler for AppThemeActionsHandler {
         let mut theme = self.theme.write();
         theme.ui = base_ui.clone();
         theme.tm_theme = tm.clone();
+        theme.name = Some(name.clone());
         let _ = self.worker.send(ThemeUpdate::Full(base_ui, tm, open_file));
     }
 
     fn toggle_gradient(&self) {
-        unimplemented!();
+        let mut ui = self.ui.lock();
+        ui.file_view.use_gradient = !ui.file_view.use_gradient;
     }
 
     fn syntax(&self, name: String) {
@@ -75,13 +87,13 @@ impl ThemeActionsHandler for AppThemeActionsHandler {
                     match syntect::highlighting::ThemeSet::load_from_reader(&mut reader) {
                         Ok(tm_theme) => Some(tm_theme),
                         Err(e) => {
-                            tracing::error!("Failed to parse tmTheme at '{}': {}", path_str, e);
+                            self.fail(format!("failed to parse tmTheme at '{path_str}': {e}"));
                             return;
                         }
                     }
                 }
                 Err(e) => {
-                    tracing::error!("Failed to open tmTheme file at '{}': {}", path_str, e);
+                    self.fail(format!("failed to open tmTheme file at '{path_str}': {e}"));
                     return;
                 }
             }
@@ -89,7 +101,7 @@ impl ThemeActionsHandler for AppThemeActionsHandler {
             match config::get_theme(&name) {
                 Some(t) => t.1,
                 None => {
-                    tracing::error!("Invalid theme name given: {}", name);
+                    self.fail(format!("invalid syntax theme name '{name}'"));
                     return;
                 }
             }
@@ -105,6 +117,30 @@ impl ThemeActionsHandler for AppThemeActionsHandler {
         let theme = self.theme.read();
         theme.ui.bg.is_dark()
     }
+
+    fn name(&self) -> String {
+        self.theme.read().name.clone().unwrap_or_default()
+    }
+
+    fn list(&self) -> String {
+        let mut names: Vec<&str> = config::get_embedded_themes()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        names.sort_unstable();
+        names.join("\n")
+    }
+}
+
+/// Toggles gradient line rendering for the file view.
+impl ThemeGradientActionsHandler for AppThemeActionsHandler {
+    fn get(&self) -> bool {
+        self.ui.lock().file_view.use_gradient
+    }
+
+    fn set(&self, val: bool) {
+        self.ui.lock().file_view.use_gradient = val;
+    }
 }
 
 // Color fields
@@ -112,6 +148,7 @@ macros::impl_color_getset!(bg);
 macros::impl_color_getset!(fg);
 macros::impl_color_getset!(cursor_bg);
 macros::impl_color_getset!(dim);
+macros::impl_color_getset!(dimmer);
 macros::impl_color_getset!(staged);
 macros::impl_color_getset!(unstaged);
 macros::impl_color_getset!(partial);

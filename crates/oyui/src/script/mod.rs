@@ -56,7 +56,18 @@ pub struct ScriptLoad {
 /// The port the application depends on; implementations hide their engine.
 pub trait ScriptHost {
     /// Compiles and runs `path`, collecting the keybinds it registers.
-    fn load(&mut self, path: &Path, handler: BoxedHandler) -> ScriptLoad;
+    fn load(
+        &mut self,
+        path: &Path,
+        handler: BoxedHandler,
+        worker: Option<std::sync::Arc<crate::worker::EventRegistry>>,
+    ) -> ScriptLoad;
     /// Runs a callback the script registered with `keybind`.
     fn call(&self, id: CallbackId) -> Result<(), ScriptError>;
+    /// Runs a named command the script registered with `command::register`.
+    fn call_command(&self, name: &str, args: &str) -> Result<(), ScriptError>;
+    /// Runs every callback registered for `event` with `on`.
+    fn call_event(&self, event: &str) -> Result<(), ScriptError>;
+    /// Delivers an off-thread task result to its one-shot callback.
+    fn call_task(&self, task_id: u64, result: String) -> Result<(), ScriptError>;
 }

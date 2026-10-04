@@ -19,7 +19,7 @@ fn load(source: &str) -> (RuneHost, KeybindRegistry, Option<ScriptError>) {
     let path = std::env::temp_dir().join(format!("oyui_script_{}_{n}.rn", std::process::id()));
     fs::write(&path, source).expect("write fixture");
     let mut host = RuneHost::new();
-    let outcome = host.load(&path, BoxedHandler::empty());
+    let outcome = host.load(&path, BoxedHandler::empty(), None);
     let _ = fs::remove_file(&path);
     (
         host,
@@ -65,7 +65,7 @@ fn script_keybinds_arrive_as_opaque_handles_and_still_run() {
 }
 
 #[test]
-fn modes_that_the_app_does_not_know_are_ignored() {
+fn unknown_modes_are_reported_and_ignored() {
     let source = r#"
         pub fn config() {
             on_mode("nope", || { keybind("ctrl-bad", || view::file::cursor::up(1)); });
@@ -73,13 +73,228 @@ fn modes_that_the_app_does_not_know_are_ignored() {
     "#;
     let (_host, reg, error) = load(source);
 
+    let error = error.expect("unknown mode must surface an error");
     assert!(
-        error.is_none(),
-        "load failed: {:?}",
-        error.map(|e| e.message)
+        error.message.contains("unknown view 'nope'"),
+        "unexpected message: {}",
+        error.message
     );
     assert!(callback_id(&reg, KeybindMode::View(View::File), "ctrl-bad").is_none());
     assert!(callback_id(&reg, KeybindMode::Global, "ctrl-bad").is_none());
+}
+
+#[test]
+fn multi_modifier_keybinds_are_bound() {
+    let source = r#"
+        pub fn config() {
+            keybind("ctrl-shift-j", || view::file::cursor::down(1));
+        }
+    "#;
+    let (_host, reg, error) = load(source);
+
+    assert!(error.is_none(), "{:?}", error.map(|e| e.message));
+    callback_id(&reg, KeybindMode::Global, "ctrl-shift-j")
+        .expect("ctrl-shift-j must be bound as one chord");
+}
+
+#[test]
+fn invalid_keybind_names_are_reported() {
+    let source = r#"
+        pub fn config() {
+            keybind("bogus", || ());
+        }
+    "#;
+    let (_host, _reg, error) = load(source);
+
+    let error = error.expect("invalid keybind must surface an error");
+    assert!(
+        error.message.contains("invalid keybind 'bogus'"),
+        "unexpected message: {}",
+        error.message
+    );
+}
+
+#[test]
+fn unbind_removes_a_default_binding() {
+    let source = r#"
+        pub fn config() {
+            unbind("s");
+        }
+    "#;
+    let (_host, reg, error) = load(source);
+
+    assert!(error.is_none(), "{:?}", error.map(|e| e.message));
+    let target = Keybind::parse("s");
+    assert!(
+        !reg.bindings.iter().any(|(_, k, _)| k.binds(&target)),
+        "unbind('s') must drop the default split binding"
+    );
+}
+
+#[test]
+fn unbind_all_clears_core_bindings() {
+    let source = r#"
+        pub fn config() { unbind_all(); }
+    "#;
+    let (_host, reg, error) = load(source);
+
+    assert!(error.is_none(), "{:?}", error.map(|e| e.message));
+    assert!(
+        reg.bindings.is_empty(),
+        "unbind_all must remove every core binding"
+    );
+}
+
+#[test]
+fn reset_keybinds_restores_defaults() {
+    let source = r#"
+        pub fn config() { unbind_all(); reset_keybinds(); }
+    "#;
+    let (_host, reg, error) = load(source);
+
+    assert!(error.is_none(), "{:?}", error.map(|e| e.message));
+    assert_eq!(reg.bindings.len(), default_keybinds().bindings.len());
+}
+
+#[test]
+fn keybinds_can_be_added_after_unbind_all() {
+    let source = r#"
+        pub fn config() { unbind_all(); keybind("ctrl-x", || ()); }
+    "#;
+    let (_host, reg, error) = load(source);
+
+    assert!(error.is_none(), "{:?}", error.map(|e| e.message));
+    callback_id(&reg, KeybindMode::Global, "ctrl-x").expect("bound after unbind_all");
+    assert_eq!(reg.bindings.len(), 1);
+}
+
+#[test]
+fn commands_and_events_round_trip() {
+    let source = r#"
+        pub fn config() {
+            command("go-down", |args| view::file::cursor::down(5));
+            on("file_opened", || ());
+        }
+    "#;
+    let (host, _reg, error) = load(source);
+    assert!(error.is_none(), "{:?}", error.map(|e| e.message));
+
+    host.call_command("go-down", "").expect("command runs");
+    host.call_event("file_opened").expect("event runs");
+    assert!(host.call_command("missing", "").is_err());
+}
+
+#[test]
+fn the_full_api_surface_compiles() {
+    let source = r#"
+        pub fn config() {
+            let _ = global::left_path();
+            let _ = global::right_path();
+            let _ = global::base_path();
+            let _ = global::view();
+            let _ = global::algorithm();
+            global::switch("tree");
+            global::command("invert");
+            global::clear_error();
+            global::notify("hi");
+            global::warn("careful");
+            global::error("bad");
+            global::clear_message();
+            global::copy("text");
+            global::undo();
+            global::redo();
+
+            let _ = analysis::files_containing("needle");
+            analysis::files_containing_async("needle", |matches| {
+                let _ = matches;
+            });
+
+            let _ = settings::scrolloff::get();
+            settings::scrolloff::set(3);
+            settings::context_lines::set(4);
+
+            let _ = view::file::path();
+            let _ = view::file::folded();
+            let _ = view::file::cursor::row();
+            let _ = view::file::cursor::row_count();
+            if let Some(_hunk) = view::file::cursor::hunk_index() {}
+            let _ = view::file::cursor::hunk_count();
+            let _ = view::file::cursor::kind();
+            let _ = view::file::cursor::text();
+            let _ = view::file::cursor::old_line();
+            let _ = view::file::cursor::new_line();
+            let _ = view::file::cursor::is_staged();
+            let _ = view::file::staging::state();
+            view::file::staging::split_at(0, 1);
+            view::file::staging::join();
+            view::file::staging::set_hunk(0, true);
+            view::file::staging::stage_all();
+            view::file::staging::unstage_all();
+
+            let _ = view::file::inspect::hunk_has();
+            if let Some(_hunk) = view::file::inspect::hunk_index() {}
+            let _ = view::file::inspect::hunk_count();
+            let _ = view::file::inspect::hunk_text();
+            let _ = view::file::inspect::hunk_marker();
+            let _ = view::file::inspect::hunk_is_staged();
+            let _ = view::file::inspect::diff_text();
+            let _ = view::file::inspect::new_text();
+            let _ = view::file::inspect::old_text();
+            let _ = view::file::inspect::staged_text();
+            let _ = view::file::inspect::stats();
+            let _ = view::file::inspect::is_binary();
+
+            let _ = view::tree::inspect::files();
+            let _ = view::tree::inspect::path_at(0);
+            let _ = view::tree::inspect::is_dir_at(0);
+            let _ = view::tree::inspect::staging_at(0);
+            let _ = view::tree::inspect::file_diff_text("a");
+            let _ = view::tree::inspect::file_stats("a");
+            let _ = view::tree::inspect::file_staging("a");
+
+            let _ = view::tree::selected_index();
+            let _ = view::tree::row_count();
+            let _ = view::tree::selected_path();
+            let _ = view::tree::selected_name();
+            let _ = view::tree::selected_is_dir();
+            let _ = view::tree::selected_staging();
+            let _ = view::tree::is_folded("a");
+            view::tree::directory::expand_all();
+            view::tree::directory::collapse_all();
+            view::tree::staging::set("a", true);
+            view::tree::staging::set_matching("**/*.md", true);
+            view::tree::staging::stage_all();
+            view::tree::staging::unstage_all();
+
+            let _ = theme::name();
+            let _ = theme::list();
+            let _ = theme::gradient::get();
+            theme::gradient::set(true);
+            theme::dimmer::set("red");
+
+            ui::hint::set("file", "j=down k=up");
+            ui::hint::clear("tree");
+            let _ = ui::tree_row_format::get();
+            ui::tree_row_format::set("state icon name stats");
+            let _ = ui::status::get();
+            ui::status::set("ready");
+
+            keybind("ctrl-shift-j", || view::file::cursor::down(1));
+            unbind("s");
+            unbind_all();
+            reset_keybinds();
+            command("go", |args| global::command("invert"));
+            let _ = command_names();
+            on("file_opened", || global::clear_error());
+        }
+    "#;
+    let (_host, _reg, error) = load(source);
+
+    assert!(
+        error.is_none(),
+        "every documented function must resolve: {:?}",
+        error.map(|e| e.message)
+    );
 }
 
 #[test]

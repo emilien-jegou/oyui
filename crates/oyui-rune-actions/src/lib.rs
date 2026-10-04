@@ -33,6 +33,38 @@ macro_rules! impl_script_repr_identity {
 
 impl_script_repr_identity!(bool, String, u32, u64, f64, ());
 
+/// `Option<T>` mirrors the engine's own option type, so absence crosses the
+/// boundary as `Some`/`None` instead of a lossy sentinel value.
+impl<T> ScriptRepr for Option<T>
+where
+    T: ScriptRepr,
+{
+    type Repr = Option<T::Repr>;
+
+    fn into_repr(self) -> Self::Repr {
+        self.map(T::into_repr)
+    }
+
+    fn from_repr(repr: Self::Repr) -> Self {
+        repr.map(T::from_repr)
+    }
+}
+
 pub mod reexport {
     pub use rune;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ScriptRepr;
+
+    #[test]
+    fn option_repr_round_trips() {
+        assert_eq!(<Option<u32> as ScriptRepr>::into_repr(Some(3)), Some(3));
+        assert_eq!(<Option<u32> as ScriptRepr>::from_repr(None), None);
+        assert_eq!(
+            <Option<String> as ScriptRepr>::into_repr(Some("x".into())),
+            Some("x".to_string())
+        );
+    }
 }

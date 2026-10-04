@@ -98,6 +98,8 @@ pub struct TreeViewData {
     pub scrolloff: usize,
     pub list_state: ListState,
     pub last_height: usize,
+    /// Script-defined row field order, e.g. `"state icon name stats"`.
+    pub tree_row_format: Option<String>,
     view_model: TreeViewModel,
     view_model_dirty: bool,
     cached_tree_version: u64,
@@ -232,6 +234,13 @@ impl TreeViewData {
         theme: &UiTheme,
         color_mode: &TerminalColorMode,
     ) {
+        let tokens: Vec<String> = self
+            .tree_row_format
+            .as_deref()
+            .unwrap_or("state icon name stats")
+            .split_whitespace()
+            .map(str::to_string)
+            .collect();
         let height = area.height as usize;
         let selected = self.selected_index;
         self.last_height = height;
@@ -257,7 +266,7 @@ impl TreeViewData {
             let end = (start + height).min(rows.len());
             let items = rows[start..end]
                 .iter()
-                .map(|r| render_tree_row(icon_provider, r, theme, color_mode))
+                .map(|r| render_tree_row(icon_provider, r, &tokens, theme, color_mode))
                 .collect::<Vec<ListItem>>();
             (items, start, end)
         };
@@ -387,12 +396,28 @@ fn flatten_recursive(
 fn render_tree_row(
     icon_provider: &dyn FileIconProvider,
     row: &TreeRow,
+    tokens: &[String],
     theme: &UiTheme,
     color_mode: &TerminalColorMode,
 ) -> ListItem<'static> {
     let mut spans = Vec::new();
 
-    // 1. Determine the base color for the entire row based on status
+    // Structural prefix: depth guides and the branch elbow.
+    for &has_sibling in &row.parent_continuations {
+        spans.push(Span::styled(
+            if has_sibling { "\u{2502}  " } else { "   " },
+            Style::default().fg(theme.dim.into()),
+        ));
+    }
+    spans.push(Span::styled(
+        if row.is_last {
+            "\u{2514}\u{2500}\u{2500} "
+        } else {
+            "\u{251c}\u{2500}\u{2500} "
+        },
+        Style::default().fg(theme.dim.into()),
+    ));
+
     let base_fg: Color = if !row.is_dir {
         if row.left_path.is_none() {
             theme.add_fg.into()
@@ -405,32 +430,6 @@ fn render_tree_row(
         theme.fg.into()
     };
 
-    // 2. Tree structure spans (keep these structural)
-    for &has_sibling in &row.parent_continuations {
-        spans.push(Span::styled(
-            if has_sibling { "│  " } else { "   " },
-            Style::default().fg(theme.dim.into()),
-        ));
-    }
-    spans.push(Span::styled(
-        if row.is_last {
-            "└── "
-        } else {
-            "├── "
-        },
-        Style::default().fg(theme.dim.into()),
-    ));
-
-    // 3. Staging symbols
-    let (stage_sym, stage_color): (&str, Color) = match row.staging_state {
-        StagingState::Staged => ("●", theme.staged.into()),
-        StagingState::Unstaged => ("○", theme.unstaged.into()),
-        StagingState::PartiallyStaged => ("◐", theme.partial.into()),
-    };
-    spans.push(Span::styled(stage_sym, Style::default().fg(stage_color)));
-    spans.push(Span::raw(" "));
-
-    // 4. File/Dir Name and Icon
     let left_name = row
         .left_path
         .as_ref()
@@ -441,77 +440,117 @@ fn render_tree_row(
         .as_ref()
         .and_then(|p| p.file_name())
         .map(|s| s.to_string_lossy());
+    let name_differ = matches!((&left_name, &right_name), (Some(l), Some(r)) if l != r);
 
-    let name_differ = match (&left_name, &right_name) {
-        (Some(l), Some(r)) => l != r,
-        _ => false,
-    };
-
-    if row.is_dir {
-        let arrow = if row.is_folded { "▸ " } else { "▾ " };
-        spans.push(Span::styled(arrow, Style::default().fg(theme.fg.into())));
-        spans.push(Span::styled(" ", Style::default().fg(theme.dir.into())));
-        spans.push(Span::styled(
-            row.name.clone(),
-            Style::default().fg(theme.dir.into()).bold(),
-        ));
-    } else if name_differ {
-        let l_name = left_name.as_ref().unwrap().to_string();
-        let r_name = right_name.as_ref().unwrap().to_string();
-
-        spans.push(Span::styled("[ ", Style::default().fg(theme.dim.into())));
-        spans.push(Span::styled(l_name, Style::default().fg(base_fg)));
-        spans.push(Span::styled(" → ", Style::default().fg(theme.dim.into())));
-        spans.push(Span::styled(r_name, Style::default().fg(base_fg)));
-        spans.push(Span::styled(" ]", Style::default().fg(theme.dim.into())));
-    } else {
-        let icon = icon_provider.get_file_icon(&row.name);
-
-        spans.push(Span::styled(icon.to_string(), Style::default().fg(base_fg)));
-        spans.push(Span::raw(" "));
-        spans.push(Span::styled(row.name.clone(), Style::default().fg(base_fg)));
-    }
-
-    // 5. Dynamic Stats
-    if let Some(stats) = &row.stats {
-        match stats {
-            DiffStats::Binary { bytes } => {
+    for token in tokens {
+        match token.as_str() {
+            "state" => {
+                let (sym, color): (&str, Color) = match row.staging_state {
+                    StagingState::Staged => ("\u{25cf}", theme.staged.into()),
+                    StagingState::Unstaged => ("\u{25cb}", theme.unstaged.into()),
+                    StagingState::PartiallyStaged => ("\u{25d0}", theme.partial.into()),
+                };
+                spans.push(Span::styled(sym, Style::default().fg(color)));
                 spans.push(Span::raw(" "));
+            }
+            "icon" => {
+                if row.is_dir {
+                    let arrow = if row.is_folded {
+                        "\u{25b8} "
+                    } else {
+                        "\u{25be} "
+                    };
+                    spans.push(Span::styled(arrow, Style::default().fg(theme.fg.into())));
+                    spans.push(Span::styled(
+                        "\u{e5ff} ",
+                        Style::default().fg(theme.dir.into()),
+                    ));
+                } else {
+                    let icon = icon_provider.get_file_icon(&row.name);
+                    spans.push(Span::styled(icon.to_string(), Style::default().fg(base_fg)));
+                    spans.push(Span::raw(" "));
+                }
+            }
+            "name" => {
+                if row.is_dir {
+                    spans.push(Span::styled(
+                        row.name.clone(),
+                        Style::default().fg(theme.dir.into()).bold(),
+                    ));
+                } else if name_differ {
+                    let l_name = left_name.as_ref().unwrap().to_string();
+                    let r_name = right_name.as_ref().unwrap().to_string();
+                    spans.push(Span::styled("[ ", Style::default().fg(theme.dim.into())));
+                    spans.push(Span::styled(l_name, Style::default().fg(base_fg)));
+                    spans.push(Span::styled(
+                        " \u{2192} ",
+                        Style::default().fg(theme.dim.into()),
+                    ));
+                    spans.push(Span::styled(r_name, Style::default().fg(base_fg)));
+                    spans.push(Span::styled(" ]", Style::default().fg(theme.dim.into())));
+                } else {
+                    spans.push(Span::styled(row.name.clone(), Style::default().fg(base_fg)));
+                }
+            }
+            "path" => {
                 spans.push(Span::styled(
-                    "(binary)",
-                    Style::default().fg(theme.dir.into()),
-                ));
-                spans.push(Span::raw(" "));
-                let sign = if *bytes > 0 { "+" } else { "" };
-                spans.push(Span::styled(
-                    format!("{}{} bytes ", sign, bytes),
+                    format!("  {}", row.path.display()),
                     Style::default().fg(theme.dim.into()),
                 ));
             }
-            DiffStats::Text {
-                insertions,
-                deletions,
-            } => {
-                if *insertions > 0 || *deletions > 0 {
-                    spans.push(Span::raw("  "));
-                }
-                if *insertions > 0 {
-                    spans.push(Span::styled(
-                        format!("+{} ", insertions),
-                        Style::default().fg(get_diff_color(*insertions, true, theme, color_mode)),
-                    ));
-                }
-                if *deletions > 0 {
-                    spans.push(Span::styled(
-                        format!("-{} ", deletions),
-                        Style::default().fg(get_diff_color(*deletions, false, theme, color_mode)),
-                    ));
-                }
-            }
+            "stats" => push_stats(&mut spans, row, theme, color_mode),
+            _ => {}
         }
     }
 
     ListItem::new(Line::from(spans))
+}
+
+/// Appends the `+N -M` / binary stats segment for a row.
+fn push_stats(
+    spans: &mut Vec<Span<'static>>,
+    row: &TreeRow,
+    theme: &UiTheme,
+    color_mode: &TerminalColorMode,
+) {
+    let Some(stats) = &row.stats else {
+        return;
+    };
+    match stats {
+        DiffStats::Binary { bytes } => {
+            spans.push(Span::raw(" "));
+            spans.push(Span::styled(
+                "(binary)",
+                Style::default().fg(theme.dir.into()),
+            ));
+            spans.push(Span::raw(" "));
+            let sign = if *bytes > 0 { "+" } else { "" };
+            spans.push(Span::styled(
+                format!("{}{} bytes ", sign, bytes),
+                Style::default().fg(theme.dim.into()),
+            ));
+        }
+        DiffStats::Text {
+            insertions,
+            deletions,
+        } => {
+            if *insertions > 0 || *deletions > 0 {
+                spans.push(Span::raw("  "));
+            }
+            if *insertions > 0 {
+                spans.push(Span::styled(
+                    format!("+{} ", insertions),
+                    Style::default().fg(get_diff_color(*insertions, true, theme, color_mode)),
+                ));
+            }
+            if *deletions > 0 {
+                spans.push(Span::styled(
+                    format!("-{} ", deletions),
+                    Style::default().fg(get_diff_color(*deletions, false, theme, color_mode)),
+                ));
+            }
+        }
+    }
 }
 
 #[cfg(test)]

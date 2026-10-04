@@ -41,6 +41,15 @@ impl KeySource {
             KeySource::Keybind(kb) => kb.matches(key),
         }
     }
+
+    /// True when this source binds the same canonical key as `kb`.
+    pub fn binds(&self, kb: &Keybind) -> bool {
+        let target = kb.canonical();
+        match self {
+            KeySource::Keybind(k) => k.canonical() == target,
+            KeySource::Keybinds(ks) => ks.0.iter().any(|k| k.canonical() == target),
+        }
+    }
 }
 
 impl From<Keybinds> for KeySource {
@@ -83,6 +92,28 @@ impl KeybindRegistry {
         } else {
             self.bindings.push((mode, kb, vec![target]));
         }
+    }
+
+    /// Removes every binding, including the built-in defaults.
+    pub fn clear(&mut self) {
+        self.bindings.clear();
+    }
+
+    /// Restores the built-in defaults, discarding every custom binding.
+    pub fn reset(&mut self) {
+        *self = default_keybinds();
+    }
+
+    /// Removes every binding that targets `kb`, across all modes.
+    pub fn remove(&mut self, kb: &Keybind) {
+        let target = kb.canonical();
+        self.bindings.retain_mut(|(_, source, _)| match source {
+            KeySource::Keybind(k) => k.canonical() != target,
+            KeySource::Keybinds(ks) => {
+                ks.0.retain(|k| k.canonical() != target);
+                !ks.0.is_empty()
+            }
+        });
     }
 
     pub fn register<K, T>(mut self, kb: K, act: T) -> Self
@@ -178,6 +209,8 @@ pub fn default_keybinds() -> KeybindRegistry {
         .register(Keybinds::code(KeyCode::Enter), GlobalActions::confirm)
         .register(Keybinds::char('q').with_ctrl('c'), GlobalActions::quit)
         .register(Keybinds::char(':'), GlobalActions::open_command_mode)
+        .register(Keybinds::char('u'), GlobalActions::undo)
+        .register(Keybinds::new().with_ctrl('r'), GlobalActions::redo)
         .register(
             Keybinds::char('h').with_code(KeyCode::Esc),
             ViewFileActions::close,
@@ -279,4 +312,27 @@ pub fn default_keybinds() -> KeybindRegistry {
             .register(Keybinds::char(' '), ViewTreeStagingActions::toggle_selected)
             .register(Keybinds::char('i'), ViewTreeStagingActions::invert)
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commons::input::Keybind;
+
+    #[test]
+    fn remove_keeps_sibling_keys_in_a_shared_source() {
+        let mut reg = default_keybinds();
+        reg.remove(&Keybind::parse("esc"));
+
+        let h = Keybind::parse("h");
+        let esc = Keybind::parse("esc");
+        assert!(
+            reg.bindings.iter().any(|(_, k, _)| k.binds(&h)),
+            "'h' must survive removing 'esc' from the shared source"
+        );
+        assert!(
+            !reg.bindings.iter().any(|(_, k, _)| k.binds(&esc)),
+            "'esc' must be removed"
+        );
+    }
 }

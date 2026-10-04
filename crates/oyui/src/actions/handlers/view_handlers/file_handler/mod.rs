@@ -3,10 +3,118 @@ use std::path::Path;
 
 use crate::actions::handlers::AppActionsHandler;
 use crate::actions::*;
-use crate::diff::DiffResult;
+use crate::diff::{DiffLine, DiffResult};
 use crate::diff_cache::DiffCache;
+use crate::tree::StagingState;
 
+pub mod file_inspect;
 pub mod file_staging_handler;
+
+/// Read-only snapshot of what the file-view cursor currently points at.
+pub(crate) struct CursorInfo {
+    pub row: usize,
+    pub row_count: usize,
+    pub hunk_index: Option<usize>,
+    pub hunk_count: usize,
+    pub kind: &'static str,
+    pub text: String,
+    pub old_line: Option<usize>,
+    pub new_line: Option<usize>,
+    pub is_staged: Option<bool>,
+}
+
+/// Resolves the cursor context for the open file, if any.
+pub(crate) fn cursor_info(
+    ui: &mut crate::view::file::FileViewData,
+    tree: &crate::tree::FileTree,
+    cache: &DiffCache,
+) -> Option<CursorInfo> {
+    let path = ui.current_path.clone()?;
+    let row = ui
+        .scroll_states
+        .get(&path)
+        .and_then(|s| s.selected())
+        .unwrap_or(0);
+    let row_count = ui.row_count(&path);
+    let hunk_starts = ui.hunk_starts(&path).cloned().unwrap_or_default();
+    let hunk_count = hunk_starts.len();
+    let hunk_index = ui
+        .row_to_hunk(&path)
+        .and_then(|m| m.get(row).copied().flatten());
+
+    let mut info = CursorInfo {
+        row,
+        row_count,
+        hunk_index,
+        hunk_count,
+        kind: "none",
+        text: String::new(),
+        old_line: None,
+        new_line: None,
+        is_staged: None,
+    };
+
+    let diff_arc = cache.diffs.get(&path);
+    let Some(DiffResult::Text(diff)) = diff_arc.as_deref() else {
+        return Some(info);
+    };
+
+    let Some(hi) = hunk_index else {
+        return Some(info);
+    };
+    let Some(hunk) = diff.hunks.get(hi) else {
+        return Some(info);
+    };
+    let Some(&visual_start) = hunk_starts.get(hi) else {
+        return Some(info);
+    };
+    let line_within = row.saturating_sub(visual_start);
+    let Some(line) = hunk.lines.get(line_within) else {
+        return Some(info);
+    };
+
+    let default_staged = tree.get_file_state(&path) == Some(StagingState::Staged);
+    let new_lines: Vec<&str> = diff.new_file_content.lines().collect();
+    let old_lines: Vec<&str> = diff.old_file_content.lines().collect();
+
+    match line {
+        DiffLine::Context {
+            old_line_idx,
+            new_line_idx,
+        } => {
+            info.kind = "context";
+            info.text = new_lines
+                .get(*new_line_idx)
+                .copied()
+                .unwrap_or("")
+                .to_string();
+            info.old_line = Some(*old_line_idx);
+            info.new_line = Some(*new_line_idx);
+        }
+        DiffLine::Deletion { old_line_idx, .. } => {
+            info.kind = "deletion";
+            info.text = old_lines
+                .get(*old_line_idx)
+                .copied()
+                .unwrap_or("")
+                .to_string();
+            info.old_line = Some(*old_line_idx);
+        }
+        DiffLine::Addition { new_line_idx, .. } => {
+            info.kind = "addition";
+            info.text = new_lines
+                .get(*new_line_idx)
+                .copied()
+                .unwrap_or("")
+                .to_string();
+            info.new_line = Some(*new_line_idx);
+        }
+    }
+
+    let sel_idx = diff.hunk_start_idx(hi) + line_within;
+    info.is_staged = Some(diff.line_selections.get(sel_idx, default_staged));
+    Some(info)
+}
 
 struct FileContext {
     path: std::path::PathBuf,
@@ -86,6 +194,20 @@ impl ViewFileActionsHandler for AppActionsHandler {
         ui.current = crate::view::ViewKind::Tree;
         ui.file_view.current_path = None;
     }
+
+    fn path(&self) -> String {
+        self.ui
+            .lock()
+            .file_view
+            .current_path
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default()
+    }
+
+    fn folded(&self) -> bool {
+        self.ui.lock().file_view.is_folded
+    }
 }
 
 impl ViewFileScrollActionsHandler for AppActionsHandler {
@@ -163,6 +285,61 @@ impl ViewFileCursorActionsHandler for AppActionsHandler {
         if let Some(ctx) = get_file_context(&mut view) {
             update_scroll_state(&mut view, &ctx.path, ctx.max_idx, None);
         }
+    }
+
+    fn row(&self) -> u32 {
+        self.resolve_cursor().map_or(0, |c| c.row as u32)
+    }
+
+    fn row_count(&self) -> u32 {
+        self.resolve_cursor().map_or(0, |c| c.row_count as u32)
+    }
+
+    fn hunk_index(&self) -> Option<u32> {
+        self.resolve_cursor()
+            .and_then(|c| c.hunk_index)
+            .map(|i| i as u32)
+    }
+
+    fn hunk_count(&self) -> u32 {
+        self.resolve_cursor().map_or(0, |c| c.hunk_count as u32)
+    }
+
+    fn kind(&self) -> String {
+        self.resolve_cursor()
+            .map(|c| c.kind.to_string())
+            .unwrap_or_else(|| "none".into())
+    }
+
+    fn text(&self) -> String {
+        self.resolve_cursor().map(|c| c.text).unwrap_or_default()
+    }
+
+    fn old_line(&self) -> u32 {
+        self.resolve_cursor()
+            .and_then(|c| c.old_line)
+            .map_or(0, |i| i as u32)
+    }
+
+    fn new_line(&self) -> u32 {
+        self.resolve_cursor()
+            .and_then(|c| c.new_line)
+            .map_or(0, |i| i as u32)
+    }
+
+    fn is_staged(&self) -> bool {
+        self.resolve_cursor()
+            .and_then(|c| c.is_staged)
+            .unwrap_or(false)
+    }
+}
+
+impl AppActionsHandler {
+    /// Resolves the cursor context for the open file.
+    fn resolve_cursor(&self) -> Option<CursorInfo> {
+        let tree = self.tree.read();
+        let mut ui = self.ui.lock();
+        cursor_info(&mut ui.file_view, &tree, &self.cache)
     }
 }
 

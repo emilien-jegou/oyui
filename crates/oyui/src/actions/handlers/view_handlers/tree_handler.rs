@@ -32,6 +32,56 @@ impl ViewTreeActionsHandler for AppActionsHandler {
         debug!("Opened file");
         let _ = self.worker.send(FileOpened { path });
     }
+
+    fn selected_index(&self) -> u32 {
+        self.ui.lock().tree_view.selected_index as u32
+    }
+
+    fn row_count(&self) -> u32 {
+        let tree = self.tree.read();
+        let mut ui = self.ui.lock();
+        ui.tree_view.flat_rows(&tree, &self.cache).len() as u32
+    }
+
+    fn selected_path(&self) -> String {
+        self.selected_row()
+            .map(|r| r.path.display().to_string())
+            .unwrap_or_default()
+    }
+
+    fn selected_name(&self) -> String {
+        self.selected_row().map(|r| r.name).unwrap_or_default()
+    }
+
+    fn selected_is_dir(&self) -> bool {
+        self.selected_row().map(|r| r.is_dir).unwrap_or(false)
+    }
+
+    fn selected_staging(&self) -> String {
+        match self.selected_row().map(|r| r.staging_state) {
+            Some(crate::tree::StagingState::Staged) => "staged".into(),
+            Some(crate::tree::StagingState::PartiallyStaged) => "partial".into(),
+            Some(crate::tree::StagingState::Unstaged) => "unstaged".into(),
+            None => "none".into(),
+        }
+    }
+
+    fn is_folded(&self, path: String) -> bool {
+        self.ui
+            .lock()
+            .tree_view
+            .ui_state
+            .is_folded(&std::path::PathBuf::from(path))
+    }
+}
+
+impl AppActionsHandler {
+    /// Clones the selected tree row, if any.
+    fn selected_row(&self) -> Option<crate::view::tree::TreeRow> {
+        let tree = self.tree.read();
+        let mut ui = self.ui.lock();
+        ui.tree_view.selected_row(&tree, &self.cache)
+    }
 }
 
 impl ViewTreeCursorActionsHandler for AppActionsHandler {
@@ -111,10 +161,39 @@ impl ViewTreeDirectoryActionsHandler for AppActionsHandler {
             }
         }
     }
+
+    fn expand_all(&self) {
+        let tree = self.tree.read();
+        let mut ui = self.ui.lock();
+        visit_dirs(&tree.nodes, &mut |path| {
+            ui.tree_view.ui_state.set_folded(path, false)
+        });
+        ui.tree_view.mark_dirty();
+    }
+
+    fn collapse_all(&self) {
+        let tree = self.tree.read();
+        let mut ui = self.ui.lock();
+        visit_dirs(&tree.nodes, &mut |path| {
+            ui.tree_view.ui_state.set_folded(path, true)
+        });
+        ui.tree_view.mark_dirty();
+    }
+}
+
+/// Visits every directory path in the tree, depth-first.
+fn visit_dirs(nodes: &[crate::tree::TreeNode], f: &mut impl FnMut(&std::path::Path)) {
+    for node in nodes {
+        if let crate::tree::TreeNode::Directory(dir) = node {
+            f(&dir.path);
+            visit_dirs(&dir.children, f);
+        }
+    }
 }
 
 impl ViewTreeStagingActionsHandler for AppActionsHandler {
     fn toggle_selected(&self) {
+        self.push_undo_snapshot();
         let tree_guard = self.tree.read();
         let picked = {
             let mut ui = self.ui.lock();
@@ -136,6 +215,7 @@ impl ViewTreeStagingActionsHandler for AppActionsHandler {
     }
 
     fn invert(&self) {
+        self.push_undo_snapshot();
         tracing::debug!("Inverting all staging selections");
         let mut tree_write = self.tree.write();
 
@@ -156,6 +236,55 @@ impl ViewTreeStagingActionsHandler for AppActionsHandler {
                 f.state = f.state.toggle();
             }
         }
+    }
+
+    fn set(&self, path: String, staged: bool) {
+        self.push_undo_snapshot();
+        let state = if staged {
+            crate::tree::StagingState::Staged
+        } else {
+            crate::tree::StagingState::Unstaged
+        };
+        let mut tree = self.tree.write();
+        tree.set_state_for_path(&std::path::PathBuf::from(path), state);
+        sync_cache(&tree, &self.cache);
+    }
+
+    fn set_matching(&self, pattern: String, staged: bool) {
+        self.push_undo_snapshot();
+        let state = if staged {
+            crate::tree::StagingState::Staged
+        } else {
+            crate::tree::StagingState::Unstaged
+        };
+        let mut tree = self.tree.write();
+        let paths: Vec<std::path::PathBuf> = tree
+            .files()
+            .filter(|f| crate::commons::glob::glob_match(&pattern, &f.path))
+            .map(|f| f.path.clone())
+            .collect();
+        for path in paths {
+            tree.set_state_for_path(&path, state);
+        }
+        sync_cache(&tree, &self.cache);
+    }
+
+    fn stage_all(&self) {
+        self.push_undo_snapshot();
+        let mut tree = self.tree.write();
+        for f in tree.files_mut() {
+            f.state = crate::tree::StagingState::Staged;
+        }
+        sync_cache(&tree, &self.cache);
+    }
+
+    fn unstage_all(&self) {
+        self.push_undo_snapshot();
+        let mut tree = self.tree.write();
+        for f in tree.files_mut() {
+            f.state = crate::tree::StagingState::Unstaged;
+        }
+        sync_cache(&tree, &self.cache);
     }
 }
 

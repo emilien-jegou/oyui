@@ -38,6 +38,22 @@ impl FileDiff {
         self.apply_staging_to_range(left, right, expand, !all_staged);
     }
 
+    /// Sets staging for a hunk (and contiguous neighbours when `expand`).
+    pub fn set_hunk(&mut self, hunk_idx: usize, expand: bool, default: bool, staged: bool) {
+        self.ensure_selection_size(default);
+        let (left, right) = self.expanded_bounds(hunk_idx, expand);
+        self.apply_staging_to_range(left, right, expand, staged);
+    }
+
+    /// Sets staging for every modifiable line in the file.
+    pub fn set_all_staging(&mut self, default: bool, staged: bool) {
+        self.ensure_selection_size(default);
+        let total_lines: usize = self.hunks.iter().map(|h| h.lines.len()).sum();
+        for idx in 0..total_lines {
+            self.line_selections.set(idx, staged);
+        }
+    }
+
     /// Inverts all staging selections.
     pub fn invert_staging(&mut self, default: bool) {
         self.ensure_selection_size(default);
@@ -337,5 +353,45 @@ mod tests {
             StagingState::Staged,
             "toggling must stage the hunk, not drop the write"
         );
+    }
+
+    fn two_hunk_diff() -> FileDiff {
+        let hunk = |start: usize| Hunk {
+            before_lines: start..start,
+            after_lines: start..start + 1,
+            lines: vec![DiffLine::Addition {
+                new_line_idx: start,
+                inline_highlights: Vec::new(),
+            }],
+            marker: HunkMarker::None,
+        };
+        FileDiff {
+            old_file_content: Arc::from(""),
+            new_file_content: Arc::from("a\nb"),
+            hunks: vec![hunk(0), hunk(1)],
+            line_selections: LineSelections::default(),
+        }
+    }
+
+    #[test]
+    fn set_hunk_is_deterministic() {
+        let mut diff = two_hunk_diff();
+        diff.set_hunk(0, false, false, true);
+
+        assert!(diff.is_hunk_fully_staged(0, 0, false));
+        assert!(!diff.is_hunk_fully_staged(1, 1, false));
+
+        diff.set_hunk(0, false, false, false);
+        assert!(!diff.is_hunk_fully_staged(0, 0, false));
+    }
+
+    #[test]
+    fn set_all_staging_marks_every_line() {
+        let mut diff = two_hunk_diff();
+        diff.set_all_staging(false, true);
+        assert_eq!(diff.staging_state(false), StagingState::Staged);
+
+        diff.set_all_staging(false, false);
+        assert_eq!(diff.staging_state(false), StagingState::Unstaged);
     }
 }

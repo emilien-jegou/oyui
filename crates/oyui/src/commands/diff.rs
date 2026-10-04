@@ -42,8 +42,12 @@ pub async fn run_diff(
         tree: tree.clone(),
         cache: cache.clone(),
         worker: worker.clone(),
+        left_path: diff_args.left.clone(),
         right_path: diff_args.right.clone(),
+        base_path: diff_args.base.clone(),
+        algorithm: diff_args.diff_algorithm,
         color_mode: options.color_mode.clone(),
+        error: config_error.clone(),
     });
 
     let config = Config {
@@ -52,6 +56,7 @@ pub async fn run_diff(
         handler: handler.clone(),
         keybinds: crate::actions::keybinds::default_keybinds(),
         host: crate::script::RuneHost::new(),
+        worker: worker.clone(),
     };
 
     let mut app = App::builder()

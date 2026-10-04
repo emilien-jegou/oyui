@@ -1480,6 +1480,7 @@ dependencies = [
  "paste",
  "ratatui",
  "rayon",
+ "regex",
  "rune",
  "scc",
  "serde",

@@ -108,6 +108,41 @@ pub fn split_hunk_at_cursor(session: &StagingSession) {
     });
 }
 
+pub fn split_at(session: &StagingSession, hunk_idx: usize, line_idx: usize) {
+    session.mutate_diff(|diff, _tree| {
+        diff.split_hunk(hunk_idx, line_idx, HunkMarker::HunkSplit);
+    });
+}
+
+pub fn join_at_cursor(session: &StagingSession) {
+    let Some(hidx) = session.hunk_idx else {
+        return;
+    };
+    session.mutate_diff(|diff, tree| {
+        let default = is_file_staged_default(tree, &session.path);
+        diff.join_hunk(hidx, true, default);
+        crate::diff::staging::update_tree_staging_state(tree, &session.path, diff, default);
+    });
+}
+
+/// Deterministically stages or unstages a hunk by index.
+pub fn set_hunk_staged(session: &StagingSession, hunk_idx: usize, staged: bool) {
+    session.mutate_diff(|diff, tree| {
+        let default = is_file_staged_default(tree, &session.path);
+        diff.set_hunk(hunk_idx, true, default, staged);
+        crate::diff::staging::update_tree_staging_state(tree, &session.path, diff, default);
+    });
+}
+
+/// Stages or unstages every modifiable line in the open file.
+pub fn set_all(session: &StagingSession, staged: bool) {
+    session.mutate_diff(|diff, tree| {
+        let default = is_file_staged_default(tree, &session.path);
+        diff.set_all_staging(default, staged);
+        crate::diff::staging::update_tree_staging_state(tree, &session.path, diff, default);
+    });
+}
+
 pub fn invert_staging(session: &StagingSession) {
     let has_text_diff = matches!(
         session.cache.diffs.get(&session.path).as_deref(),

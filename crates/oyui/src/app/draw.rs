@@ -1,3 +1,4 @@
+use crate::app::ui_state::{Message, MessageLevel};
 use crate::app::{merge_stats, App, CommandMode};
 use crate::config::UiTheme;
 use crate::view::ViewKind;
@@ -46,8 +47,47 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 
     let cmd_mode = app.ui.lock().command_mode.clone();
 
-    draw_hint_bar(frame, hint_area, &cmd_mode, &app.ui.lock().current, &theme);
-    draw_command_bar(frame, cmd_area, &cmd_mode, &theme);
+    // Expire stale script notifications before rendering them.
+    let message = {
+        let mut ui = app.ui.lock();
+        if ui
+            .message
+            .as_ref()
+            .is_some_and(|m| m.expires_at <= std::time::Instant::now())
+        {
+            ui.message = None;
+        }
+        ui.message.clone()
+    };
+    let status = app.ui.lock().status.clone();
+
+    let view = app.ui.lock().current;
+    let hint_override = app
+        .ui
+        .lock()
+        .hint_formats
+        .get(match view {
+            ViewKind::Tree => "tree",
+            ViewKind::File => "file",
+        })
+        .cloned();
+
+    draw_hint_bar(
+        frame,
+        hint_area,
+        &cmd_mode,
+        &view,
+        hint_override.as_deref(),
+        &theme,
+    );
+    draw_command_bar(
+        frame,
+        cmd_area,
+        &cmd_mode,
+        message.as_ref(),
+        &status,
+        &theme,
+    );
 
     if let CommandMode::ConfirmMerge = cmd_mode {
         let stats = merge_stats::merge_stats(&app.tree, &app.cache);
@@ -60,33 +100,49 @@ fn draw_hint_bar(
     area: Rect,
     mode: &CommandMode,
     view: &ViewKind,
+    script_override: Option<&str>,
     theme: &UiTheme,
 ) {
-    let hints = match mode {
-        CommandMode::Normal => match view {
-            ViewKind::Tree => vec![
-                ("j/k", "move"),
-                ("h/l", "close/open"),
-                ("space", "stage"),
-                ("i", "invert"),
-                (":", "cmd"),
-                ("enter", "merge"),
-                ("q", "quit"),
+    // A script-defined format only applies to the normal mode; modal hints are
+    // fixed because they describe mandatory controls.
+    let script_hints = script_override
+        .filter(|_| matches!(mode, CommandMode::Normal))
+        .map(parse_hint_format);
+
+    let hints = match script_hints {
+        Some(hints) => hints,
+        None => match mode {
+            CommandMode::Normal => match view {
+                ViewKind::Tree => vec![
+                    ("j/k".to_string(), "move".to_string()),
+                    ("h/l".to_string(), "close/open".to_string()),
+                    ("space".to_string(), "stage".to_string()),
+                    ("i".to_string(), "invert".to_string()),
+                    (":".to_string(), "cmd".to_string()),
+                    ("enter".to_string(), "merge".to_string()),
+                    ("q".to_string(), "quit".to_string()),
+                ],
+                ViewKind::File => vec![
+                    ("j/k".to_string(), "move".to_string()),
+                    ("n/N".to_string(), "hunks".to_string()),
+                    ("space".to_string(), "stage".to_string()),
+                    ("z".to_string(), "unfold".to_string()),
+                    ("s".to_string(), "split".to_string()),
+                    ("t".to_string(), "line".to_string()),
+                    ("h/esc".to_string(), "back".to_string()),
+                    ("enter".to_string(), "merge".to_string()),
+                    ("q".to_string(), "quit".to_string()),
+                ],
+            },
+            CommandMode::Active(_) => vec![
+                ("enter".to_string(), "run".to_string()),
+                ("esc".to_string(), "cancel".to_string()),
             ],
-            ViewKind::File => vec![
-                ("j/k", "move"),
-                ("n/N", "hunks"),
-                ("space", "stage"),
-                ("z", "unfold"),
-                ("s", "split"),
-                ("t", "line"),
-                ("h/esc", "back"),
-                ("enter", "merge"),
-                ("q", "quit"),
+            CommandMode::ConfirmMerge => vec![
+                ("enter".to_string(), "confirm".to_string()),
+                ("q/esc".to_string(), "cancel".to_string()),
             ],
         },
-        CommandMode::Active(_) => vec![("enter", "run"), ("esc", "cancel")],
-        CommandMode::ConfirmMerge => vec![("enter", "confirm"), ("q/esc", "cancel")],
     };
 
     let spans: Vec<Span> = hints
@@ -110,7 +166,22 @@ fn draw_hint_bar(
     );
 }
 
-fn draw_command_bar(frame: &mut Frame, area: Rect, mode: &CommandMode, theme: &UiTheme) {
+/// Parses `"key=desc key=desc"`; `_` in a description becomes a space.
+fn parse_hint_format(s: &str) -> Vec<(String, String)> {
+    s.split_whitespace()
+        .filter_map(|token| token.split_once('='))
+        .map(|(k, v)| (k.to_string(), v.replace('_', " ")))
+        .collect()
+}
+
+fn draw_command_bar(
+    frame: &mut Frame,
+    area: Rect,
+    mode: &CommandMode,
+    message: Option<&Message>,
+    status: &str,
+    theme: &UiTheme,
+) {
     if let CommandMode::Active(buf) = mode {
         let line = Line::from(vec![
             Span::styled(
@@ -124,6 +195,29 @@ fn draw_command_bar(frame: &mut Frame, area: Rect, mode: &CommandMode, theme: &U
         ]);
         frame.render_widget(
             Paragraph::new(line).style(Style::default().bg(theme.cursor_bg.into())),
+            area,
+        );
+    } else if let Some(message) = message {
+        let color = match message.level {
+            MessageLevel::Info => theme.fg,
+            MessageLevel::Warn => theme.partial,
+            MessageLevel::Error => theme.del_fg,
+        };
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                format!(" {} ", message.text),
+                Style::default().fg(color.into()),
+            )))
+            .style(Style::default().bg(theme.bg.into())),
+            area,
+        );
+    } else if !status.is_empty() {
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                format!(" {status}"),
+                Style::default().fg(theme.dim.into()),
+            )))
+            .style(Style::default().bg(theme.bg.into())),
             area,
         );
     } else {

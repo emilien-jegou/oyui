@@ -42,6 +42,7 @@ once_cell = { workspace = true }
 paste = { workspace = true }
 scc = { workspace = true }
 libc = { workspace = true }
+regex = { workspace = true }
 
 [dev-dependencies]
 paste = { workspace = true }

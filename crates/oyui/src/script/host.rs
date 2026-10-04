@@ -23,6 +23,14 @@ pub struct RuneHost {
     pub(super) callbacks: Arc<Mutex<HashMap<CallbackId, SyncFunction>>>,
     pub(super) registration: Arc<Mutex<Registration>>,
     pub(super) next_id: Arc<AtomicU64>,
+    /// Named callbacks registered with `command::register`.
+    pub(super) commands: Arc<Mutex<HashMap<String, SyncFunction>>>,
+    /// Zero-arg callbacks registered with `on`, keyed by event name.
+    pub(super) events: Arc<Mutex<HashMap<String, Vec<Arc<SyncFunction>>>>>,
+    /// One-shot callbacks awaiting an off-thread task result.
+    pub(super) tasks: Arc<Mutex<HashMap<u64, SyncFunction>>>,
+    /// Allocator for task callback ids.
+    pub(super) next_task: Arc<AtomicU64>,
 }
 
 impl Default for RuneHost {
@@ -38,17 +46,26 @@ impl RuneHost {
             callbacks: Arc::new(Mutex::new(HashMap::new())),
             registration: Arc::new(Mutex::new(Registration::fresh())),
             next_id: Arc::new(AtomicU64::new(0)),
+            commands: Arc::new(Mutex::new(HashMap::new())),
+            events: Arc::new(Mutex::new(HashMap::new())),
+            tasks: Arc::new(Mutex::new(HashMap::new())),
+            next_task: Arc::new(AtomicU64::new(0)),
         }
     }
 
     /// Context handed to the language server: same modules, unused store.
     pub fn lsp_context(handler: BoxedHandler) -> Result<Context, ContextError> {
-        natives::build_context(&Self::new(), handler)
+        natives::build_context(&Self::new(), handler, None)
     }
 }
 
 impl ScriptHost for RuneHost {
-    fn load(&mut self, path: &Path, handler: BoxedHandler) -> ScriptLoad {
+    fn load(
+        &mut self,
+        path: &Path,
+        handler: BoxedHandler,
+        worker: Option<Arc<crate::worker::EventRegistry>>,
+    ) -> ScriptLoad {
         let span = info_span!("load_config", path = %path.display());
         let _enter = span.enter();
 
@@ -62,9 +79,12 @@ impl ScriptHost for RuneHost {
 
         info!("Config file found. Preparing to compile.");
         self.callbacks.lock().clear();
+        self.commands.lock().clear();
+        self.events.lock().clear();
+        self.tasks.lock().clear();
         *self.registration.lock() = Registration::fresh();
 
-        let context = match natives::build_context(self, handler) {
+        let context = match natives::build_context(self, handler, worker) {
             Ok(context) => context,
             Err(e) => {
                 return failed(default_keybinds(), format!("Failed to build context: {e}"));
@@ -75,10 +95,14 @@ impl ScriptHost for RuneHost {
             Err(e) => return failed(default_keybinds(), e.message),
         };
 
-        let error = compile::run_config_script(&mut vm).err().map(|e| e.message);
+        let run_error = compile::run_config_script(&mut vm).err().map(|e| e.message);
         let keybinds = self.registration.lock().registry.clone();
+        let native_error = self.registration.lock().error.take();
         info!("Config loaded successfully");
 
+        // A `config()` failure aborts the script, so it wins over native
+        // diagnostics collected before the abort; otherwise surface the native.
+        let error = run_error.or(native_error);
         ScriptLoad {
             keybinds: Some(keybinds),
             error: error.map(ScriptError::new),
@@ -95,6 +119,37 @@ impl ScriptHost for RuneHost {
         cb.call::<()>(())
             .into_result()
             .map_err(|e| ScriptError::new(e.to_string()))
+    }
+
+    fn call_command(&self, name: &str, args: &str) -> Result<(), ScriptError> {
+        let commands = self.commands.lock();
+        let Some(cb) = commands.get(name) else {
+            return Err(ScriptError::new(format!("unknown command '{name}'")));
+        };
+        cb.call::<()>((args.to_string(),))
+            .into_result()
+            .map_err(|e| ScriptError::new(format!("command '{name}' failed: {e}")))
+    }
+
+    fn call_event(&self, event: &str) -> Result<(), ScriptError> {
+        let callbacks: Vec<Arc<SyncFunction>> =
+            self.events.lock().get(event).cloned().unwrap_or_default();
+        for cb in callbacks {
+            cb.call::<()>(())
+                .into_result()
+                .map_err(|e| ScriptError::new(format!("event '{event}' failed: {e}")))?;
+        }
+        Ok(())
+    }
+
+    fn call_task(&self, task_id: u64, result: String) -> Result<(), ScriptError> {
+        let cb =
+            self.tasks.lock().remove(&task_id).ok_or_else(|| {
+                ScriptError::new(format!("task {task_id} is no longer registered"))
+            })?;
+        cb.call::<()>((result,))
+            .into_result()
+            .map_err(|e| ScriptError::new(format!("task {task_id} failed: {e}")))
     }
 }
 

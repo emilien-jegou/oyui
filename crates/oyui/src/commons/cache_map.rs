@@ -87,7 +87,10 @@ impl<T> CacheMap<T> {
         state.in_flight.remove(&path);
         // Lock order: state mutex -> scc entry. Never call this while holding the
         // tree lock: `update` closures take the tree lock under the scc entry.
-        let _ = self.inner.insert_sync(path, value);
+        //
+        // `upsert_sync` is required: `insert_sync` rejects existing keys, which
+        // would silently drop updates (e.g. undo restoring a cached diff).
+        let _ = self.inner.upsert_sync(path, value);
         state.version += 1;
         true
     }
@@ -184,5 +187,27 @@ mod tests {
             Some(())
         );
         assert_eq!(map.get(&path).map(|v| *v), Some(42));
+    }
+
+    /// Regression: `set` previously used insert semantics and silently dropped
+    /// writes for already-cached paths (breaking undo restore).
+    #[test]
+    fn set_replaces_an_existing_value() {
+        let map: CacheMap<u32> = CacheMap::default();
+        let path = PathBuf::from("p");
+
+        assert!(map.set(path.clone(), Arc::new(1), map.generation()));
+        assert!(map.set(path.clone(), Arc::new(2), map.generation()));
+        assert_eq!(map.get(&path).map(|v| *v), Some(2));
+    }
+
+    /// The write counter must advance on accepted writes so views can detect
+    /// asynchronous stats updates.
+    #[test]
+    fn version_advances_on_each_write() {
+        let map: CacheMap<u32> = CacheMap::default();
+        let start = map.version();
+        map.set(PathBuf::from("p"), Arc::new(1), map.generation());
+        assert!(map.version() > start);
     }
 }

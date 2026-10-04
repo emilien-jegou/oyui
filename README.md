@@ -60,6 +60,13 @@ environment.systemPackages = [
 ];
 ```
 
+## 📚 Documentation
+
+- [Configuration & scripting](./docs/configuration.md)
+- [Script API reference](./docs/actions.md)
+- [Default keybindings](./docs/keybindings.md)
+- [Builtin themes](./docs/themes.md)
+
 ## ⚙️ Configuration
 
 Setup the default config for oyui at `~/.config/oyui/config.rn`:
@@ -78,8 +85,8 @@ pub fn config() {
 
   // Overwritting theme specific config.
 
-  // 50+ actions and settings to configure, check the documentation:
-  // https://github.com/emilien-jegou/oyui/wiki/Actions-API
+  // 100+ actions and settings to configure, see docs/actions.md:
+  // https://github.com/emilien-jegou/oyui/blob/main/docs/actions.md
   theme::bg::set("#000000");
   theme::file_staged_highlight::set(LineHighlightMode::Gradient(0.05));
 
