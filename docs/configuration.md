@@ -234,6 +234,11 @@ synthesizes a three-way merge from `base`/`left`/`right`. Each conflict shows
 `global::resolve()` re-opens the overlay. Values that are not chosen keep their
 markers, so you can partially resolve.
 
+In a merge session the normal confirm (`enter` in the diff view) never runs the
+two-way staging write; it stays in the resolver until conflicts are chosen, or
+writes the synthesized merge result when there are none. This prevents the
+merge target from being clobbered.
+
 ```rune
 on("config_reload", || {
     if global::conflict_count() > 0 {

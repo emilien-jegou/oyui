@@ -26,6 +26,30 @@ impl GlobalActionsHandler for AppActionsHandler {
             return;
         };
 
+        // Merge sessions resolve through the conflict overlay (or the
+        // synthesized result); the two-way staging write would clobber the
+        // target, so it must not run here.
+        if self.operation == crate::app::Operation::Merge {
+            let snapshot = {
+                let ui = self.ui.lock();
+                ui.resolve.as_ref().map(|s| (s.count(), s.resolved_text()))
+            };
+            match snapshot {
+                Some((count, _)) if count > 0 => {
+                    self.ui.lock().resolve_open = true;
+                    self.set_message(
+                        MessageLevel::Info,
+                        "resolve conflicts, then press enter".into(),
+                    );
+                }
+                Some((_, text)) => self.write_result(&target, text),
+                None => {
+                    self.ui.lock().should_quit = true;
+                }
+            }
+            return;
+        }
+
         let mut tree = self.tree.write();
         let res = crate::app::merge::confirm_and_write(&mut tree, &target, &self.cache);
         match res {
@@ -192,6 +216,17 @@ impl AppActionsHandler {
     /// Sets a transient bottom-bar message with a default lifetime.
     pub(crate) fn set_message(&self, level: MessageLevel, text: String) {
         self.ui.lock().message = Some(Message::new(level, text, Message::DEFAULT_TTL));
+    }
+
+    /// Writes `text` to `target`, quitting the session on success.
+    pub(crate) fn write_result(&self, target: &std::path::Path, text: String) {
+        match std::fs::write(target, text) {
+            Ok(()) => {
+                self.set_message(MessageLevel::Info, format!("wrote {}", target.display()));
+                self.ui.lock().should_quit = true;
+            }
+            Err(e) => self.set_message(MessageLevel::Error, format!("write failed: {e}")),
+        }
     }
 }
 

@@ -159,14 +159,14 @@ fn detect_conflicts(session: &Session, ui: &Arc<Mutex<UiState>>) {
         &read(&session.right_path),
         session.view.diff_algorithm,
     );
-    if merged.conflict_count() > 0 {
-        install(ui, merged);
-    }
+    install(ui, merged);
 }
 
-/// Stores the parsed/synthesized conflicts and opens the resolver.
+/// Stores the parsed/synthesized result and opens the resolver when conflicts
+/// remain (a clean merge stays hidden and is written on confirm).
 fn install(ui: &Arc<Mutex<UiState>>, conflicts: crate::diff::ConflictedFile) {
+    let open = conflicts.conflict_count() > 0;
     let mut guard = ui.lock();
     guard.resolve = Some(crate::app::ui_state::ResolveState::new(conflicts));
-    guard.resolve_open = true;
+    guard.resolve_open = open;
 }
