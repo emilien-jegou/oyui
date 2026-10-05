@@ -65,32 +65,32 @@ pub struct LineRenderer<'a> {
 
 impl<'a> LineRenderer<'a> {
     pub fn render(self) -> Row<'a> {
-        // Conflict markers override the normal add/del/staged styling so they
-        // stand out from the surrounding hunks.
-        let is_add = self.is_add && !self.is_conflict;
-        let is_del = self.is_del && !self.is_conflict;
-        let is_staged = self.is_staged && !self.is_conflict;
+        // Conflict lines use the conflict underlay background across the whole
+        // row (gutter, sign and text); markers additionally get an accent fg.
+        let mut row_style = get_line_style(
+            self.is_add,
+            self.is_del,
+            self.is_selected,
+            self.is_staged,
+            self.is_conflict,
+            self.use_gradient,
+            self.theme,
+        );
 
-        let row_style = if self.is_conflict {
-            conflict_marker_style(self.content, self.theme)
-        } else {
-            get_line_style(
-                is_add,
-                is_del,
-                self.is_selected,
-                is_staged,
-                self.use_gradient,
-                self.theme,
-            )
-        };
+        if self.is_conflict {
+            if let Some(fg) = conflict_marker_fg(self.content, self.theme) {
+                row_style = row_style.fg(fg.into()).add_modifier(Modifier::BOLD);
+            }
+        }
 
         let mut row_cells = GutterRenderer {
             config: self.gutter_config,
             idx: self.idx,
-            is_add,
-            is_del,
+            is_add: self.is_add,
+            is_del: self.is_del,
             is_selected: self.is_selected,
-            is_staged,
+            is_staged: self.is_staged,
+            is_conflict: self.is_conflict,
             mode: self.mode,
             use_gradient: self.use_gradient,
             area_width: self.area_width,
@@ -104,10 +104,16 @@ impl<'a> LineRenderer<'a> {
         let text_cell = TextRenderer {
             content: self.content,
             idx: self.idx,
-            is_add,
-            is_del,
+            is_add: self.is_add && !self.is_conflict,
+            is_del: self.is_del && !self.is_conflict,
             is_selected: self.is_selected,
-            is_staged,
+            is_staged: self.is_staged,
+            is_conflict: self.is_conflict,
+            conflict_fg: if self.is_conflict {
+                conflict_marker_fg(self.content, self.theme)
+            } else {
+                None
+            },
             inline_highlights: self.inline_highlights,
             syntax_opt: if self.is_conflict {
                 None
@@ -130,20 +136,17 @@ impl<'a> LineRenderer<'a> {
     }
 }
 
-/// Prominent style for a conflict marker line.
-fn conflict_marker_style(content: &str, theme: &UiTheme) -> Style {
-    let base = Style::default()
-        .bg(theme.cursor_bg.into())
-        .add_modifier(Modifier::BOLD);
+/// Accent foreground for a conflict marker line, using theme accent colors.
+fn conflict_marker_fg(content: &str, theme: &UiTheme) -> Option<crate::config::theme::Color> {
     if content.starts_with("<<<<<<<") {
-        base.fg(theme.staged.into())
+        Some(theme.staged)
     } else if content.starts_with(">>>>>>>") {
-        base.fg(theme.del_fg.into())
+        Some(theme.del_fg)
     } else if content.starts_with("|||||||") {
-        base.fg(theme.partial.into())
+        Some(theme.partial)
     } else if content.starts_with("=======") {
-        base.fg(theme.cmd.into())
+        Some(theme.cmd)
     } else {
-        base
+        None
     }
 }

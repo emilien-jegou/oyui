@@ -144,6 +144,15 @@ pub struct UiTheme {
     #[builder(default = 0.1)]
     pub file_change_highlight_opacity: f64,
 
+    /// Underlay behind conflict blocks. `None` derives it from the background.
+    #[builder(default = None)]
+    pub conflict_bg: Option<Color>,
+    /// Conflict underlay highlight: `None` disables it.
+    #[builder(default = LineHighlightMode::Solid)]
+    pub file_conflict_highlight: LineHighlightMode,
+    #[builder(default = 1.0)]
+    pub file_conflict_highlight_opacity: f64,
+
     #[builder(default = "◣".to_string())]
     pub char_hunk_split: String,
     #[builder(default = "▶".to_string())]

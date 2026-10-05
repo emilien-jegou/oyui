@@ -163,6 +163,7 @@ macros::impl_color_getset!(char_trailing_space_fg);
 macros::impl_color_getset!(char_tab_fg);
 macros::impl_opt_color_getset!(char_line_split_color);
 macros::impl_opt_color_getset!(char_hunk_split_color);
+macros::impl_opt_color_getset!(conflict_bg);
 
 // String fields
 macros::impl_ty_getset!(tree_progressive_change_dim, bool);
@@ -215,5 +216,25 @@ impl ThemeFileChangeHighlightOpacityActionsHandler for AppThemeActionsHandler {
 
     fn set(&self, val: f64) {
         self.theme.write().ui.file_change_highlight_opacity = val;
+    }
+}
+
+impl ThemeFileConflictHighlightActionsHandler for AppThemeActionsHandler {
+    fn get(&self) -> LineHighlightMode {
+        self.theme.read().ui.file_conflict_highlight
+    }
+
+    fn set(&self, val: LineHighlightMode) {
+        self.theme.write().ui.file_conflict_highlight = val;
+    }
+}
+
+impl ThemeFileConflictHighlightOpacityActionsHandler for AppThemeActionsHandler {
+    fn get(&self) -> f64 {
+        self.theme.read().ui.file_conflict_highlight_opacity
+    }
+
+    fn set(&self, val: f64) {
+        self.theme.write().ui.file_conflict_highlight_opacity = val;
     }
 }

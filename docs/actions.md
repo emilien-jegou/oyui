@@ -153,6 +153,9 @@ or `"none"` to clear the override.
 | `theme::file_staged_highlight_opacity` | `f64` | Gradient opacity for staged lines. |
 | `theme::file_change_highlight` | `LineHighlightMode` | Changed-line highlight. |
 | `theme::file_change_highlight_opacity` | `f64` | Gradient opacity for changed lines. |
+| `theme::file_conflict_highlight` | `LineHighlightMode` | Conflict-block underlay: `None` disables it. |
+| `theme::file_conflict_highlight_opacity` | `f64` | Conflict underlay opacity. |
+| `theme::conflict_bg` | `String` | Underlay color for conflict blocks; `""` derives it from the background (darkened, or lightened when the background is near-black). |
 
 ### Glyphs and strings
 

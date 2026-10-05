@@ -95,6 +95,11 @@ define_actions! {
         file_change_highlight { @getset(LineHighlightMode) }
         file_change_highlight_opacity { @getset(f64) }
 
+        // Conflict-block underlay. `conflict_bg` empty derives it from the bg.
+        conflict_bg { @getset(String) }
+        file_conflict_highlight { @getset(LineHighlightMode) }
+        file_conflict_highlight_opacity { @getset(f64) }
+
         char_hunk_split { @getset(String) }
         char_hunk_split_color { @getset(String) }
         char_line_split { @getset(String) }

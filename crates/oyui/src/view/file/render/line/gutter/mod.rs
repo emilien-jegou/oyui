@@ -42,6 +42,8 @@ pub struct GutterRenderer<'a> {
     pub is_selected: bool,
     #[builder(default)]
     pub is_staged: bool,
+    #[builder(default)]
+    pub is_conflict: bool,
     pub mode: HunkMarker,
     #[builder(default)]
     pub use_gradient: bool,
@@ -60,6 +62,7 @@ impl<'a> GutterRenderer<'a> {
             .is_add(self.is_add)
             .is_del(self.is_del)
             .is_staged(self.is_staged)
+            .is_conflict(self.is_conflict)
             .theme(self.theme)
             .custom_style(self.config.number_style)
             .build();
@@ -99,6 +102,7 @@ impl<'a> GutterRenderer<'a> {
                     .is_del(self.is_del)
                     .is_staged(self.is_staged)
                     .is_selected(self.is_selected)
+                    .is_conflict(self.is_conflict)
                     .use_gradient(self.use_gradient)
                     .area_width(self.area_width)
                     .row_style(self.row_style)

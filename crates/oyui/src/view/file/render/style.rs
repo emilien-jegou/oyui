@@ -1,17 +1,45 @@
 use crate::{
     config::{theme::Color, LineHighlightMode, UiTheme},
-    view::file::utils::colors::{darken_color, lighten_color, safe_lerp_color},
+    view::file::utils::colors::{darken_color, lighten_color, safe_lerp_color, underlay_of},
 };
 use ratatui::style::Style;
+
+/// The underlay color behind conflict blocks, blended by the configured
+/// opacity. `conflict_bg` overrides the derived darken/lighten of the theme bg.
+pub fn conflict_underlay(theme: &UiTheme) -> Color {
+    let raw = theme
+        .conflict_bg
+        .unwrap_or_else(|| underlay_of(&theme.bg).unwrap_or(theme.cursor_bg));
+    safe_lerp_color(
+        &theme.bg,
+        &raw,
+        theme.file_conflict_highlight_opacity as f32,
+    )
+}
+
+/// True when the conflict underlay highlight is enabled.
+fn conflict_highlight_on(theme: &UiTheme) -> bool {
+    !matches!(theme.file_conflict_highlight, LineHighlightMode::None)
+}
 
 pub fn get_line_style(
     is_add: bool,
     is_del: bool,
     is_selected: bool,
     is_staged: bool,
+    is_conflict: bool,
     use_gradient: bool,
     theme: &UiTheme,
 ) -> Style {
+    // Conflict lines get the underlay instead of the change/staged colors.
+    if is_conflict && conflict_highlight_on(theme) {
+        let mut bg = conflict_underlay(theme);
+        if is_selected {
+            bg = safe_lerp_color(&theme.cursor_bg, &bg, 0.3);
+        }
+        return Style::default().fg(theme.fg.into()).bg(bg.into());
+    }
+
     let is_add_or_del = is_add || is_del;
 
     // We only use an uncolored row background (theme.bg or cursor_bg) if the file change highlight
@@ -123,10 +151,13 @@ pub fn to_tui_style(style: syntect::highlighting::Style) -> Style {
 pub struct LineBgCalculator {
     grad1_width: f32,
     grad2_width: f32,
+    grad_conflict_width: f32,
     use_grad_change: bool,
     use_gradient_change_solid: bool,
     use_staged_grad: bool,
     use_staged_solid: bool,
+    use_conflict: bool,
+    use_conflict_grad: bool,
     is_selected: bool,
     is_staged: bool,
     is_add_or_del: bool,
@@ -136,6 +167,7 @@ pub struct LineBgCalculator {
     cursor_bg: Color,
     neutral_change_bg: Color,
     neutral_accent_bg_grad: Color,
+    conflict_bg: Color,
 }
 
 impl LineBgCalculator {
@@ -144,6 +176,7 @@ impl LineBgCalculator {
         is_del: bool,
         is_selected: bool,
         is_staged: bool,
+        is_conflict: bool,
         use_gradient: bool,
         area_width: u16,
         theme: &UiTheme,
@@ -157,6 +190,19 @@ impl LineBgCalculator {
             LineHighlightMode::Gradient(pct) => (area_width as f64 * pct).max(1.0) as f32,
             _ => 1.0,
         };
+        let grad_conflict_width = match theme.file_conflict_highlight {
+            LineHighlightMode::Gradient(pct) => (area_width as f64 * pct).max(1.0) as f32,
+            _ => 1.0,
+        };
+
+        let use_conflict = is_conflict && conflict_highlight_on(theme);
+        let use_conflict_grad = use_gradient
+            && use_conflict
+            && matches!(
+                theme.file_conflict_highlight,
+                LineHighlightMode::Gradient(_)
+            );
+        let conflict_bg = conflict_underlay(theme);
 
         let is_add_or_del = is_add || is_del;
         let use_grad_change = use_gradient
@@ -206,10 +252,13 @@ impl LineBgCalculator {
         Self {
             grad1_width,
             grad2_width,
+            grad_conflict_width,
             use_grad_change,
             use_gradient_change_solid,
             use_staged_grad,
             use_staged_solid,
+            use_conflict,
+            use_conflict_grad,
             is_selected,
             is_staged,
             is_add_or_del,
@@ -217,10 +266,25 @@ impl LineBgCalculator {
             cursor_bg: theme.cursor_bg,
             neutral_change_bg,
             neutral_accent_bg_grad,
+            conflict_bg,
         }
     }
 
     pub fn get_bg(&self, visual_x: usize) -> Color {
+        if self.use_conflict {
+            let base = if self.use_conflict_grad {
+                let t = (visual_x as f32 / self.grad_conflict_width).clamp(0.0, 1.0);
+                safe_lerp_color(&self.conflict_bg, &self.bg, t)
+            } else {
+                self.conflict_bg
+            };
+            return if self.is_selected {
+                safe_lerp_color(&self.cursor_bg, &base, 0.2)
+            } else {
+                base
+            };
+        }
+
         let base_bg_neutral = if self.use_grad_change {
             let t1 = (visual_x as f32 / self.grad1_width).clamp(0.0, 1.0);
             safe_lerp_color(&self.neutral_change_bg, &self.bg, t1)
@@ -258,6 +322,6 @@ impl LineBgCalculator {
     }
 
     pub fn char_by_char(&self) -> bool {
-        self.use_grad_change || self.use_staged_grad
+        self.use_grad_change || self.use_staged_grad || self.use_conflict_grad
     }
 }

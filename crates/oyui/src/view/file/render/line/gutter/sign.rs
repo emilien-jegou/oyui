@@ -14,6 +14,8 @@ pub struct GutterSign<'a> {
     pub is_del: bool,
     pub is_staged: bool,
     pub is_selected: bool,
+    #[builder(default)]
+    pub is_conflict: bool,
     pub use_gradient: bool,
     pub area_width: u16,
     pub row_style: Style,
@@ -73,6 +75,7 @@ impl<'a> GutterSign<'a> {
             self.is_del,
             self.is_selected,
             self.is_staged,
+            self.is_conflict,
             self.use_gradient,
             self.area_width,
             self.theme,

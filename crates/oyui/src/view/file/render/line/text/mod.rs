@@ -33,6 +33,8 @@ pub struct TextRenderer<'a> {
     pub is_del: bool,
     pub is_selected: bool,
     pub is_staged: bool,
+    pub is_conflict: bool,
+    pub conflict_fg: Option<crate::config::theme::Color>,
     pub inline_highlights: &'a [InlineChange],
     pub syntax_opt: Option<&'a Vec<Vec<(syntect::highlighting::Style, String)>>>,
     pub area_width: u16,
@@ -58,6 +60,7 @@ impl<'a> TextRenderer<'a> {
             self.is_del,
             self.is_selected,
             self.is_staged,
+            self.is_conflict,
             self.use_gradient,
             self.area_width,
             self.theme,
@@ -196,6 +199,9 @@ impl<'a> TextRenderer<'a> {
             }
             if self.is_del {
                 base_style = base_style.fg(self.theme.del_fg.into());
+            }
+            if let Some(fg) = self.conflict_fg {
+                base_style = base_style.fg(fg.into());
             }
 
             let mut token_offset = 0;

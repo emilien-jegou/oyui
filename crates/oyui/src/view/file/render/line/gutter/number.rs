@@ -1,4 +1,5 @@
 use crate::config::UiTheme;
+use crate::view::file::render::style::conflict_underlay;
 use crate::view::file::utils::colors::safe_lerp_color;
 use ratatui::{style::Style, text::Span, widgets::Cell};
 use typed_builder::TypedBuilder;
@@ -12,6 +13,8 @@ pub struct GutterNumber<'a> {
     pub is_add: bool,
     pub is_del: bool,
     pub is_staged: bool,
+    #[builder(default)]
+    pub is_conflict: bool,
     pub theme: &'a UiTheme,
     #[builder(default)]
     pub custom_style: Option<Style>,
@@ -19,6 +22,16 @@ pub struct GutterNumber<'a> {
 
 impl<'a> GutterNumber<'a> {
     pub fn compute_style(&self) -> Style {
+        if self.is_conflict {
+            let mut style = Style::default()
+                .bg(conflict_underlay(self.theme).into())
+                .fg(self.theme.fg.into());
+            if let Some(override_style) = self.custom_style {
+                style = style.patch(override_style);
+            }
+            return style;
+        }
+
         let mut line_num_style = if self.is_selected {
             if self.is_staged && (self.is_add || self.is_del) {
                 Style::default()

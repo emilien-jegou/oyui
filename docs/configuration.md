@@ -235,6 +235,18 @@ Resolving rewrites the working file and recomputes the diff in place, so the
 markers disappear as you go. `global::conflict_count()` reports how many
 conflicts were detected.
 
+The whole conflict line — gutter, sign and text — sits on a dedicated
+**conflict underlay** highlight, defaulting to a darkened version of the theme
+background (lightened when the background is near-black). Marker lines use the
+theme's accent colors. Override it like any other highlight:
+
+```rune
+theme::conflict_bg::set("#202030");                 // explicit underlay color
+theme::file_conflict_highlight::set(LineHighlightMode::None);      // off
+theme::file_conflict_highlight::set(LineHighlightMode::Gradient(0.2));
+theme::file_conflict_highlight_opacity::set(0.6);
+```
+
 Confirming follows the integration's rules:
 
 - **git / mergetool** (default): `enter` refuses to confirm while conflicts

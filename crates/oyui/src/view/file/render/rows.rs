@@ -59,6 +59,7 @@ impl<'a> RowBuilder<'a> {
         let mut selection_idx = 0usize;
         let mut current_new = 0usize;
         let mut visual_row_idx = 0usize;
+        let mut in_conflict = false;
 
         macro_rules! push_row {
             ($row:expr) => {{
@@ -96,7 +97,8 @@ impl<'a> RowBuilder<'a> {
                     .idx(current_new)
                     .is_selected(is_selected)
                     .is_staged(true)
-                    .is_conflict(crate::diff::conflict::is_marker_line(
+                    .is_conflict(conflict_flags(
+                        &mut in_conflict,
                         self.new_lines[current_new]
                     ))
                     .syntax_opt(self.syntax_opt)
@@ -132,7 +134,7 @@ impl<'a> RowBuilder<'a> {
                             .idx(*new_line_idx)
                             .is_selected(is_selected)
                             .is_staged(is_staged)
-                            .is_conflict(crate::diff::conflict::is_marker_line(line))
+                            .is_conflict(conflict_flags(&mut in_conflict, line))
                             .mode(line_mode)
                             .syntax_opt(self.syntax_opt)
                             .area_width(self.area_width)
@@ -155,6 +157,7 @@ impl<'a> RowBuilder<'a> {
                             .is_del(true)
                             .is_selected(is_selected)
                             .is_staged(is_staged)
+                            .is_conflict(in_conflict)
                             .mode(line_mode)
                             .inline_highlights(inline_highlights)
                             .area_width(self.area_width)
@@ -176,7 +179,7 @@ impl<'a> RowBuilder<'a> {
                             .is_add(true)
                             .is_selected(is_selected)
                             .is_staged(is_staged)
-                            .is_conflict(crate::diff::conflict::is_marker_line(line))
+                            .is_conflict(conflict_flags(&mut in_conflict, line))
                             .mode(line_mode)
                             .inline_highlights(inline_highlights)
                             .syntax_opt(self.syntax_opt)
@@ -230,7 +233,8 @@ impl<'a> RowBuilder<'a> {
                     .idx(current_new)
                     .is_selected(is_selected)
                     .is_staged(true)
-                    .is_conflict(crate::diff::conflict::is_marker_line(
+                    .is_conflict(conflict_flags(
+                        &mut in_conflict,
                         self.new_lines[current_new]
                     ))
                     .syntax_opt(self.syntax_opt)
@@ -258,6 +262,21 @@ impl<'a> RowBuilder<'a> {
 
         total
     }
+}
+
+/// Tracks whether `line` lies inside a conflict block (markers inclusive).
+fn conflict_flags(in_conflict: &mut bool, line: &str) -> bool {
+    if line.starts_with("<<<<<<<") {
+        *in_conflict = true;
+        return true;
+    }
+    if *in_conflict {
+        if line.starts_with(">>>>>>>") {
+            *in_conflict = false;
+        }
+        return true;
+    }
+    false
 }
 
 #[cfg(test)]

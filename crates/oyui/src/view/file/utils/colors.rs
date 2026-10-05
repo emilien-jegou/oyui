@@ -49,6 +49,18 @@ pub fn darken_color(c: &Color, factor: f32) -> Color {
     )
 }
 
+/// Underlay for conflict blocks: a darkened background, or a lightened one
+/// when the background is too dark to darken further.
+pub fn underlay_of(bg: &Color) -> Option<Color> {
+    let (r, g, b) = bg.try_as_rgb()?;
+    let luminance = 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32;
+    if luminance < 32.0 {
+        Some(lighten_color(bg, 0.14))
+    } else {
+        Some(darken_color(bg, 0.14))
+    }
+}
+
 pub fn lighten_color(c: &Color, factor: f32) -> Color {
     let (r, g, b) = match c {
         Color::Rgb(r, g, b) => (*r, *g, *b),
