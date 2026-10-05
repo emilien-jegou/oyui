@@ -1,5 +1,45 @@
 # Examples
 
+Two kinds of example live here:
+
+- **Configurations** — runnable `.rn` files (see the table below).
+- **Scenario fixtures** — data under `diff/`, `merge/`, `conflict/` driven by
+  [`example.sh`](./example.sh).
+
+## Running scenarios
+
+`example.sh` is the single entrypoint. It drives the **local** binary (built
+from this checkout) and copies fixtures into a scratch directory so writes
+never touch the repository.
+
+```sh
+examples/example.sh list          # list scenarios
+examples/example.sh help          # usage
+examples/example.sh merge         # three-way merge with a conflict
+examples/example.sh git-mergetool # resolve a real git conflict with oyui
+examples/example.sh check         # verify fixtures + run the test suite
+examples/example.sh clean
+```
+
+| Scenario | What it does |
+|---|---|
+| `diff` | Read-only two-way directory diff. |
+| `staged` | Stage a two-way diff; the result is written back to the copy. |
+| `merge` | Synthesized three-way merge with a conflicting region. |
+| `merge-clean` | Synthesized three-way merge with no conflicts. |
+| `conflict` | Resolve a target that already contains conflict markers. |
+| `git-difftool` | Run oyui through `git difftool` on a scratch repo. |
+| `git-mergetool` | Run oyui through `git mergetool` on a scratch repo. |
+| `jj-diffedit` / `jj-resolve` | Same via `jj` (needs `jj` installed). |
+| `check` | Validate fixtures and run `cargo test -p oyui`. |
+| `clean` | Remove the scratch directory. |
+
+Environment: `OYUI_BIN` to pick a binary, `OYUI_EXAMPLES_DIR` for the scratch
+dir (default `/tmp/oyui-examples`), `OYUI_EXAMPLE_DRY=1` to print the command
+instead of launching the TUI.
+
+## Configurations
+
 Runnable `.rn` configuration snippets. Each file is a complete
 `config()` you can copy to `~/.config/oyui/config.rn` or load with
 `oyui -c examples/<file>`.

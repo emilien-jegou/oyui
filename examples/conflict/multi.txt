@@ -1,0 +1,13 @@
+alpha
+<<<<<<< ours
+ours one
+=======
+theirs one
+>>>>>>> theirs
+beta
+<<<<<<< ours
+ours two
+=======
+theirs two
+>>>>>>> theirs
+gamma

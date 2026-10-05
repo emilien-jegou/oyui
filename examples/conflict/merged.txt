@@ -1,0 +1,10 @@
+fn main() {
+<<<<<<< ours
+    let value = 1;
+||||||| base
+    let value = 0;
+=======
+    let value = 2;
+>>>>>>> theirs
+    println!("value = {value}");
+}
