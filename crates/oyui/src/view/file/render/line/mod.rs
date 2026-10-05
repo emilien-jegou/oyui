@@ -136,17 +136,8 @@ impl<'a> LineRenderer<'a> {
     }
 }
 
-/// Accent foreground for a conflict marker line, using theme accent colors.
+/// Accent foreground for conflict marker lines: one consistent color for the
+/// whole conflict (no per-marker rainbow).
 fn conflict_marker_fg(content: &str, theme: &UiTheme) -> Option<crate::config::theme::Color> {
-    if content.starts_with("<<<<<<<") {
-        Some(theme.staged)
-    } else if content.starts_with(">>>>>>>") {
-        Some(theme.del_fg)
-    } else if content.starts_with("|||||||") {
-        Some(theme.partial)
-    } else if content.starts_with("=======") {
-        Some(theme.cmd)
-    } else {
-        None
-    }
+    crate::diff::conflict::is_marker_line(content).then_some(theme.partial)
 }
