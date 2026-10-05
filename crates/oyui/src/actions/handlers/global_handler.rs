@@ -78,6 +78,14 @@ impl GlobalActionsHandler for AppActionsHandler {
         self.write_target.is_some()
     }
 
+    fn conflict_count(&self) -> u32 {
+        self.ui
+            .lock()
+            .conflicts
+            .as_ref()
+            .map_or(0, |c| c.conflict_count() as u32)
+    }
+
     fn switch(&self, view: String) {
         let target = match view.to_lowercase().as_str() {
             "file" => crate::view::ViewKind::File,

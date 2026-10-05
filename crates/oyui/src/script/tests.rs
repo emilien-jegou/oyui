@@ -239,6 +239,7 @@ fn the_full_api_surface_compiles() {
             let _ = global::algorithm();
             let _ = global::operation();
             let _ = global::writable();
+            let _ = global::conflict_count();
             global::switch("tree");
             global::command("invert");
             global::clear_error();

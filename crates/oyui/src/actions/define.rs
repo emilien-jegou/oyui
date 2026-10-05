@@ -18,6 +18,7 @@ define_actions! {
         algorithm(|| -> String)
         operation(|| -> String)
         writable(|| -> bool)
+        conflict_count(|| -> u32)
 
         // Switch the active pane and run a command-palette command.
         switch(String)

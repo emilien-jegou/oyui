@@ -83,6 +83,8 @@ pub struct UiState {
     pub status: String,
     /// Open keybinding-help overlay, if any.
     pub help: Option<HelpState>,
+    /// Parsed conflicts found in the merge target, if any.
+    pub conflicts: Option<crate::diff::ConflictedFile>,
     /// Bounded undo/redo history for staging mutations.
     pub undo: crate::app::undo::UndoStack,
 }
@@ -101,6 +103,7 @@ impl UiState {
             message: None,
             status: String::new(),
             help: None,
+            conflicts: None,
             undo: crate::app::undo::UndoStack::default(),
         }
     }

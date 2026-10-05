@@ -2,9 +2,11 @@ use std::fmt;
 use std::ops::Range;
 use std::sync::Arc;
 
+pub mod conflict;
 pub mod line_selections;
 pub mod staging;
 
+pub use conflict::{ConflictedFile, Side};
 pub use line_selections::LineSelections;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

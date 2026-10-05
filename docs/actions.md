@@ -40,6 +40,7 @@ Session-level actions and context.
 | `global::algorithm()` | `String` | Diff algorithm: `histogram`, `myers`, `myersminimal`, `syntaxaware`. |
 | `global::operation()` | `String` | Session kind: `diff` or `merge`. |
 | `global::writable()` | `bool` | Whether confirming writes a result (`false` for `diff --no-write`). |
+| `global::conflict_count()` | `u32` | Conflicts detected in the merge target (0 when none/not a merge). |
 | `global::switch(view)` | | Switch pane; `view` is `"file"` or `"tree"`. |
 | `global::command(cmd)` | | Run a palette command (see [commands](#palette-commands)). |
 | `global::undo()` | | Undo the last staging mutation. |
