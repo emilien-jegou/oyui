@@ -1,10 +1,10 @@
-//! Inline conflict resolution for merge sessions.
+//! Inline conflict folding for merge sessions.
 //!
-//! Conflicts are rendered as ordinary file lines (with visible markers), so
-//! resolving one splices the chosen side into the working file, rewrites it,
-//! and recomputes the diff in place.
+//! Selecting a side (`o`/`T`/`B`) folds the conflict to a summary marker
+//! instead of rewriting the file: the markers stay on disk, so a choice can be
+//! revisited and (for jj) the conflict can be confirmed as-is. Pressing `o`
+//! again expands the conflict.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::actions::handlers::AppActionsHandler;
@@ -27,7 +27,7 @@ impl ViewFileConflictActionsHandler for AppActionsHandler {
 }
 
 impl AppActionsHandler {
-    /// Resolves the conflict under the cursor with `side`, then refreshes.
+    /// Folds (or, for `ours`, re-expands) the conflict under the cursor.
     fn resolve_conflict(&self, side: Side) {
         if self.reject_read_only() {
             return;
@@ -38,67 +38,62 @@ impl AppActionsHandler {
             return;
         };
 
-        let (has_state, index) = {
+        let index = {
             let ui = self.ui.lock();
-            match ui.resolve.as_ref() {
-                Some(state) => (true, state.conflict_at_line(line)),
-                None => (false, None),
-            }
+            ui.resolve
+                .as_ref()
+                .and_then(|state| state.conflict_at_line(line))
         };
-
-        if !has_state {
-            self.set_message(MessageLevel::Info, "no conflicts to resolve".into());
-            return;
-        }
         let Some(index) = index else {
             self.set_message(MessageLevel::Info, "no conflict under cursor".into());
             return;
         };
 
-        let text = {
+        let folded = {
             let mut ui = self.ui.lock();
-            let state = ui.resolve.as_mut().expect("checked above");
-            state.set_choice(index, side);
-            state.resolved_text()
+            let state = ui.resolve.as_mut().expect("conflict index implies state");
+            if side == Side::Ours && state.is_folded(index) {
+                // `o` on a folded conflict expands it again.
+                state.set_folded(index, false);
+                false
+            } else {
+                state.set_choice(index, side);
+                state.set_folded(index, true);
+                true
+            }
         };
 
-        let Some(target) = self.write_target.clone() else {
-            return;
-        };
-        if let Err(e) = std::fs::write(&target, &text) {
-            self.set_message(MessageLevel::Error, format!("write failed: {e}"));
-            return;
-        }
+        let text = self
+            .ui
+            .lock()
+            .resolve
+            .as_ref()
+            .map(|state| state.display_text())
+            .unwrap_or_default();
+        self.refresh_open_with(text);
 
-        self.refresh_open_diff();
-
-        let label = match side {
-            Side::Ours => "ours",
-            Side::Theirs => "theirs",
-            Side::Both => "both",
-        };
         self.set_message(
             MessageLevel::Info,
-            format!("conflict {} -> {label}", index + 1),
+            format!(
+                "conflict {} {}",
+                index + 1,
+                if folded { "folded" } else { "expanded" }
+            ),
         );
     }
 
-    /// Recomputes the open file's diff from disk after its content changed.
-    fn refresh_open_diff(&self) {
+    /// Recomputes the open file's diff from `new` (display) content.
+    fn refresh_open_with(&self, new: String) {
         let Some(path) = self.ui.lock().file_view.current_path.clone() else {
             return;
         };
-        let Some((left, right)) = self.tree.read().find_paths(&path) else {
+        let Some((left, _right)) = self.tree.read().find_paths(&path) else {
             return;
         };
-
-        let read = |p: &Option<PathBuf>| {
-            p.as_ref()
-                .map(|p| std::fs::read_to_string(p).unwrap_or_default())
-                .unwrap_or_default()
-        };
-        let old = read(&left);
-        let new = read(&right);
+        let old = left
+            .as_ref()
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .unwrap_or_default();
 
         let Ok(hunks) =
             crate::worker::tasks::full_diff::compute(&self.algorithm, &old, &new, &path)

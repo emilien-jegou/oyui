@@ -237,9 +237,9 @@ Merge sessions only; these resolve the conflict under the cursor inline.
 
 | Function | Returns | Description |
 |---|---|---|
-| `view::file::conflict::ours()` | | Replace the conflict with the ours side. |
-| `view::file::conflict::theirs()` | | Replace the conflict with the theirs side. |
-| `view::file::conflict::both()` | | Replace the conflict with ours followed by theirs. |
+| `view::file::conflict::ours()` | | Fold the conflict with ours; call again to expand. |
+| `view::file::conflict::theirs()` | | Fold the conflict with theirs. |
+| `view::file::conflict::both()` | | Fold the conflict with ours followed by theirs. |
 
 ### Folding and file
 

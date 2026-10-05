@@ -39,9 +39,9 @@ Active in every view.
 | `s` | Split hunk at the cursor |
 | `i` | Invert selections |
 | `z` | Toggle unchanged-context folding |
-| `o` | Resolve the conflict at the cursor: ours |
-| `T` | Resolve the conflict at the cursor: theirs |
-| `B` | Resolve the conflict at the cursor: both |
+| `o` | Fold the conflict at the cursor (ours); press again to expand |
+| `T` | Fold the conflict at the cursor (theirs) |
+| `B` | Fold the conflict at the cursor (both) |
 
 ## Tree view
 

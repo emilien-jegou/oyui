@@ -27,19 +27,28 @@ pub struct HelpState {
 }
 
 /// Conflict-resolution state for the merge target, rendered inline.
+///
+/// Folding is display-only: the file on disk keeps its markers, so a choice can
+/// be revisited and (for jj) the conflict can be confirmed as-is.
 #[derive(Clone, Debug)]
 pub struct ResolveState {
     /// Parsed conflicts from the working file.
     pub conflicts: crate::diff::ConflictedFile,
     /// Chosen side per conflict; `None` keeps the markers.
     pub choices: Vec<Option<crate::diff::Side>>,
+    /// Whether each conflict is collapsed to a summary line.
+    pub folded: Vec<bool>,
 }
 
 impl ResolveState {
-    /// Builds a resolver with nothing chosen yet.
+    /// Builds a resolver with nothing chosen or folded.
     pub fn new(conflicts: crate::diff::ConflictedFile) -> Self {
-        let choices = vec![None; conflicts.conflict_count()];
-        Self { conflicts, choices }
+        let count = conflicts.conflict_count();
+        Self {
+            conflicts,
+            choices: vec![None; count],
+            folded: vec![false; count],
+        }
     }
 
     /// Number of conflicts.
@@ -57,6 +66,11 @@ impl ResolveState {
         self.choices.get(index).copied().flatten()
     }
 
+    /// Whether conflict `index` is folded.
+    pub fn is_folded(&self, index: usize) -> bool {
+        self.folded.get(index).copied().unwrap_or(false)
+    }
+
     /// Sets the chosen side for conflict `index`.
     pub fn set_choice(&mut self, index: usize, side: crate::diff::Side) {
         if let Some(slot) = self.choices.get_mut(index) {
@@ -64,12 +78,27 @@ impl ResolveState {
         }
     }
 
-    /// The conflict whose line range contains `line` in the current rendering.
-    pub fn conflict_at_line(&self, line: usize) -> Option<usize> {
-        self.conflicts.conflict_at_line(line, &self.choices)
+    /// Sets the folded state for conflict `index`.
+    pub fn set_folded(&mut self, index: usize, folded: bool) {
+        if let Some(slot) = self.folded.get_mut(index) {
+            *slot = folded;
+        }
     }
 
-    /// Renders the file with the chosen sides; unresolved conflicts keep markers.
+    /// The conflict whose line range contains `line` in the current rendering.
+    pub fn conflict_at_line(&self, line: usize) -> Option<usize> {
+        self.conflicts
+            .display_ranges(&self.folded)
+            .into_iter()
+            .position(|r| r.contains(&line))
+    }
+
+    /// On-screen content: folded conflicts collapse to a summary marker.
+    pub fn display_text(&self) -> String {
+        self.conflicts.display(&self.folded, &self.choices)
+    }
+
+    /// Content to write on confirm: chosen sides applied, others keep markers.
     pub fn resolved_text(&self) -> String {
         self.conflicts.resolve_optional(&self.choices)
     }
@@ -189,8 +218,12 @@ b
         assert_eq!(state.resolved_count(), 1);
         assert!(state.resolved_text().contains("one"));
         assert!(!state.resolved_text().contains("two"));
-        // After resolving, the block is just the "one" line at index 1.
+
+        // Folding collapses the block to a single summary line.
+        state.set_folded(0, true);
         assert_eq!(state.conflict_at_line(1), Some(0));
+        assert_eq!(state.conflict_at_line(3), None);
+        assert!(state.display_text().contains("<<<<<<< ours ⋯ >>>>>>>"));
     }
 
     #[test]

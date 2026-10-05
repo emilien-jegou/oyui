@@ -223,17 +223,18 @@ prominently among the surrounding hunks. There is no separate window. Markers
 are read from the target (git's `$MERGED`); if the target is clean, oyui
 synthesizes a three-way merge from `base`/`left`/`right` first.
 
-Put the cursor on a conflict and choose a side:
+Put the cursor on a conflict and fold it to a summary marker:
 
 | Key | Action |
 |---|---|
-| `o` | Take ours |
-| `T` | Take theirs |
-| `B` | Take both |
+| `o` | Fold the conflict with **ours**; press `o` again to expand |
+| `T` | Fold the conflict with **theirs** |
+| `B` | Fold the conflict with **both** |
 
-Resolving rewrites the working file and recomputes the diff in place, so the
-markers disappear as you go. `global::conflict_count()` reports how many
-conflicts were detected.
+Folding is **display-only**: the working file keeps its markers, so a choice can
+be revisited and the conflict can still be confirmed as-is. A folded conflict
+renders as one line, `<<<<<<< ours ⋯ >>>>>>>`, which re-expands with `o`.
+`global::conflict_count()` reports how many conflicts were detected.
 
 The whole conflict line — gutter, sign and text — sits on a dedicated
 **conflict underlay** highlight, defaulting to a darkened version of the theme
@@ -252,7 +253,8 @@ Confirming follows the integration's rules:
 - **git / mergetool** (default): `enter` refuses to confirm while conflicts
   remain, reporting how many are left.
 - **jj resolve**: pass `--allow-unresolved` (see the jj config in the README)
-  to permit confirming with conflicts left.
+  to confirm with conflicts still present — jj stores them structurally, so
+  committing a conflict is intended, not an error.
 
 In a merge session, confirm never runs the two-way staging write; it writes the
 resolved working file, so the merge target is never clobbered.

@@ -265,9 +265,14 @@ impl<'a> RowBuilder<'a> {
 }
 
 /// Tracks whether `line` lies inside a conflict block (markers inclusive).
+///
+/// A folded conflict is a single line containing both markers; it is treated as
+/// a self-contained conflict line without changing the open/closed state.
 fn conflict_flags(in_conflict: &mut bool, line: &str) -> bool {
     if line.starts_with("<<<<<<<") {
-        *in_conflict = true;
+        if !line.contains(">>>>>>>") {
+            *in_conflict = true;
+        }
         return true;
     }
     if *in_conflict {

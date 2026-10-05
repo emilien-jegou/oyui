@@ -162,11 +162,35 @@ impl ConflictedFile {
         self.resolve(&vec![side; self.conflict_count()])
     }
 
-    /// Line ranges (in the reconstruction for `choices`) of each conflict.
+    /// Builds the on-screen content: conflicts are shown in full, or collapsed
+    /// to a single summary marker line when folded.
     ///
-    /// Resolved conflicts span their substituted lines; unresolved ones span
-    /// the full marker block. Used to map a file-view cursor to a conflict.
-    pub fn conflict_ranges(&self, choices: &[Option<Side>]) -> Vec<std::ops::Range<usize>> {
+    /// This never touches the file on disk — it only drives rendering.
+    pub fn display(&self, folded: &[bool], choices: &[Option<Side>]) -> String {
+        let mut lines = Vec::new();
+        let mut idx = 0;
+        for segment in &self.segments {
+            match segment {
+                Segment::Common(text) => lines.extend(text.iter().cloned()),
+                Segment::Conflict(c) => {
+                    if folded.get(idx).copied().unwrap_or(false) {
+                        lines.push(summary_line(choices.get(idx).copied().flatten()));
+                    } else {
+                        write_markers(&mut lines, c);
+                    }
+                    idx += 1;
+                }
+            }
+        }
+        let mut out = lines.join("\n");
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out
+    }
+
+    /// Line ranges of each conflict in [`display`](Self::display) output.
+    pub fn display_ranges(&self, folded: &[bool]) -> Vec<std::ops::Range<usize>> {
         let mut ranges = Vec::new();
         let mut line = 0usize;
         let mut idx = 0usize;
@@ -174,11 +198,10 @@ impl ConflictedFile {
             match segment {
                 Segment::Common(text) => line += text.len(),
                 Segment::Conflict(c) => {
-                    let len = match choices.get(idx).copied().flatten() {
-                        Some(Side::Ours) => c.ours.len(),
-                        Some(Side::Theirs) => c.theirs.len(),
-                        Some(Side::Both) => c.ours.len() + c.theirs.len(),
-                        None => c.marker_lines(),
+                    let len = if folded.get(idx).copied().unwrap_or(false) {
+                        1
+                    } else {
+                        c.marker_lines()
                     };
                     ranges.push(line..line + len);
                     line += len;
@@ -187,13 +210,6 @@ impl ConflictedFile {
             }
         }
         ranges
-    }
-
-    /// The conflict whose line range contains `line`, if any.
-    pub fn conflict_at_line(&self, line: usize, choices: &[Option<Side>]) -> Option<usize> {
-        self.conflict_ranges(choices)
-            .into_iter()
-            .position(|r| r.contains(&line))
     }
 
     /// Resolves conflicts using `choices` (one per conflict, in order).
@@ -226,6 +242,17 @@ impl ConflictedFile {
         }
         out
     }
+}
+
+/// A single line summarising a folded conflict and its current choice.
+fn summary_line(choice: Option<Side>) -> String {
+    let label = match choice {
+        Some(Side::Ours) => "ours",
+        Some(Side::Theirs) => "theirs",
+        Some(Side::Both) => "both",
+        None => "unresolved",
+    };
+    format!("<<<<<<< {label} ⋯ >>>>>>>")
 }
 
 /// Emits the unresolved marker block for a conflict.
