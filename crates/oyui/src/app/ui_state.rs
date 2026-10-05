@@ -26,6 +26,80 @@ pub struct HelpState {
     pub scroll: usize,
 }
 
+/// Interactive conflict-resolution state for the merge target.
+#[derive(Clone, Debug)]
+pub struct ResolveState {
+    /// Parsed conflicts from the target file.
+    pub conflicts: crate::diff::ConflictedFile,
+    /// Index of the conflict being inspected.
+    pub cursor: usize,
+    /// Chosen side per conflict; `None` keeps the markers.
+    pub choices: Vec<Option<crate::diff::Side>>,
+}
+
+impl ResolveState {
+    /// Builds a resolver with nothing chosen yet.
+    pub fn new(conflicts: crate::diff::ConflictedFile) -> Self {
+        let choices = vec![None; conflicts.conflict_count()];
+        Self {
+            conflicts,
+            cursor: 0,
+            choices,
+        }
+    }
+
+    /// Number of conflicts.
+    pub fn count(&self) -> usize {
+        self.conflicts.conflict_count()
+    }
+
+    /// The conflict currently under the cursor.
+    pub fn current(&self) -> Option<&crate::diff::conflict::Conflict> {
+        self.conflicts
+            .segments
+            .iter()
+            .filter_map(|s| match s {
+                crate::diff::conflict::Segment::Conflict(c) => Some(c),
+                _ => None,
+            })
+            .nth(self.cursor)
+    }
+
+    /// Moves the cursor by `delta`, clamped to the conflict range.
+    pub fn move_cursor(&mut self, delta: isize) {
+        let count = self.count();
+        if count == 0 {
+            self.cursor = 0;
+            return;
+        }
+        self.cursor = (self.cursor as isize + delta).clamp(0, count as isize - 1) as usize;
+    }
+
+    /// Chooses a side for the current conflict.
+    pub fn set_choice(&mut self, side: crate::diff::Side) {
+        if let Some(slot) = self.choices.get_mut(self.cursor) {
+            *slot = Some(side);
+        }
+    }
+
+    /// Clears the current conflict's choice.
+    pub fn clear_choice(&mut self) {
+        if let Some(slot) = self.choices.get_mut(self.cursor) {
+            *slot = None;
+        }
+    }
+
+    /// Number of conflicts that have a chosen side.
+    pub fn resolved_count(&self) -> usize {
+        self.choices.iter().filter(|c| c.is_some()).count()
+    }
+
+    /// Renders the file with the chosen sides; unresolved conflicts keep markers.
+    pub fn resolved_text(&self) -> String {
+        self.conflicts.resolve_optional(&self.choices)
+    }
+}
+
 /// A transient message shown on the bottom bar.
 #[derive(Clone, Debug)]
 pub struct Message {
@@ -83,8 +157,10 @@ pub struct UiState {
     pub status: String,
     /// Open keybinding-help overlay, if any.
     pub help: Option<HelpState>,
-    /// Parsed conflicts found in the merge target, if any.
-    pub conflicts: Option<crate::diff::ConflictedFile>,
+    /// Conflict-resolution state for the merge target, if any.
+    pub resolve: Option<ResolveState>,
+    /// Whether the conflict resolver overlay is visible.
+    pub resolve_open: bool,
     /// Bounded undo/redo history for staging mutations.
     pub undo: crate::app::undo::UndoStack,
 }
@@ -103,7 +179,8 @@ impl UiState {
             message: None,
             status: String::new(),
             help: None,
-            conflicts: None,
+            resolve: None,
+            resolve_open: false,
             undo: crate::app::undo::UndoStack::default(),
         }
     }
@@ -112,6 +189,32 @@ impl UiState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resolve_state_navigates_and_chooses_sides() {
+        let source = "\
+a
+<<<<<<< ours
+one
+=======
+two
+>>>>>>> theirs
+b
+";
+        let parsed = crate::diff::ConflictedFile::parse(source).expect("conflicted");
+        let mut state = ResolveState::new(parsed);
+
+        assert_eq!(state.count(), 1);
+        assert_eq!(state.resolved_count(), 0);
+
+        state.set_choice(crate::diff::Side::Ours);
+        assert_eq!(state.resolved_count(), 1);
+        assert!(state.resolved_text().contains("one"));
+        assert!(!state.resolved_text().contains("two"));
+
+        state.clear_choice();
+        assert!(state.resolved_text().contains("<<<<<<<"));
+    }
 
     #[test]
     fn panel_text_is_flattened_and_capped() {

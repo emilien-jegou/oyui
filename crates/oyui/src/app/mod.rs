@@ -83,7 +83,9 @@ impl App {
         };
         if let Ok(content) = std::fs::read_to_string(target) {
             if let Some(conflicts) = crate::diff::ConflictedFile::parse(&content) {
-                self.ui.lock().conflicts = Some(conflicts);
+                let mut ui = self.ui.lock();
+                ui.resolve = Some(ui_state::ResolveState::new(conflicts));
+                ui.resolve_open = true;
             }
         }
     }

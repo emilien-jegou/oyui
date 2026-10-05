@@ -2,6 +2,7 @@
 
 pub mod config_error;
 pub mod confirm_window;
+pub mod conflict;
 pub mod file;
 pub mod keybinds;
 pub mod tree;

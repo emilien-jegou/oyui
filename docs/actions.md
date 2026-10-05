@@ -47,6 +47,7 @@ Session-level actions and context.
 | `global::redo()` | | Redo the last undone staging mutation. |
 | `global::copy(text)` | | Copy `text` to the system clipboard via OSC 52. |
 | `global::help()` | | Toggle the keybinding-help overlay. |
+| `global::resolve()` | | Toggle the conflict-resolution overlay (merge sessions). |
 | `global::notify(msg)` | | Show a transient info message. |
 | `global::warn(msg)` | | Show a transient warning message. |
 | `global::error(msg)` | | Show a transient error message. |

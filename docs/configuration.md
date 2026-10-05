@@ -215,6 +215,31 @@ An invalid pattern is reported through `global::error`.
 
 ---
 
+## Resolving conflicts
+
+When a `merge` session's target contains conflict markers, oyui parses them and
+opens a conflict resolver. Each conflict shows `OURS`, optional `BASE`, and
+`THEIRS`; choose a side per conflict:
+
+| Key (in resolver) | Action |
+|---|---|
+| `j`/`k`, `n`/`N`, `up`/`down` | Move between conflicts |
+| `o` / `t` / `b` | Take ours / theirs / both |
+| `u` | Clear the choice |
+| `esc`, `q` | Close the resolver |
+
+`global::conflict_count()` reports how many conflicts were detected, and
+`global::resolve()` re-opens the overlay. Values that are not chosen keep their
+markers, so you can partially resolve.
+
+```rune
+on("config_reload", || {
+    if global::conflict_count() > 0 {
+        global::warn("conflicts remain");
+    }
+});
+```
+
 ## Clipboard
 
 `global::copy(text)` copies via OSC 52, which works over SSH and needs no

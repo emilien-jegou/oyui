@@ -249,6 +249,7 @@ fn the_full_api_surface_compiles() {
             global::clear_message();
             global::copy("text");
             global::help();
+            global::resolve();
             global::undo();
             global::redo();
 

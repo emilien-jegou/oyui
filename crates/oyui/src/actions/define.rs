@@ -40,6 +40,9 @@ define_actions! {
 
         // Toggle the keybinding-help overlay.
         help()
+
+        // Toggle the conflict-resolution overlay (merge sessions).
+        resolve()
     }
     settings {
         scrolloff { @getset(u32) }

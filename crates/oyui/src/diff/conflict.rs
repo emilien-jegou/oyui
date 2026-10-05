@@ -158,25 +158,21 @@ impl ConflictedFile {
     ///
     /// Missing choices leave the conflict markers in place.
     pub fn resolve(&self, choices: &[Side]) -> String {
+        let resolved: Vec<Option<Side>> = choices.iter().map(|s| Some(*s)).collect();
+        self.resolve_optional(&resolved)
+    }
+
+    /// Resolves with per-conflict optional choices; `None` keeps the markers.
+    pub fn resolve_optional(&self, choices: &[Option<Side>]) -> String {
         let mut lines = Vec::new();
         let mut idx = 0;
         for segment in &self.segments {
             match segment {
                 Segment::Common(text) => lines.extend(text.iter().cloned()),
                 Segment::Conflict(c) => {
-                    match choices.get(idx) {
-                        Some(&side) => lines.extend(c.resolve(side)),
-                        None => {
-                            lines.push("<<<<<<< ours".to_string());
-                            lines.extend(c.ours.iter().cloned());
-                            if let Some(base) = &c.base {
-                                lines.push("||||||| base".to_string());
-                                lines.extend(base.iter().cloned());
-                            }
-                            lines.push("=======".to_string());
-                            lines.extend(c.theirs.iter().cloned());
-                            lines.push(">>>>>>> theirs".to_string());
-                        }
+                    match choices.get(idx).copied().flatten() {
+                        Some(side) => lines.extend(c.resolve(side)),
+                        None => write_markers(&mut lines, c),
                     }
                     idx += 1;
                 }
@@ -188,6 +184,19 @@ impl ConflictedFile {
         }
         out
     }
+}
+
+/// Emits the unresolved marker block for a conflict.
+fn write_markers(lines: &mut Vec<String>, conflict: &Conflict) {
+    lines.push("<<<<<<< ours".to_string());
+    lines.extend(conflict.ours.iter().cloned());
+    if let Some(base) = &conflict.base {
+        lines.push("||||||| base".to_string());
+        lines.extend(base.iter().cloned());
+    }
+    lines.push("=======".to_string());
+    lines.extend(conflict.theirs.iter().cloned());
+    lines.push(">>>>>>> theirs".to_string());
 }
 
 #[derive(Clone, Copy)]

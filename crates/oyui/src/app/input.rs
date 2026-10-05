@@ -14,6 +14,12 @@ impl App {
             return false;
         }
 
+        // The conflict resolver is modal while open.
+        if self.ui.lock().resolve_open {
+            self.handle_resolve_key(key);
+            return false;
+        }
+
         // One lock for all UI state; dropped before anything that re-locks it
         // (parking_lot mutexes are not reentrant).
         let mut ui = self.ui.lock();
@@ -110,6 +116,38 @@ impl App {
             }
         }
         false
+    }
+
+    /// Handles keys while the conflict resolver is open.
+    fn handle_resolve_key(&self, key: KeyEvent) {
+        use crate::diff::Side;
+
+        if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
+            return;
+        }
+
+        let mut ui = self.ui.lock();
+
+        if matches!(key.code, KeyCode::Esc | KeyCode::Char('q')) {
+            ui.resolve_open = false;
+            return;
+        }
+
+        let Some(state) = ui.resolve.as_mut() else {
+            return;
+        };
+
+        match key.code {
+            KeyCode::Char('j') | KeyCode::Down | KeyCode::Char('n') => state.move_cursor(1),
+            KeyCode::Char('k') | KeyCode::Up | KeyCode::Char('N') => state.move_cursor(-1),
+            KeyCode::Char('g') | KeyCode::Home => state.cursor = 0,
+            KeyCode::Char('G') | KeyCode::End => state.move_cursor(isize::MAX),
+            KeyCode::Char('o') => state.set_choice(Side::Ours),
+            KeyCode::Char('t') => state.set_choice(Side::Theirs),
+            KeyCode::Char('b') => state.set_choice(Side::Both),
+            KeyCode::Char('u') => state.clear_choice(),
+            _ => {}
+        }
     }
 
     /// Handles keys while the keybinding help overlay is open.

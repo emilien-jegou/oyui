@@ -81,9 +81,22 @@ impl GlobalActionsHandler for AppActionsHandler {
     fn conflict_count(&self) -> u32 {
         self.ui
             .lock()
-            .conflicts
+            .resolve
             .as_ref()
-            .map_or(0, |c| c.conflict_count() as u32)
+            .map_or(0, |r| r.count() as u32)
+    }
+
+    fn resolve(&self) {
+        let mut ui = self.ui.lock();
+        if ui.resolve.is_some() {
+            ui.resolve_open = !ui.resolve_open;
+        } else {
+            ui.message = Some(Message::new(
+                MessageLevel::Info,
+                "no conflicts to resolve".into(),
+                Message::DEFAULT_TTL,
+            ));
+        }
     }
 
     fn switch(&self, view: String) {
