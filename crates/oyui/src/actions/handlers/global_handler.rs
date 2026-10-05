@@ -144,6 +144,9 @@ impl GlobalActionsHandler for AppActionsHandler {
             Some("add" | "a" | "unstage" | "u" | "invert" | "i")
         );
         if is_staging {
+            if self.reject_read_only() {
+                return;
+            }
             self.push_undo_snapshot();
         }
         let mut tree = self.tree.write();
@@ -172,6 +175,9 @@ impl GlobalActionsHandler for AppActionsHandler {
     }
 
     fn undo(&self) {
+        if self.reject_read_only() {
+            return;
+        }
         let Some(snap) = self.ui.lock().undo.take_undo() else {
             self.set_message(MessageLevel::Info, "nothing to undo".into());
             return;
@@ -183,6 +189,9 @@ impl GlobalActionsHandler for AppActionsHandler {
     }
 
     fn redo(&self) {
+        if self.reject_read_only() {
+            return;
+        }
         let Some(snap) = self.ui.lock().undo.take_redo() else {
             self.set_message(MessageLevel::Info, "nothing to redo".into());
             return;
@@ -216,6 +225,21 @@ impl AppActionsHandler {
     /// Sets a transient bottom-bar message with a default lifetime.
     pub(crate) fn set_message(&self, level: MessageLevel, text: String) {
         self.ui.lock().message = Some(Message::new(level, text, Message::DEFAULT_TTL));
+    }
+
+    /// True when the session must not mutate staging (read-only diff).
+    pub(crate) fn is_read_only(&self) -> bool {
+        self.write_target.is_none()
+    }
+
+    /// Rejects a staging action in a read-only session, warning the user.
+    pub(crate) fn reject_read_only(&self) -> bool {
+        if self.is_read_only() {
+            self.set_message(MessageLevel::Info, "read-only session".into());
+            true
+        } else {
+            false
+        }
     }
 
     /// Writes `text` to `target`, quitting the session on success.

@@ -161,6 +161,8 @@ pub struct UiState {
     pub resolve: Option<ResolveState>,
     /// Whether the conflict resolver overlay is visible.
     pub resolve_open: bool,
+    /// Whether the session may write a result (false for `diff --no-write`).
+    pub writable: bool,
     /// Bounded undo/redo history for staging mutations.
     pub undo: crate::app::undo::UndoStack,
 }
@@ -181,6 +183,7 @@ impl UiState {
             help: None,
             resolve: None,
             resolve_open: false,
+            writable: true,
             undo: crate::app::undo::UndoStack::default(),
         }
     }

@@ -44,17 +44,20 @@ impl UiState {
         color_mode: &TerminalColorMode,
     ) {
         match self.current {
-            ViewKind::Tree => self.tree_view.draw(
-                &DevIconProvider,
-                frame,
-                area,
-                tree,
-                cache,
-                base_path,
-                diff_summary,
-                theme,
-                color_mode,
-            ),
+            ViewKind::Tree => {
+                self.tree_view.hide_staging = !self.writable;
+                self.tree_view.draw(
+                    &DevIconProvider,
+                    frame,
+                    area,
+                    tree,
+                    cache,
+                    base_path,
+                    diff_summary,
+                    theme,
+                    color_mode,
+                )
+            }
             ViewKind::File => self.file_view.draw(frame, area, cache, tree, theme),
         }
     }

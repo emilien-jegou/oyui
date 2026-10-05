@@ -65,6 +65,9 @@ impl ViewFileStagingActionsHandler for AppActionsHandler {
 
 impl AppActionsHandler {
     fn with_staging_session<F: FnOnce(&StagingSession)>(&self, f: F) {
+        if self.reject_read_only() {
+            return;
+        }
         // Resolve the session first so a no-op (no open file) does not push a
         // spurious undo point; snapshot only once we are about to mutate.
         let Some(s) =

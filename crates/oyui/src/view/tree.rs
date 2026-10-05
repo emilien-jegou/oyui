@@ -100,6 +100,8 @@ pub struct TreeViewData {
     pub last_height: usize,
     /// Script-defined row field order, e.g. `"state icon name stats"`.
     pub tree_row_format: Option<String>,
+    /// Hide staging symbols (set in read-only sessions).
+    pub hide_staging: bool,
     view_model: TreeViewModel,
     view_model_dirty: bool,
     cached_tree_version: u64,
@@ -234,13 +236,16 @@ impl TreeViewData {
         theme: &UiTheme,
         color_mode: &TerminalColorMode,
     ) {
-        let tokens: Vec<String> = self
+        let mut tokens: Vec<String> = self
             .tree_row_format
             .as_deref()
             .unwrap_or("state icon name stats")
             .split_whitespace()
             .map(str::to_string)
             .collect();
+        if self.hide_staging {
+            tokens.retain(|t| t != "state");
+        }
         let height = area.height as usize;
         let selected = self.selected_index;
         self.last_height = height;

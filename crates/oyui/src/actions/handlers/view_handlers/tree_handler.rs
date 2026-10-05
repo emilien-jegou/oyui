@@ -193,6 +193,9 @@ fn visit_dirs(nodes: &[crate::tree::TreeNode], f: &mut impl FnMut(&std::path::Pa
 
 impl ViewTreeStagingActionsHandler for AppActionsHandler {
     fn toggle_selected(&self) {
+        if self.reject_read_only() {
+            return;
+        }
         self.push_undo_snapshot();
         let tree_guard = self.tree.read();
         let picked = {
@@ -215,6 +218,9 @@ impl ViewTreeStagingActionsHandler for AppActionsHandler {
     }
 
     fn invert(&self) {
+        if self.reject_read_only() {
+            return;
+        }
         self.push_undo_snapshot();
         tracing::debug!("Inverting all staging selections");
         let mut tree_write = self.tree.write();
@@ -239,6 +245,9 @@ impl ViewTreeStagingActionsHandler for AppActionsHandler {
     }
 
     fn set(&self, path: String, staged: bool) {
+        if self.reject_read_only() {
+            return;
+        }
         self.push_undo_snapshot();
         let state = if staged {
             crate::tree::StagingState::Staged
@@ -251,6 +260,9 @@ impl ViewTreeStagingActionsHandler for AppActionsHandler {
     }
 
     fn set_matching(&self, pattern: String, staged: bool) {
+        if self.reject_read_only() {
+            return;
+        }
         self.push_undo_snapshot();
         let state = if staged {
             crate::tree::StagingState::Staged
@@ -270,6 +282,9 @@ impl ViewTreeStagingActionsHandler for AppActionsHandler {
     }
 
     fn stage_all(&self) {
+        if self.reject_read_only() {
+            return;
+        }
         self.push_undo_snapshot();
         let mut tree = self.tree.write();
         for f in tree.files_mut() {
@@ -279,6 +294,9 @@ impl ViewTreeStagingActionsHandler for AppActionsHandler {
     }
 
     fn unstage_all(&self) {
+        if self.reject_read_only() {
+            return;
+        }
         self.push_undo_snapshot();
         let mut tree = self.tree.write();
         for f in tree.files_mut() {

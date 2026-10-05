@@ -128,6 +128,10 @@ impl App {
             Some("add" | "a" | "unstage" | "u" | "invert" | "i")
         );
         if is_staging {
+            if !self.ui.lock().writable {
+                self.set_message(MessageLevel::Info, "read-only session".into());
+                return;
+            }
             let tree = self.tree.read();
             let snap = crate::app::undo::capture(&tree, &self.cache);
             drop(tree);

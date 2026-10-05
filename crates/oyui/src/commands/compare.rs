@@ -71,6 +71,7 @@ async fn run(
     let theme = Arc::new(RwLock::new(ThemeState::new(&options.color_mode)));
     let mut ui_state = UiState::new(options.color_mode.support_true_color());
     ui_state.configure(session.view.scrolloff, session.view.context_lines);
+    ui_state.writable = session.write_target.is_some();
     let ui = Arc::new(Mutex::new(ui_state));
 
     detect_conflicts(&session, &ui);
