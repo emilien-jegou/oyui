@@ -192,8 +192,10 @@ impl FileTree {
         left_dir: &Path,
         right_dir: &Path,
     ) -> (Self, Vec<(PathBuf, PathBuf, PathBuf)>) {
-        let left_exists = left_dir.exists();
-        let right_exists = right_dir.exists();
+        // Git's difftool passes `/dev/null` for a missing side; treat it as
+        // absent rather than as a device to walk.
+        let left_exists = left_dir.exists() && !is_null_device(left_dir);
+        let right_exists = right_dir.exists() && !is_null_device(right_dir);
 
         let is_left_file = left_exists && left_dir.is_file();
         let is_right_file = right_exists && right_dir.is_file();
@@ -242,8 +244,8 @@ impl FileTree {
             };
             let mut files_to_stat = Vec::new();
 
-            let left_res_exists = left_resolved.exists();
-            let right_res_exists = right_resolved.exists();
+            let left_res_exists = left_resolved.exists() && !is_null_device(&left_resolved);
+            let right_res_exists = right_resolved.exists() && !is_null_device(&right_resolved);
 
             let rel_path_buf = if right_res_exists {
                 PathBuf::from(
@@ -483,6 +485,12 @@ impl TreeNode {
     }
 }
 
+/// True for a null device (`/dev/null`, or `NUL` on Windows).
+fn is_null_device(path: &Path) -> bool {
+    let text = path.to_string_lossy();
+    text == "/dev/null" || text.eq_ignore_ascii_case("nul")
+}
+
 #[tracing::instrument(level = "trace", skip_all)]
 fn files_are_identical(path_a: &Path, path_b: &Path) -> bool {
     let meta_a = match fs::metadata(path_a) {
@@ -520,5 +528,34 @@ fn files_are_identical(path_a: &Path, path_b: &Path) -> bool {
             (None, None) => return true,
             _ => return false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dev_null_is_treated_as_a_missing_side() {
+        let dir = std::env::temp_dir().join(format!("oyui_devnull_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let added = dir.join("added.txt");
+        std::fs::write(&added, "hello\n").unwrap();
+
+        // Addition: /dev/null on the left.
+        let (tree, _) = FileTree::build_from_dir_diff(Path::new("/dev/null"), &added);
+        assert!(tree.is_file_diff);
+        let file = tree.files().next().expect("one file");
+        assert!(file.left_path.is_none(), "left must be treated as absent");
+        assert!(file.right_path.is_some());
+
+        // Deletion: /dev/null on the right.
+        let (tree, _) = FileTree::build_from_dir_diff(&added, Path::new("/dev/null"));
+        assert!(tree.is_file_diff);
+        let file = tree.files().next().expect("one file");
+        assert!(file.left_path.is_some());
+        assert!(file.right_path.is_none(), "right must be treated as absent");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -146,7 +146,8 @@ git mergetool --tool=oyui
 ```
 
 `--no-write` makes `oyui diff` purely inspect; the mergetool form writes the
-resolved result to `$MERGED`.
+resolved result to `$MERGED`. Git passes `/dev/null` for added or deleted
+files; oyui treats that as a missing side automatically.
 
 ### Enabling config LSP with neovim
 
