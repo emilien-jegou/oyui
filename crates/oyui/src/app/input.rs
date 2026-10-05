@@ -133,6 +133,24 @@ impl App {
             return;
         }
 
+        // Enter writes the (optionally partial) resolution to the target.
+        if key.code == KeyCode::Enter {
+            let text = ui.resolve.as_ref().map(|s| s.resolved_text());
+            drop(ui);
+            if let (Some(text), Some(target)) = (text, self.write_target.clone()) {
+                match std::fs::write(&target, text) {
+                    Ok(()) => {
+                        self.set_message(MessageLevel::Info, "conflicts written".into());
+                        self.ui.lock().should_quit = true;
+                    }
+                    Err(e) => {
+                        self.set_message(MessageLevel::Error, format!("write failed: {e}"));
+                    }
+                }
+            }
+            return;
+        }
+
         let Some(state) = ui.resolve.as_mut() else {
             return;
         };

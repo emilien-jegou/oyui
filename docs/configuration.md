@@ -226,7 +226,8 @@ opens a conflict resolver. Each conflict shows `OURS`, optional `BASE`, and
 | `j`/`k`, `n`/`N`, `up`/`down` | Move between conflicts |
 | `o` / `t` / `b` | Take ours / theirs / both |
 | `u` | Clear the choice |
-| `esc`, `q` | Close the resolver |
+| `enter` | Write the result to the target and exit |
+| `esc`, `q` | Close the resolver (keep choices) |
 
 `global::conflict_count()` reports how many conflicts were detected, and
 `global::resolve()` re-opens the overlay. Values that are not chosen keep their

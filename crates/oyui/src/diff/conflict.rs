@@ -275,6 +275,32 @@ fn main() {
     }
 
     #[test]
+    fn resolve_optional_keeps_unchosen_markers() {
+        let two = "\
+a
+<<<<<<< ours
+1
+=======
+2
+>>>>>>> theirs
+b
+<<<<<<< ours
+3
+=======
+4
+>>>>>>> theirs
+c
+";
+        let parsed = ConflictedFile::parse(two).expect("conflicted");
+        assert_eq!(parsed.conflict_count(), 2);
+
+        let out = parsed.resolve_optional(&[Some(Side::Ours), None]);
+        assert!(out.contains('1') && !out.contains('2'));
+        assert!(out.contains("<<<<<<< ours"));
+        assert!(out.contains('3') && out.contains('4'));
+    }
+
+    #[test]
     fn side_tokens_parse() {
         assert_eq!(Side::parse("ours"), Some(Side::Ours));
         assert_eq!(Side::parse("LOCAL"), Some(Side::Ours));

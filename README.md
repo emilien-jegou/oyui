@@ -125,6 +125,10 @@ merge-args = ["merge", "$base", "$left", "$right"]
 `$right`); `oyui merge` resolves a three-way conflict (`$base`, `$left`,
 `$right`) and writes the result back to `$right`.
 
+When the merge target contains conflict markers, `oyui merge` opens a resolver
+overlay showing `OURS` / `BASE` / `THEIRS` for each conflict. Pick a side with
+`o`/`t`/`b`, then press `enter` to write the resolved file and exit.
+
 ### Usage with Git
 
 As a difftool:
