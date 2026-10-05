@@ -75,6 +75,23 @@ impl Keybind {
         }
     }
 
+    /// Renders the chord for display, e.g. `ctrl-shift-j` or `space`.
+    pub fn display(&self) -> String {
+        let (mods, key) = self.canonical();
+        let mut parts = Vec::new();
+        if mods.ctrl {
+            parts.push("ctrl".to_string());
+        }
+        if mods.alt {
+            parts.push("alt".to_string());
+        }
+        if mods.shift {
+            parts.push("shift".to_string());
+        }
+        parts.push(key);
+        parts.join("-")
+    }
+
     /// Canonical identity used to match equivalent spellings (`space` == `' '`).
     pub fn canonical(&self) -> (Modifiers, String) {
         match self {
@@ -363,5 +380,13 @@ mod tests {
     fn invalid_names_are_rejected() {
         assert!(Keybind::parse_checked("bogus").is_err());
         assert!(Keybind::parse_checked("ctrl-shift-j").is_ok());
+    }
+
+    #[test]
+    fn display_renders_chords() {
+        assert_eq!(Keybind::parse("ctrl-shift-j").display(), "ctrl-shift-j");
+        assert_eq!(Keybind::Char(" ".to_string()).display(), "space");
+        assert_eq!(Keybind::parse("enter").display(), "enter");
+        assert_eq!(Keybind::parse("G").display(), "G");
     }
 }

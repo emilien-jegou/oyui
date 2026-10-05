@@ -169,6 +169,24 @@ fn keybinds_can_be_added_after_unbind_all() {
 }
 
 #[test]
+fn named_keybinds_carry_their_label() {
+    let source = r#"
+        pub fn config() {
+            keybind_named("ctrl-y", "my custom action", || ());
+        }
+    "#;
+    let (_host, reg, error) = load(source);
+    assert!(error.is_none(), "{:?}", error.map(|e| e.message));
+
+    let entry = reg
+        .entries()
+        .into_iter()
+        .find(|e| e.keys.contains(&"ctrl-y".to_string()))
+        .expect("ctrl-y must be bound");
+    assert_eq!(entry.labels, vec!["my custom action".to_string()]);
+}
+
+#[test]
 fn commands_and_events_round_trip() {
     let source = r#"
         pub fn config() {
@@ -182,6 +200,32 @@ fn commands_and_events_round_trip() {
     host.call_command("go-down", "").expect("command runs");
     host.call_event("file_opened").expect("event runs");
     assert!(host.call_command("missing", "").is_err());
+}
+
+/// Every bundled example must compile against the live API. Keeps
+/// `examples/*.rn` honest as the surface evolves.
+#[test]
+fn bundled_examples_compile() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+    let mut checked = 0;
+
+    for entry in fs::read_dir(&dir).unwrap_or_else(|e| panic!("read {}: {e}", dir.display())) {
+        let path = entry.expect("dir entry").path();
+        if path.extension() != Some(OsStr::new("rn")) {
+            continue;
+        }
+        let source = fs::read_to_string(&path).expect("read example");
+        let (_host, _reg, error) = load(&source);
+        assert!(
+            error.is_none(),
+            "{} failed to load: {:?}",
+            path.display(),
+            error.map(|e| e.message)
+        );
+        checked += 1;
+    }
+
+    assert!(checked >= 10, "expected 10+ examples, checked {checked}");
 }
 
 #[test]
@@ -201,6 +245,7 @@ fn the_full_api_surface_compiles() {
             global::error("bad");
             global::clear_message();
             global::copy("text");
+            global::help();
             global::undo();
             global::redo();
 
@@ -280,6 +325,7 @@ fn the_full_api_surface_compiles() {
             ui::status::set("ready");
 
             keybind("ctrl-shift-j", || view::file::cursor::down(1));
+            keybind_named("ctrl-y", "labelled", || ());
             unbind("s");
             unbind_all();
             reset_keybinds();

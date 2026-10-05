@@ -281,9 +281,16 @@ pub fn define_actions(input: TokenStream) -> TokenStream {
 
     // Generate dispatch method implementation arms for BoxedHandler
     let mut dispatch_arms = Vec::new();
+    // Parallel arms yielding a human-readable dotted path for each action.
+    let mut describe_arms = Vec::new();
     for (path, _getset, leaves) in &active_branches {
         let field_name = path_to_field_name(path);
         let deepest_enum_name = build_enum_name(path);
+        let path_label: String = path
+            .iter()
+            .map(|id| id.to_string().to_lowercase())
+            .collect::<Vec<_>>()
+            .join(".");
 
         for leaf in leaves {
             let leaf_ident = &leaf.ident;
@@ -314,8 +321,30 @@ pub fn define_actions(input: TokenStream) -> TokenStream {
                     let _ = self.0.#field_name.#leaf_ident(#(#arg_names.clone()),*);
                 }
             });
+
+            let label = format!("{path_label}.{}", leaf_ident.to_string().to_lowercase());
+            let describe_arm = if args.is_empty() {
+                quote! { #pattern => ::std::string::String::from(#label) }
+            } else {
+                let placeholders = vec!["{}"; args.len()].join(", ");
+                let suffix = format!("({placeholders})");
+                quote! { #pattern => ::std::format!("{}{}", #label, ::std::format!(#suffix, #(#arg_names),*)) }
+            };
+            describe_arms.push(describe_arm);
         }
     }
+
+    let describe_impl = quote! {
+        impl Actions {
+            /// Human-readable dotted path, e.g. `view.file.cursor.down(1)`.
+            pub fn describe(&self) -> ::std::string::String {
+                match self {
+                    #(#describe_arms,)*
+                    _ => ::std::string::String::new(),
+                }
+            }
+        }
+    };
 
     let handler_struct = quote! {
         #[derive(Clone, Debug)]
@@ -477,6 +506,8 @@ pub fn define_actions(input: TokenStream) -> TokenStream {
     let expanded = quote! {
         #(#enum_definitions)*
 
+        #describe_impl
+
         #(#traits)*
 
         #handler_struct
@@ -487,6 +518,13 @@ pub fn define_actions(input: TokenStream) -> TokenStream {
         // input dispatch and tests can use it without pulling a script engine in.
         #[derive(Clone, Debug)]
         pub struct Action(pub Actions);
+
+        impl Action {
+            /// Human-readable dotted path of the wrapped action.
+            pub fn describe(&self) -> ::std::string::String {
+                self.0.describe()
+            }
+        }
 
         impl From<Actions> for Action {
             fn from(val: Actions) -> Self {

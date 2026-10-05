@@ -34,6 +34,9 @@ define_actions! {
 
         // Copy text to the system clipboard via OSC 52 (works over SSH).
         copy(String)
+
+        // Toggle the keybinding-help overlay.
+        help()
     }
     settings {
         scrolloff { @getset(u32) }

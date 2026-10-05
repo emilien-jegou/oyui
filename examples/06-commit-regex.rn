@@ -1,0 +1,38 @@
+// Stage every file whose content matches a regex.
+//
+// The scan runs on the worker thread and reports back on the main thread, so
+// it never blocks the UI.
+pub fn config() {
+    command("commit_regex", |pattern| {
+        if pattern == "" {
+            global::error("usage: :commit_regex <regex>");
+            return;
+        }
+
+        global::notify("scanning files...");
+        analysis::files_containing_async(pattern, |matches| {
+            if matches == "" {
+                global::warn("no files matched");
+                return;
+            }
+
+            for path in matches.split("\n") {
+                if path != "" {
+                    view::tree::staging::set(path, true);
+                }
+            }
+            global::notify("staged matching files");
+        });
+    });
+
+    // A blocking variant for small repositories.
+    command("find_todo", |args| {
+        let matches = analysis::files_containing("TODO|FIXME");
+        if matches == "" {
+            global::warn("nothing found");
+        } else {
+            global::copy(matches);
+            global::notify("matches copied");
+        }
+    });
+}

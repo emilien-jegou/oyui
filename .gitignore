@@ -33,6 +33,9 @@
 !docs/
 !docs/**/*
 
+!examples/
+!examples/**/*
+
 # To fix:
 #!flake.nix
 #!flake.lock

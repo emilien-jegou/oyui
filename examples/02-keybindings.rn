@@ -1,0 +1,23 @@
+// Rebinding keys and scoping binds to a view.
+pub fn config() {
+    // Modifiers: ctrl (control), alt, shift. Combine them with '-'.
+    keybind("ctrl-shift-j", || view::file::cursor::down(10));
+    keybind("ctrl-shift-k", || view::file::cursor::up(10));
+
+    // Global actions.
+    keybind("ctrl-s", || view::file::staging::stage_all());
+    keybind("ctrl-z", || global::undo());
+
+    // Binds registered inside on_mode only apply to that pane.
+    on_mode("file", || {
+        keybind("ctrl-d", || view::file::cursor::half_page_down());
+        keybind("ctrl-u", || view::file::cursor::half_page_up());
+        keybind("Y", || global::copy(view::file::path()));
+    });
+
+    on_mode("tree", || {
+        keybind("ctrl-d", || view::tree::cursor::down(20));
+        keybind("ctrl-u", || view::tree::cursor::up(20));
+        keybind("l", || view::tree::open_selected());
+    });
+}

@@ -1,0 +1,25 @@
+// Theme selection, color overrides, gradients and glyphs.
+pub fn config() {
+    // Pick a builtin (see docs/themes.md), `"ansi"`, or `"path:/x.tmTheme"`.
+    theme::set("catppuccin-mocha");
+
+    // Any field can be overridden. Values accept "#rrggbb", "rgb(r, g, b)",
+    // named colors, "theme:<field>", "tm:<field>" and "ansi:<n>".
+    theme::bg::set("#1e1e2e");
+    theme::fg::set("theme:fg");
+    theme::partial::set("rgb(250, 179, 135)");
+    theme::dim::set("darkgray");
+    theme::add_fg::set("theme:staged");
+
+    // Line highlighting.
+    theme::file_staged_highlight::set(LineHighlightMode::Gradient(0.08));
+    theme::file_change_highlight::set(LineHighlightMode::Solid);
+    theme::file_change_highlight_opacity::set(0.12);
+
+    // Glyphs.
+    theme::char_indicator::set("▎");
+    theme::tree_progressive_change_dim::set(true);
+
+    // Replace only the syntax highlighting theme.
+    // theme::syntax("path:/home/me/custom.tmTheme");
+}

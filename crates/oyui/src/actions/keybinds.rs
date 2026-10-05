@@ -50,6 +50,14 @@ impl KeySource {
             KeySource::Keybinds(ks) => ks.0.iter().any(|k| k.canonical() == target),
         }
     }
+
+    /// Renders every chord in this source for display.
+    pub fn display(&self) -> Vec<String> {
+        match self {
+            KeySource::Keybind(k) => vec![k.display()],
+            KeySource::Keybinds(ks) => ks.0.iter().map(Keybind::display).collect(),
+        }
+    }
 }
 
 impl From<Keybinds> for KeySource {
@@ -64,9 +72,18 @@ impl From<Keybind> for KeySource {
     }
 }
 
+/// One displayable binding: its mode, its chords, and its target labels.
+pub struct KeybindEntry {
+    pub mode: KeybindMode,
+    pub keys: Vec<String>,
+    pub labels: Vec<String>,
+}
+
 #[derive(Clone)]
 pub struct KeybindRegistry {
     pub bindings: Vec<(KeybindMode, KeySource, Vec<ActionTarget>)>,
+    /// Optional human labels for script callbacks, keyed by callback id.
+    labels: std::collections::HashMap<u64, String>,
 }
 
 impl Default for KeybindRegistry {
@@ -79,6 +96,40 @@ impl KeybindRegistry {
     pub fn new() -> Self {
         Self {
             bindings: Vec::new(),
+            labels: std::collections::HashMap::new(),
+        }
+    }
+
+    /// Attaches a display label to a script callback id.
+    pub fn label_callback(&mut self, id: CallbackId, label: String) {
+        self.labels.insert(id.0, label);
+    }
+
+    /// Every binding, flattened for display.
+    pub fn entries(&self) -> Vec<KeybindEntry> {
+        self.bindings
+            .iter()
+            .map(|(mode, source, targets)| KeybindEntry {
+                mode: mode.clone(),
+                keys: source.display(),
+                labels: targets.iter().map(|t| self.target_label(t)).collect(),
+            })
+            .collect()
+    }
+
+    /// A single target's display label.
+    fn target_label(&self, target: &ActionTarget) -> String {
+        match target {
+            ActionTarget::Static(action) => {
+                // Show the leaf name only; the section already groups by view.
+                let full = action.describe();
+                full.rsplit('.').next().unwrap_or(&full).to_string()
+            }
+            ActionTarget::Dynamic(id) => self
+                .labels
+                .get(&id.0)
+                .cloned()
+                .unwrap_or_else(|| "<script>".to_string()),
         }
     }
 
@@ -97,6 +148,7 @@ impl KeybindRegistry {
     /// Removes every binding, including the built-in defaults.
     pub fn clear(&mut self) {
         self.bindings.clear();
+        self.labels.clear();
     }
 
     /// Restores the built-in defaults, discarding every custom binding.
@@ -209,6 +261,7 @@ pub fn default_keybinds() -> KeybindRegistry {
         .register(Keybinds::code(KeyCode::Enter), GlobalActions::confirm)
         .register(Keybinds::char('q').with_ctrl('c'), GlobalActions::quit)
         .register(Keybinds::char(':'), GlobalActions::open_command_mode)
+        .register(Keybinds::char('?'), GlobalActions::help)
         .register(Keybinds::char('u'), GlobalActions::undo)
         .register(Keybinds::new().with_ctrl('r'), GlobalActions::redo)
         .register(
@@ -317,7 +370,32 @@ pub fn default_keybinds() -> KeybindRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::actions::{
+        Action, Actions, GlobalActions, ViewActions, ViewFileActions, ViewFileCursorActions,
+    };
     use crate::commons::input::Keybind;
+
+    #[test]
+    fn actions_describe_themselves() {
+        let quit = Action(Actions::global(GlobalActions::quit));
+        assert_eq!(quit.describe(), "global.quit");
+
+        let down = Action(Actions::view(ViewActions::file(ViewFileActions::cursor(
+            ViewFileCursorActions::down(5),
+        ))));
+        assert_eq!(down.describe(), "view.file.cursor.down(5)");
+    }
+
+    #[test]
+    fn entries_carry_action_labels() {
+        let reg = default_keybinds();
+        let entries = reg.entries();
+        assert!(
+            entries.iter().any(|e| e.keys.contains(&"enter".to_string())
+                && e.labels.iter().any(|l| l == "confirm")),
+            "enter must list the confirm label"
+        );
+    }
 
     #[test]
     fn remove_keeps_sibling_keys_in_a_shared_source() {

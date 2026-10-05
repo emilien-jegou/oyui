@@ -1,0 +1,26 @@
+// Staging hunks/lines, bulk operations and undo.
+pub fn config() {
+    on_mode("file", || {
+        keybind("space", || view::file::staging::toggle());
+        keybind("t", || view::file::staging::toggle_line());
+        keybind("s", || view::file::staging::split());
+        keybind("J", || view::file::staging::join());
+        keybind("i", || view::file::staging::invert());
+    });
+
+    on_mode("tree", || {
+        keybind("space", || view::tree::staging::toggle_selected());
+        keybind("i", || view::tree::staging::invert());
+    });
+
+    keybind("u", || global::undo());
+    keybind("ctrl-r", || global::redo());
+
+    // Palette commands for bulk work.
+    command("stage-tests", |args| view::tree::staging::set_matching("**/*test*", true));
+    command("unstage-all", |args| view::tree::staging::unstage_all());
+    command("stage-src", |args| {
+        view::tree::staging::set_matching("src/**", true);
+        global::notify("staged src/**");
+    });
+}

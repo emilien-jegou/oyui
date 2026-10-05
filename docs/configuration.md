@@ -51,6 +51,28 @@ on_mode("tree", || {
 
 `on_mode` accepts only `"file"` and `"tree"`; anything else is a load error.
 
+### Naming keybinds
+
+Use `keybind_named(chord, label, callback)` to give a bind a readable label
+shown in the help overlay. Plain `keybind` binds appear as `<script>`.
+
+```rune
+keybind_named("ctrl-j", "scroll down 5", || view::file::cursor::down(5));
+```
+
+### Seeing all keybinds
+
+Press `?` (or run `:help keybinds`) to open a scrollable overlay listing every
+binding — global plus both views — including bindings registered by your
+config. The active view is marked `(current)`.
+
+| Key (in overlay) | Action |
+|---|---|
+| `?`, `q`, `esc` | Close |
+| `j`/`k`, `down`/`up` | Scroll |
+| `d`/`u`, `page down`/`page up` | Scroll by 10 |
+| `g`/`G`, `home`/`end` | Top / bottom |
+
 ### Removing default binds
 
 `unbind` removes every binding for a chord (in all modes). It prunes the chord

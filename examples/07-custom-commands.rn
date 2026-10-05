@@ -1,0 +1,32 @@
+// Register custom palette commands (`:name`).
+pub fn config() {
+    // Commands receive the raw argument string after the command name.
+    command("invert-selection", |args| view::file::staging::invert());
+
+    command("stage-md", |args| {
+        view::tree::staging::set_matching("**/*.md", true);
+        global::notify("staged markdown");
+    });
+
+    command("echo", |args| {
+        if args == "" {
+            global::warn("echo: missing argument");
+        } else {
+            global::notify(args);
+        }
+    });
+
+    // `command_names()` lists every registered script command.
+    command("list-commands", |args| {
+        let names = command_names();
+        if names == "" {
+            global::warn("no script commands");
+        } else {
+            global::copy(names);
+            global::notify("command names copied");
+        }
+    });
+
+    // Run a builtin palette command from a keybind.
+    keybind("ctrl-g", || global::command("invert"));
+}

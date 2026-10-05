@@ -95,6 +95,13 @@ impl App {
 
     #[tracing::instrument(skip_all, fields(cmd = cmd))]
     pub fn execute_command(&mut self, cmd: &str) {
+        // `:help [keybinds]` opens the keybinding overlay.
+        let trimmed = cmd.trim();
+        if matches!(trimmed, "help" | "help keybinds" | "keybinds") {
+            self.ui.lock().help = Some(ui_state::HelpState::default());
+            return;
+        }
+
         // Snapshot before a staging command so palette edits are undoable.
         let is_staging = matches!(
             cmd.trim().split_whitespace().next(),

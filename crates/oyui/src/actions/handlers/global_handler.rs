@@ -1,6 +1,6 @@
 use crate::actions::handlers::AppActionsHandler;
 use crate::actions::{GlobalActionsHandler, GlobalConfirmMergeWindowEnabledActionsHandler};
-use crate::app::ui_state::{Message, MessageLevel};
+use crate::app::ui_state::{HelpState, Message, MessageLevel};
 use crate::app::CommandMode;
 
 impl GlobalActionsHandler for AppActionsHandler {
@@ -141,6 +141,14 @@ impl GlobalActionsHandler for AppActionsHandler {
             ),
             Err(e) => self.set_message(MessageLevel::Error, format!("clipboard failed: {e}")),
         }
+    }
+
+    fn help(&self) {
+        let mut ui = self.ui.lock();
+        ui.help = match ui.help {
+            Some(_) => None,
+            None => Some(HelpState::default()),
+        };
     }
 }
 

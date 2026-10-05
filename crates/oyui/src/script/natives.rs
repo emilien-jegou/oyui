@@ -33,6 +33,7 @@ impl Registration {
 /// Stores `cb` and binds it to `kb` under the mode currently being wired.
 fn register_keybind(
     kb: &str,
+    label: Option<String>,
     cb: Function,
     callbacks: &Mutex<HashMap<CallbackId, SyncFunction>>,
     next_id: &AtomicU64,
@@ -67,6 +68,9 @@ fn register_keybind(
         Some(mode) => registry.register_fn_mode(mode, kb, id),
         None => registry.register_fn(kb, id),
     };
+    if let Some(label) = label {
+        state.registry.label_callback(id, label);
+    }
 }
 
 /// Runs `cb` with `mode` active so nested keybinds land in that scope.
@@ -155,14 +159,25 @@ pub(super) fn build_context(
     let mut context = Context::with_default_modules()?;
     context.install(super::highlight::base_module()?)?;
 
+    let mut m = Module::new();
+
     let callbacks = Arc::clone(&host.callbacks);
     let next_id = Arc::clone(&host.next_id);
     let registration = Arc::clone(&host.registration);
-
-    let mut m = Module::new();
     m.function("keybind", move |kb: String, cb: Function| {
-        register_keybind(&kb, cb, &callbacks, &next_id, &registration);
+        register_keybind(&kb, None, cb, &callbacks, &next_id, &registration);
     })
+    .build()?;
+
+    let callbacks = Arc::clone(&host.callbacks);
+    let next_id = Arc::clone(&host.next_id);
+    let registration = Arc::clone(&host.registration);
+    m.function(
+        "keybind_named",
+        move |kb: String, label: String, cb: Function| {
+            register_keybind(&kb, Some(label), cb, &callbacks, &next_id, &registration);
+        },
+    )
     .build()?;
 
     let registration = Arc::clone(&host.registration);

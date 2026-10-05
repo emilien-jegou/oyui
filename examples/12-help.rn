@@ -1,0 +1,25 @@
+// Named keybinds and the keybinding help overlay.
+//
+// Press `?` (or run `:help keybinds`) to list every binding, including the
+// ones registered here. Named binds show their label instead of a raw
+// callback name.
+pub fn config() {
+    // `keybind_named(chord, label, callback)`.
+    keybind_named("ctrl-j", "scroll down 5", || view::file::cursor::down(5));
+    keybind_named("ctrl-k", "scroll up 5", || view::file::cursor::up(5));
+
+    on_mode("file", || {
+        keybind_named("Y", "copy hunk text", || {
+            global::copy(view::file::inspect::hunk_text())
+        });
+        keybind_named("Z", "fold/unfold context", || view::file::fold::toggle());
+    });
+
+    on_mode("tree", || {
+        keybind_named("ctrl-o", "open selection", || view::tree::open_selected());
+        keybind_named("ctrl-a", "stage everything", || view::tree::staging::stage_all());
+    });
+
+    // Open the overlay from the palette too.
+    command("keybinds", |args| global::help());
+}

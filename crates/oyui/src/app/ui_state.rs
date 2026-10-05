@@ -19,6 +19,13 @@ pub enum MessageLevel {
     Error,
 }
 
+/// State of the keybinding-help overlay.
+#[derive(Default, Clone, Debug)]
+pub struct HelpState {
+    /// Vertical scroll offset, clamped while drawing.
+    pub scroll: usize,
+}
+
 /// A transient message shown on the bottom bar.
 #[derive(Clone, Debug)]
 pub struct Message {
@@ -74,6 +81,8 @@ pub struct UiState {
     pub message: Option<Message>,
     /// Persistent script status line shown on the bottom bar.
     pub status: String,
+    /// Open keybinding-help overlay, if any.
+    pub help: Option<HelpState>,
     /// Bounded undo/redo history for staging mutations.
     pub undo: crate::app::undo::UndoStack,
 }
@@ -91,6 +100,7 @@ impl UiState {
             hint_formats: std::collections::HashMap::new(),
             message: None,
             status: String::new(),
+            help: None,
             undo: crate::app::undo::UndoStack::default(),
         }
     }

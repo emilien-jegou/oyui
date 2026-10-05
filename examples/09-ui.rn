@@ -1,0 +1,24 @@
+// Hint bar, tree rows, status line and runtime settings.
+pub fn config() {
+    // Replace the hint bar per view. `_` becomes a space; pairs are
+    // "key=description".
+    ui::hint::set("file", "j/k=move space=stage s=split n/N=hunks :=cmd");
+    ui::hint::set("tree", "j/k=move l=open space=stage i=invert :=cmd");
+
+    // Tree row fields, in order: state, icon, name, stats, path.
+    ui::tree_row_format::set("state icon name stats");
+
+    // Persistent status line (shown when no message or command is active).
+    ui::status::set("oyui  ·  :cmd  ·  q=quit");
+
+    // Runtime settings.
+    settings::scrolloff::set(3);
+    settings::context_lines::set(6);
+
+    // Ask the current theme how it looks.
+    if theme::is_dark() {
+        theme::char_indicator::set("▎");
+    } else {
+        theme::char_indicator::set("│");
+    }
+}

@@ -1,0 +1,34 @@
+// Moving around files and the tree.
+pub fn config() {
+    on_mode("file", || {
+        // Hunk-to-hunk.
+        keybind("n", || view::file::nav::next_hunk());
+        keybind("N", || view::file::nav::prev_hunk());
+
+        // Collapse/expand unchanged context.
+        keybind("z", || view::file::fold::toggle());
+
+        // Jump to the extremes.
+        keybind("g", || view::file::cursor::top());
+        keybind("G", || view::file::cursor::bottom());
+
+        // Horizontal scroll.
+        keybind("ctrl-h", || view::file::scroll::left(4));
+        keybind("ctrl-l", || view::file::scroll::right(4));
+    });
+
+    on_mode("tree", || {
+        // Directories.
+        keybind("l", || view::tree::directory::expand());
+        keybind("h", || view::tree::directory::collapse());
+        keybind("L", || view::tree::directory::expand_all());
+        keybind("H", || view::tree::directory::collapse_all());
+
+        // Open the selected row (file or directory).
+        keybind("enter", || view::tree::open_selected());
+    });
+
+    // Switch panes from anywhere.
+    keybind("ctrl-1", || global::switch("tree"));
+    keybind("ctrl-2", || global::switch("file"));
+}

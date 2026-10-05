@@ -1,0 +1,19 @@
+// React to application events with `on`.
+//
+// Events: config_reload, file_opened, view_changed, quit.
+pub fn config() {
+    on("config_reload", || {
+        global::notify("config reloaded");
+    });
+
+    on("file_opened", || {
+        global::notify("opened " + view::file::path());
+    });
+
+    on("view_changed", || {
+        global::warn("view: " + global::view());
+    });
+
+    // Runs once on exit; keep it quick.
+    on("quit", || {});
+}

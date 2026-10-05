@@ -13,6 +13,7 @@ Active in every view.
 | `enter` | Confirm / open the merge window |
 | `q`, `ctrl-c` | Quit |
 | `:` | Open the command prompt |
+| `?` | Show all keybindings (help overlay) |
 | `u` | Undo |
 | `ctrl-r` | Redo |
 | `h`, `esc` | Close the file view |

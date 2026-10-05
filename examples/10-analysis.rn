@@ -1,0 +1,47 @@
+// Inspecting the open diff and scanning file contents.
+pub fn config() {
+    // Current cursor context.
+    command("where", |args| {
+        global::notify(
+            view::file::cursor::kind() + " @ " + view::file::path()
+        );
+    });
+
+    command("show-stats", |args| {
+        let stats = view::file::inspect::stats();
+        if stats == "" {
+            global::warn("no stats");
+        } else {
+            global::notify(stats);
+        }
+    });
+
+    command("show-hunk", |args| {
+        if view::file::inspect::hunk_has() {
+            global::notify(view::file::inspect::hunk_text());
+        } else {
+            global::warn("no hunk under cursor");
+        }
+    });
+
+    // Blocking scan; use commit_regex.rn for the async version.
+    command("find-todo", |args| {
+        let matches = analysis::files_containing("TODO|FIXME|XXX");
+        if matches == "" {
+            global::warn("nothing found");
+        } else {
+            global::copy(matches);
+            global::notify("matches copied");
+        }
+    });
+
+    // Per-file queries straight from the tree.
+    command("selected-stats", |args| {
+        let path = view::tree::selected_path();
+        if path == "" {
+            global::warn("nothing selected");
+        } else {
+            global::notify(view::tree::inspect::file_stats(path));
+        }
+    });
+}

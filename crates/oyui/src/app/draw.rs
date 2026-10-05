@@ -45,6 +45,17 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         crate::view::config_error::draw(frame, view_area, err, &theme);
     }
 
+    // 3. Draw the keybinding help overlay on top of everything.
+    if app.ui.lock().help.is_some() {
+        let entries = app.config.keybinds.entries();
+        let current = app.ui.lock().current;
+        let mut scroll = app.ui.lock().help.as_ref().map_or(0, |h| h.scroll);
+        crate::view::keybinds::draw(frame, view_area, &entries, current, &mut scroll, &theme);
+        if let Some(help) = app.ui.lock().help.as_mut() {
+            help.scroll = scroll;
+        }
+    }
+
     let cmd_mode = app.ui.lock().command_mode.clone();
 
     // Expire stale script notifications before rendering them.
