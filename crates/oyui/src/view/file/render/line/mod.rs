@@ -104,8 +104,8 @@ impl<'a> LineRenderer<'a> {
         let text_cell = TextRenderer {
             content: self.content,
             idx: self.idx,
-            is_add: self.is_add && !self.is_conflict,
-            is_del: self.is_del && !self.is_conflict,
+            is_add: self.is_add,
+            is_del: self.is_del,
             is_selected: self.is_selected,
             is_staged: self.is_staged,
             is_conflict: self.is_conflict,

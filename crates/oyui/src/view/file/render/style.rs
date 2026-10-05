@@ -31,15 +31,6 @@ pub fn get_line_style(
     use_gradient: bool,
     theme: &UiTheme,
 ) -> Style {
-    // Conflict lines get the underlay instead of the change/staged colors.
-    if is_conflict && conflict_highlight_on(theme) {
-        let mut bg = conflict_underlay(theme);
-        if is_selected {
-            bg = safe_lerp_color(&theme.cursor_bg, &bg, 0.3);
-        }
-        return Style::default().fg(theme.fg.into()).bg(bg.into());
-    }
-
     let is_add_or_del = is_add || is_del;
 
     // We only use an uncolored row background (theme.bg or cursor_bg) if the file change highlight
@@ -138,6 +129,15 @@ pub fn get_line_style(
         if !is_selected && !has_change_solid {
             style = style.bg(theme.bg.into());
         }
+    }
+
+    // Conflict lines keep their change foreground but sit on the underlay.
+    if is_conflict && conflict_highlight_on(theme) {
+        let mut bg = conflict_underlay(theme);
+        if is_selected {
+            bg = safe_lerp_color(&theme.cursor_bg, &bg, 0.3);
+        }
+        style = style.bg(bg.into());
     }
 
     style
