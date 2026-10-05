@@ -7,7 +7,7 @@ use crate::{
     terminal_colors::TerminalColorMode,
 };
 
-pub mod diff;
+pub mod compare;
 
 #[derive(Debug)]
 pub enum CommandError {
@@ -61,7 +61,8 @@ pub async fn run(opts: RunOptions) -> Result<(), CommandError> {
     });
 
     match opts.args.command {
-        Commands::Diff(ref diff_args) => diff::run_diff(&opts, diff_args, config_path).await,
+        Commands::Diff(ref diff_args) => compare::run_diff(&opts, diff_args, config_path).await,
+        Commands::Merge(ref merge_args) => compare::run_merge(&opts, merge_args, config_path).await,
         Commands::LanguageServer => crate::script::language_server::run_lsp().await,
     }
 }

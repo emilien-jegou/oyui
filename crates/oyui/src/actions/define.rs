@@ -16,6 +16,8 @@ define_actions! {
         base_path(|| -> String)
         view(|| -> String)
         algorithm(|| -> String)
+        operation(|| -> String)
+        writable(|| -> bool)
 
         // Switch the active pane and run a command-palette command.
         switch(String)

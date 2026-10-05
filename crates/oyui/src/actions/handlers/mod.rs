@@ -25,9 +25,12 @@ pub struct AppActionsHandler {
     pub theme: Arc<RwLock<ThemeState>>,
     pub tree: Arc<RwLock<FileTree>>,
     pub cache: DiffCache,
+    pub operation: crate::app::Operation,
     pub left_path: PathBuf,
     pub right_path: PathBuf,
     pub base_path: Option<PathBuf>,
+    /// Destination for the confirmed result; `None` means read-only.
+    pub write_target: Option<PathBuf>,
     pub algorithm: crate::cli::DiffAlgorithm,
     pub worker: Arc<EventRegistry>,
     pub color_mode: TerminalColorMode,

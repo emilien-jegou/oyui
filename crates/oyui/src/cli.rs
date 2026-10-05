@@ -23,21 +23,25 @@ pub struct Args {
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum Commands {
-    /// Diff two directories
+    /// View or edit a two-way diff (git difftool, jj diff/diffedit).
+    ///
+    /// `left` is the old side, `right` the new side. Confirming writes the
+    /// selected result back to `right`.
     Diff(DiffArgs),
+
+    /// Resolve a three-way merge or conflict (jj resolve, git mergetool).
+    ///
+    /// `base`, `left` and `right` are the common ancestor and the two sides.
+    /// Confirming writes the merged result to `--output` (defaults to `right`).
+    Merge(MergeArgs),
 
     /// Run the LSP
     LanguageServer,
 }
 
-#[derive(Parser, Debug, Clone)]
-pub struct DiffArgs {
-    pub left: PathBuf,
-    pub right: PathBuf,
-
-    #[arg(short = 'b', long = "base")]
-    pub base: Option<PathBuf>,
-
+/// Options shared by the diff/merge views.
+#[derive(clap::Args, Debug, Clone)]
+pub struct ViewArgs {
     #[arg(long = "diff-algorithm", default_value = "histogram")]
     pub diff_algorithm: DiffAlgorithm,
 
@@ -46,6 +50,38 @@ pub struct DiffArgs {
 
     #[arg(long = "context-lines", default_value = "4")]
     pub context_lines: usize,
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct DiffArgs {
+    /// Old side.
+    pub left: PathBuf,
+    /// New side; receives the confirmed result unless `--no-write` is set.
+    pub right: PathBuf,
+
+    /// Inspect only: never write the result back.
+    #[arg(long = "no-write")]
+    pub no_write: bool,
+
+    #[command(flatten)]
+    pub view: ViewArgs,
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct MergeArgs {
+    /// Common ancestor.
+    pub base: PathBuf,
+    /// First side ("ours"/"local").
+    pub left: PathBuf,
+    /// Second side ("theirs"/"remote").
+    pub right: PathBuf,
+
+    /// Where to write the merged result; defaults to `right`.
+    #[arg(short = 'o', long = "output")]
+    pub output: Option<PathBuf>,
+
+    #[command(flatten)]
+    pub view: ViewArgs,
 }
 
 #[derive(Parser, Debug, Clone)]

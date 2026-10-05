@@ -38,6 +38,8 @@ Session-level actions and context.
 | `global::base_path()` | `String` | Base path, or `""` when unset. |
 | `global::view()` | `String` | Active pane: `"file"` or `"tree"`. |
 | `global::algorithm()` | `String` | Diff algorithm: `histogram`, `myers`, `myersminimal`, `syntaxaware`. |
+| `global::operation()` | `String` | Session kind: `diff` or `merge`. |
+| `global::writable()` | `bool` | Whether confirming writes a result (`false` for `diff --no-write`). |
 | `global::switch(view)` | | Switch pane; `view` is `"file"` or `"tree"`. |
 | `global::command(cmd)` | | Run a palette command (see [commands](#palette-commands)). |
 | `global::undo()` | | Undo the last staging mutation. |

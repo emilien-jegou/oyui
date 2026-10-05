@@ -237,6 +237,8 @@ fn the_full_api_surface_compiles() {
             let _ = global::base_path();
             let _ = global::view();
             let _ = global::algorithm();
+            let _ = global::operation();
+            let _ = global::writable();
             global::switch("tree");
             global::command("invert");
             global::clear_error();

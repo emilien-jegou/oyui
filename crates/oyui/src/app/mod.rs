@@ -14,6 +14,23 @@ use typed_builder::TypedBuilder;
 pub use ui_state::UiState;
 use ui_state::{Message, MessageLevel};
 
+/// What the session is doing: inspect a two-way diff, or resolve a merge.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Operation {
+    Diff,
+    Merge,
+}
+
+impl Operation {
+    /// Stable lowercase token used by scripts.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Operation::Diff => "diff",
+            Operation::Merge => "merge",
+        }
+    }
+}
+
 use crate::actions::BoxedHandler;
 use crate::commands::CommandError;
 use crate::config::Config;
@@ -31,9 +48,12 @@ pub struct App {
     pub tree: Arc<RwLock<FileTree>>,
     pub cache: DiffCache,
     pub worker: Arc<EventRegistry>,
+    pub operation: Operation,
     pub left_path: PathBuf,
     pub right_path: PathBuf,
     pub base_path: Option<PathBuf>,
+    /// Destination for the confirmed result; `None` means read-only.
+    pub write_target: Option<PathBuf>,
     pub config: Config,
     pub handler: BoxedHandler,
     pub color_mode: TerminalColorMode,

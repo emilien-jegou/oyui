@@ -20,8 +20,14 @@ impl GlobalActionsHandler for AppActionsHandler {
     }
 
     fn execute_merge(&self) {
+        // Read-only sessions (e.g. `oyui diff --no-write`) simply exit.
+        let Some(target) = self.write_target.clone() else {
+            self.ui.lock().should_quit = true;
+            return;
+        };
+
         let mut tree = self.tree.write();
-        let res = crate::app::merge::confirm_and_write(&mut tree, &self.right_path, &self.cache);
+        let res = crate::app::merge::confirm_and_write(&mut tree, &target, &self.cache);
         match res {
             Ok(crate::app::events::ExitAction::QuitAndMerge) => {
                 self.ui.lock().should_quit = true;
@@ -29,6 +35,7 @@ impl GlobalActionsHandler for AppActionsHandler {
             Ok(_) => {}
             Err(e) => {
                 tracing::error!("Merge failed: {}", e);
+                self.set_message(MessageLevel::Error, format!("write failed: {e}"));
             }
         }
     }
@@ -61,6 +68,14 @@ impl GlobalActionsHandler for AppActionsHandler {
 
     fn algorithm(&self) -> String {
         format!("{:?}", self.algorithm).to_lowercase()
+    }
+
+    fn operation(&self) -> String {
+        self.operation.as_str().to_string()
+    }
+
+    fn writable(&self) -> bool {
+        self.write_target.is_some()
     }
 
     fn switch(&self, view: String) {

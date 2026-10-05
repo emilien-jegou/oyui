@@ -115,14 +115,34 @@ diff-instructions = false
 
 [merge-tools.oyui]
 program = "oyui"
+# Two-way diff editor: jj commit -i, squash -i, split, diffedit, restore -i.
 edit-args = ["diff", "$left", "$right"]
+# Three-way merge editor: jj resolve.
+merge-args = ["merge", "$base", "$left", "$right"]
 ```
 
-Oyui currently does not support `jj resolve` command.
+`oyui diff` edits the two-way diff (`$left` vs `$right`, writing back to
+`$right`); `oyui merge` resolves a three-way conflict (`$base`, `$left`,
+`$right`) and writes the result back to `$right`.
 
 ### Usage with Git
 
-More documentation on git integration will come soon once difftool/mergetool integration have stabilized. Some info [available here](https://github.com/emilien-jegou/oyui/issues/10#issuecomment-4754957273)
+As a difftool:
+
+```sh
+git config --global difftool.oyui.cmd 'oyui diff "$LOCAL" "$REMOTE" --no-write'
+git difftool --tool=oyui
+```
+
+As a mergetool:
+
+```sh
+git config --global mergetool.oyui.cmd 'oyui merge "$BASE" "$LOCAL" "$REMOTE" -o "$MERGED"'
+git mergetool --tool=oyui
+```
+
+`--no-write` makes `oyui diff` purely inspect; the mergetool form writes the
+resolved result to `$MERGED`.
 
 ### Enabling config LSP with neovim
 
