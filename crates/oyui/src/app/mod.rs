@@ -65,29 +65,10 @@ pub struct App {
 
 impl App {
     pub async fn start(&mut self) -> Result<(), CommandError> {
-        self.detect_conflicts();
         self.start_tree_calculation()?;
         self.config.start_watching(&self.worker)?;
         self.run().await?;
         Ok(())
-    }
-
-    /// Parses conflict markers from the merge target so the UI/scripts can see
-    /// how many conflicts remain to resolve.
-    fn detect_conflicts(&self) {
-        if self.operation != Operation::Merge {
-            return;
-        }
-        let Some(target) = &self.write_target else {
-            return;
-        };
-        if let Ok(content) = std::fs::read_to_string(target) {
-            if let Some(conflicts) = crate::diff::ConflictedFile::parse(&content) {
-                let mut ui = self.ui.lock();
-                ui.resolve = Some(ui_state::ResolveState::new(conflicts));
-                ui.resolve_open = true;
-            }
-        }
     }
 
     /// Applies one worker event to the app state.

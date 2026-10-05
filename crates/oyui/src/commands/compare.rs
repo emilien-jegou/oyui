@@ -73,6 +73,8 @@ async fn run(
     ui_state.configure(session.view.scrolloff, session.view.context_lines);
     let ui = Arc::new(Mutex::new(ui_state));
 
+    detect_conflicts(&session, &ui);
+
     let worker_context = AppWorkerContext::builder()
         .syntax_engine(SyntaxEngine::new())
         .algorithm(session.view.diff_algorithm)
@@ -127,4 +129,44 @@ async fn run(
 
     app.start().await?;
     Ok(())
+}
+
+/// Prepares conflict resolution for a merge session.
+///
+/// Prefers markers already present in the target (git's `$MERGED`); otherwise
+/// synthesizes a three-way merge from `base`/`left`/`right`.
+fn detect_conflicts(session: &Session, ui: &Arc<Mutex<UiState>>) {
+    if session.operation != Operation::Merge {
+        return;
+    }
+
+    if let Some(target) = &session.write_target {
+        if let Ok(content) = std::fs::read_to_string(target) {
+            if let Some(conflicts) = crate::diff::ConflictedFile::parse(&content) {
+                install(ui, conflicts);
+                return;
+            }
+        }
+    }
+
+    let Some(base) = &session.base_path else {
+        return;
+    };
+    let read = |path: &PathBuf| std::fs::read_to_string(path).unwrap_or_default();
+    let merged = crate::diff::merge3::merge3(
+        &read(base),
+        &read(&session.left_path),
+        &read(&session.right_path),
+        session.view.diff_algorithm,
+    );
+    if merged.conflict_count() > 0 {
+        install(ui, merged);
+    }
+}
+
+/// Stores the parsed/synthesized conflicts and opens the resolver.
+fn install(ui: &Arc<Mutex<UiState>>, conflicts: crate::diff::ConflictedFile) {
+    let mut guard = ui.lock();
+    guard.resolve = Some(crate::app::ui_state::ResolveState::new(conflicts));
+    guard.resolve_open = true;
 }

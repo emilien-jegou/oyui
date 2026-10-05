@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 pub mod conflict;
 pub mod line_selections;
+pub mod merge3;
 pub mod staging;
 
 pub use conflict::{ConflictedFile, Side};

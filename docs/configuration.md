@@ -217,9 +217,10 @@ An invalid pattern is reported through `global::error`.
 
 ## Resolving conflicts
 
-When a `merge` session's target contains conflict markers, oyui parses them and
-opens a conflict resolver. Each conflict shows `OURS`, optional `BASE`, and
-`THEIRS`; choose a side per conflict:
+A `merge` session opens a conflict resolver. Conflicts are read from markers
+already present in the target (git's `$MERGED`); if the target is clean, oyui
+synthesizes a three-way merge from `base`/`left`/`right`. Each conflict shows
+`OURS`, `BASE`, and `THEIRS`; choose a side per conflict:
 
 | Key (in resolver) | Action |
 |---|---|
