@@ -55,7 +55,7 @@ run_oyui() {
     printf '\n'
     return 0
   fi
-  run_oyui "$@"
+  "$BIN" "$@"
 }
 
 usage() {
@@ -260,6 +260,16 @@ $EXAMPLES/example.sh
 EOF
   [[ "$missing" == 0 ]] || die "fixtures incomplete"
   printf 'fixtures ok\n'
+
+  # Dry-run the launching scenarios: guards against a runner that recurses or
+  # forgets to emit the oyui invocation.
+  for s in diff staged merge merge-clean conflict; do
+    out="$(OYUI_EXAMPLE_DRY=1 "$0" "$s")"
+    if [[ "$out" != *DRY:* ]]; then
+      die "dry-run for '$s' produced no oyui command"
+    fi
+  done
+  printf 'dry-run ok\n'
 
   if [[ ! -x "$BIN" ]]; then
     printf 'building oyui (local)...\n'
