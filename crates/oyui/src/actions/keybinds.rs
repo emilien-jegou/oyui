@@ -1,9 +1,9 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::actions::{
-    Action, GlobalActions, ViewFileActions, ViewFileCursorActions, ViewFileFoldActions,
-    ViewFileNavActions, ViewFileScrollActions, ViewFileStagingActions, ViewTreeActions,
-    ViewTreeCursorActions, ViewTreeDirectoryActions, ViewTreeStagingActions,
+    Action, GlobalActions, ViewFileActions, ViewFileConflictActions, ViewFileCursorActions,
+    ViewFileFoldActions, ViewFileNavActions, ViewFileScrollActions, ViewFileStagingActions,
+    ViewTreeActions, ViewTreeCursorActions, ViewTreeDirectoryActions, ViewTreeStagingActions,
 };
 use crate::commons::input::{Keybind, Keybinds};
 use crate::script::CallbackId;
@@ -318,6 +318,9 @@ pub fn default_keybinds() -> KeybindRegistry {
             .register(Keybinds::char('s'), ViewFileStagingActions::split)
             .register(Keybinds::char('i'), ViewFileStagingActions::invert)
             .register(Keybinds::char('z'), ViewFileFoldActions::toggle)
+            .register(Keybinds::char('o'), ViewFileConflictActions::ours)
+            .register(Keybinds::char('T'), ViewFileConflictActions::theirs)
+            .register(Keybinds::char('B'), ViewFileConflictActions::both)
         })
         .on_mode(KeybindMode::View(View::Tree), |r| {
             r.register(

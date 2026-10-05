@@ -12,6 +12,14 @@
 //! >>>>>>> theirs
 //! ```
 
+/// True when `line` is a conflict marker (`<<<<<<<`, `|||||||`, `=======`, `>>>>>>>`).
+pub fn is_marker_line(line: &str) -> bool {
+    line.starts_with("<<<<<<<")
+        || line.starts_with("|||||||")
+        || line.starts_with("=======")
+        || line.starts_with(">>>>>>>")
+}
+
 /// How a single conflict should be resolved.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Side {
@@ -152,6 +160,40 @@ impl ConflictedFile {
     /// Resolves every conflict with the same side.
     pub fn resolve_all(&self, side: Side) -> String {
         self.resolve(&vec![side; self.conflict_count()])
+    }
+
+    /// Line ranges (in the reconstruction for `choices`) of each conflict.
+    ///
+    /// Resolved conflicts span their substituted lines; unresolved ones span
+    /// the full marker block. Used to map a file-view cursor to a conflict.
+    pub fn conflict_ranges(&self, choices: &[Option<Side>]) -> Vec<std::ops::Range<usize>> {
+        let mut ranges = Vec::new();
+        let mut line = 0usize;
+        let mut idx = 0usize;
+        for segment in &self.segments {
+            match segment {
+                Segment::Common(text) => line += text.len(),
+                Segment::Conflict(c) => {
+                    let len = match choices.get(idx).copied().flatten() {
+                        Some(Side::Ours) => c.ours.len(),
+                        Some(Side::Theirs) => c.theirs.len(),
+                        Some(Side::Both) => c.ours.len() + c.theirs.len(),
+                        None => c.marker_lines(),
+                    };
+                    ranges.push(line..line + len);
+                    line += len;
+                    idx += 1;
+                }
+            }
+        }
+        ranges
+    }
+
+    /// The conflict whose line range contains `line`, if any.
+    pub fn conflict_at_line(&self, line: usize, choices: &[Option<Side>]) -> Option<usize> {
+        self.conflict_ranges(choices)
+            .into_iter()
+            .position(|r| r.contains(&line))
     }
 
     /// Resolves conflicts using `choices` (one per conflict, in order).

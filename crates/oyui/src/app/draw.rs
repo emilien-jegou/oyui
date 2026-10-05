@@ -45,15 +45,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         crate::view::config_error::draw(frame, view_area, err, &theme);
     }
 
-    // 3. Draw the conflict resolver when open.
-    if app.ui.lock().resolve_open {
-        let state = app.ui.lock().resolve.clone();
-        if let Some(state) = state {
-            crate::view::conflict::draw(frame, view_area, &state, &theme);
-        }
-    }
-
-    // 4. Draw the keybinding help overlay on top of everything.
+    // 3. Draw the keybinding help overlay on top of everything.
     if app.ui.lock().help.is_some() {
         let entries = app.config.keybinds.entries();
         let current = app.ui.lock().current;

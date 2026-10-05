@@ -80,6 +80,10 @@ pub struct MergeArgs {
     #[arg(short = 'o', long = "output")]
     pub output: Option<PathBuf>,
 
+    /// Allow confirming while conflicts remain (jj); git requires resolution.
+    #[arg(long = "allow-unresolved")]
+    pub allow_unresolved: bool,
+
     #[command(flatten)]
     pub view: ViewArgs,
 }

@@ -54,6 +54,8 @@ pub struct App {
     pub base_path: Option<PathBuf>,
     /// Destination for the confirmed result; `None` means read-only.
     pub write_target: Option<PathBuf>,
+    /// Whether confirming is allowed with unresolved conflicts.
+    pub allow_unresolved: bool,
     pub config: Config,
     pub handler: BoxedHandler,
     pub color_mode: TerminalColorMode,

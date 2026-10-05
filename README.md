@@ -117,19 +117,21 @@ diff-instructions = false
 program = "oyui"
 # Two-way diff editor: jj commit -i, squash -i, split, diffedit, restore -i.
 edit-args = ["diff", "$left", "$right"]
-# Three-way merge editor: jj resolve.
-merge-args = ["merge", "$base", "$left", "$right"]
+# Three-way merge editor: jj resolve. jj allows confirming with conflicts left.
+merge-args = ["merge", "$base", "$left", "$right", "--allow-unresolved"]
 ```
 
 `oyui diff` edits the two-way diff (`$left` vs `$right`, writing back to
 `$right`); `oyui merge` resolves a three-way conflict (`$base`, `$left`,
 `$right`) and writes the result back to `$right`.
 
-`oyui merge` opens a resolver overlay showing `OURS` / `BASE` / `THEIRS` for
-each conflict. Conflicts are read from markers already in the target (git's
-`$MERGED`); when the target is clean, oyui synthesizes a three-way merge from
-`$base`/`$left`/`$right` instead. Pick a side with `o`/`t`/`b`, then press
-`enter` to write the resolved file and exit.
+`oyui merge` shows conflicts **inline in the file view**, with the marker
+blocks highlighted among the normal hunks. Conflicts are read from markers
+already in the target (git's `$MERGED`); when the target is clean, oyui
+synthesizes a three-way merge from `$base`/`$left`/`$right` instead. With the
+cursor on a conflict, `o` takes ours, `T` theirs, `B` both; `enter` writes the
+resolved file. Following git, confirming with conflicts left is refused unless
+`--allow-unresolved` is passed (as the jj config above does).
 
 ### Usage with Git
 

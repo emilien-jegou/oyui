@@ -96,6 +96,9 @@ impl<'a> RowBuilder<'a> {
                     .idx(current_new)
                     .is_selected(is_selected)
                     .is_staged(true)
+                    .is_conflict(crate::diff::conflict::is_marker_line(
+                        self.new_lines[current_new]
+                    ))
                     .syntax_opt(self.syntax_opt)
                     .area_width(self.area_width)
                     .use_gradient(self.use_gradient)
@@ -129,6 +132,7 @@ impl<'a> RowBuilder<'a> {
                             .idx(*new_line_idx)
                             .is_selected(is_selected)
                             .is_staged(is_staged)
+                            .is_conflict(crate::diff::conflict::is_marker_line(line))
                             .mode(line_mode)
                             .syntax_opt(self.syntax_opt)
                             .area_width(self.area_width)
@@ -172,6 +176,7 @@ impl<'a> RowBuilder<'a> {
                             .is_add(true)
                             .is_selected(is_selected)
                             .is_staged(is_staged)
+                            .is_conflict(crate::diff::conflict::is_marker_line(line))
                             .mode(line_mode)
                             .inline_highlights(inline_highlights)
                             .syntax_opt(self.syntax_opt)
@@ -225,6 +230,9 @@ impl<'a> RowBuilder<'a> {
                     .idx(current_new)
                     .is_selected(is_selected)
                     .is_staged(true)
+                    .is_conflict(crate::diff::conflict::is_marker_line(
+                        self.new_lines[current_new]
+                    ))
                     .syntax_opt(self.syntax_opt)
                     .area_width(self.area_width)
                     .use_gradient(self.use_gradient)

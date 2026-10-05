@@ -217,27 +217,33 @@ An invalid pattern is reported through `global::error`.
 
 ## Resolving conflicts
 
-A `merge` session opens a conflict resolver. Conflicts are read from markers
-already present in the target (git's `$MERGED`); if the target is clean, oyui
-synthesizes a three-way merge from `base`/`left`/`right`. Each conflict shows
-`OURS`, `BASE`, and `THEIRS`; choose a side per conflict:
+Conflicts are shown **inline in the file view**: the working file contains the
+`<<<<<<<`/`|||||||`/`=======`/`>>>>>>>` markers as ordinary lines, styled
+prominently among the surrounding hunks. There is no separate window. Markers
+are read from the target (git's `$MERGED`); if the target is clean, oyui
+synthesizes a three-way merge from `base`/`left`/`right` first.
 
-| Key (in resolver) | Action |
+Put the cursor on a conflict and choose a side:
+
+| Key | Action |
 |---|---|
-| `j`/`k`, `n`/`N`, `up`/`down` | Move between conflicts |
-| `o` / `t` / `b` | Take ours / theirs / both |
-| `u` | Clear the choice |
-| `enter` | Write the result to the target and exit |
-| `esc`, `q` | Close the resolver (keep choices) |
+| `o` | Take ours |
+| `T` | Take theirs |
+| `B` | Take both |
 
-`global::conflict_count()` reports how many conflicts were detected, and
-`global::resolve()` re-opens the overlay. Values that are not chosen keep their
-markers, so you can partially resolve.
+Resolving rewrites the working file and recomputes the diff in place, so the
+markers disappear as you go. `global::conflict_count()` reports how many
+conflicts were detected.
 
-In a merge session the normal confirm (`enter` in the diff view) never runs the
-two-way staging write; it stays in the resolver until conflicts are chosen, or
-writes the synthesized merge result when there are none. This prevents the
-merge target from being clobbered.
+Confirming follows the integration's rules:
+
+- **git / mergetool** (default): `enter` refuses to confirm while conflicts
+  remain, reporting how many are left.
+- **jj resolve**: pass `--allow-unresolved` (see the jj config in the README)
+  to permit confirming with conflicts left.
+
+In a merge session, confirm never runs the two-way staging write; it writes the
+resolved working file, so the merge target is never clobbered.
 
 ```rune
 on("config_reload", || {

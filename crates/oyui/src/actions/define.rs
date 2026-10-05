@@ -40,9 +40,6 @@ define_actions! {
 
         // Toggle the keybinding-help overlay.
         help()
-
-        // Toggle the conflict-resolution overlay (merge sessions).
-        resolve()
     }
     settings {
         scrolloff { @getset(u32) }
@@ -167,6 +164,13 @@ define_actions! {
             path(|| -> String)
             folded(|| -> bool)
             close()
+
+            // Resolve the conflict under the cursor (merge sessions).
+            conflict {
+                ours()
+                theirs()
+                both()
+            }
 
             // Read-only diff/hunk introspection for the open file.
             inspect {

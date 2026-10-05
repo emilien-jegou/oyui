@@ -47,7 +47,7 @@ Session-level actions and context.
 | `global::redo()` | | Redo the last undone staging mutation. |
 | `global::copy(text)` | | Copy `text` to the system clipboard via OSC 52. |
 | `global::help()` | | Toggle the keybinding-help overlay. |
-| `global::resolve()` | | Toggle the conflict-resolution overlay (merge sessions). |
+
 | `global::notify(msg)` | | Show a transient info message. |
 | `global::warn(msg)` | | Show a transient warning message. |
 | `global::error(msg)` | | Show a transient error message. |
@@ -227,6 +227,16 @@ theme::gradient::set(true);
 | `view::file::staging::stage_all()` / `unstage_all()` | | Stage/unstage every modifiable line in the file. |
 | `view::file::staging::invert()` | | Invert all selections. |
 | `view::file::staging::state()` | `String` | File staging state: `staged`, `partial`, `unstaged`, `none`. |
+
+### Conflicts
+
+Merge sessions only; these resolve the conflict under the cursor inline.
+
+| Function | Returns | Description |
+|---|---|---|
+| `view::file::conflict::ours()` | | Replace the conflict with the ours side. |
+| `view::file::conflict::theirs()` | | Replace the conflict with the theirs side. |
+| `view::file::conflict::both()` | | Replace the conflict with ours followed by theirs. |
 
 ### Folding and file
 

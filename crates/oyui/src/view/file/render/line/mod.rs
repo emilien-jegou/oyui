@@ -9,7 +9,7 @@ use crate::{
 use gutter::{GutterConfig, GutterRenderer};
 use ratatui::{
     layout::Constraint,
-    style::Stylize,
+    style::{Modifier, Style, Stylize},
     widgets::{Block, Borders, Row, Table},
 };
 use text::{TextConfig, TextRenderer};
@@ -41,6 +41,9 @@ pub struct LineRenderer<'a> {
     pub is_selected: bool,
     #[builder(default)]
     pub is_staged: bool,
+    /// Conflict-marker line: rendered with a prominent, overriding style.
+    #[builder(default)]
+    pub is_conflict: bool,
     #[builder(default)]
     pub mode: HunkMarker,
     #[builder(default = &[])]
@@ -62,22 +65,32 @@ pub struct LineRenderer<'a> {
 
 impl<'a> LineRenderer<'a> {
     pub fn render(self) -> Row<'a> {
-        let row_style = get_line_style(
-            self.is_add,
-            self.is_del,
-            self.is_selected,
-            self.is_staged,
-            self.use_gradient,
-            self.theme,
-        );
+        // Conflict markers override the normal add/del/staged styling so they
+        // stand out from the surrounding hunks.
+        let is_add = self.is_add && !self.is_conflict;
+        let is_del = self.is_del && !self.is_conflict;
+        let is_staged = self.is_staged && !self.is_conflict;
+
+        let row_style = if self.is_conflict {
+            conflict_marker_style(self.content, self.theme)
+        } else {
+            get_line_style(
+                is_add,
+                is_del,
+                self.is_selected,
+                is_staged,
+                self.use_gradient,
+                self.theme,
+            )
+        };
 
         let mut row_cells = GutterRenderer {
             config: self.gutter_config,
             idx: self.idx,
-            is_add: self.is_add,
-            is_del: self.is_del,
+            is_add,
+            is_del,
             is_selected: self.is_selected,
-            is_staged: self.is_staged,
+            is_staged,
             mode: self.mode,
             use_gradient: self.use_gradient,
             area_width: self.area_width,
@@ -91,12 +104,16 @@ impl<'a> LineRenderer<'a> {
         let text_cell = TextRenderer {
             content: self.content,
             idx: self.idx,
-            is_add: self.is_add,
-            is_del: self.is_del,
+            is_add,
+            is_del,
             is_selected: self.is_selected,
-            is_staged: self.is_staged,
+            is_staged,
             inline_highlights: self.inline_highlights,
-            syntax_opt: self.syntax_opt,
+            syntax_opt: if self.is_conflict {
+                None
+            } else {
+                self.syntax_opt
+            },
             area_width: self.area_width,
             use_gradient: self.use_gradient,
             theme: self.theme,
@@ -110,5 +127,23 @@ impl<'a> LineRenderer<'a> {
         row_cells.push(text_cell);
 
         Row::new(row_cells).style(row_style)
+    }
+}
+
+/// Prominent style for a conflict marker line.
+fn conflict_marker_style(content: &str, theme: &UiTheme) -> Style {
+    let base = Style::default()
+        .bg(theme.cursor_bg.into())
+        .add_modifier(Modifier::BOLD);
+    if content.starts_with("<<<<<<<") {
+        base.fg(theme.staged.into())
+    } else if content.starts_with(">>>>>>>") {
+        base.fg(theme.del_fg.into())
+    } else if content.starts_with("|||||||") {
+        base.fg(theme.partial.into())
+    } else if content.starts_with("=======") {
+        base.fg(theme.cmd.into())
+    } else {
+        base
     }
 }

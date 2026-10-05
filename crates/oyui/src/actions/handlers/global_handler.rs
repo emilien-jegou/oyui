@@ -30,19 +30,28 @@ impl GlobalActionsHandler for AppActionsHandler {
         // synthesized result); the two-way staging write would clobber the
         // target, so it must not run here.
         if self.operation == crate::app::Operation::Merge {
-            let snapshot = {
+            let (unresolved, text) = {
                 let ui = self.ui.lock();
-                ui.resolve.as_ref().map(|s| (s.count(), s.resolved_text()))
-            };
-            match snapshot {
-                Some((count, _)) if count > 0 => {
-                    self.ui.lock().resolve_open = true;
-                    self.set_message(
-                        MessageLevel::Info,
-                        "resolve conflicts, then press enter".into(),
-                    );
+                match ui.resolve.as_ref() {
+                    Some(state) => (
+                        state.count() - state.resolved_count(),
+                        Some(state.resolved_text()),
+                    ),
+                    None => (0, None),
                 }
-                Some((_, text)) => self.write_result(&target, text),
+            };
+
+            // git refuses to confirm with conflicts left; jj allows it.
+            if unresolved > 0 && !self.allow_unresolved {
+                self.set_message(
+                    MessageLevel::Warn,
+                    format!("{unresolved} conflict(s) unresolved"),
+                );
+                return;
+            }
+
+            match text {
+                Some(text) => self.write_result(&target, text),
                 None => {
                     self.ui.lock().should_quit = true;
                 }
@@ -108,19 +117,6 @@ impl GlobalActionsHandler for AppActionsHandler {
             .resolve
             .as_ref()
             .map_or(0, |r| r.count() as u32)
-    }
-
-    fn resolve(&self) {
-        let mut ui = self.ui.lock();
-        if ui.resolve.is_some() {
-            ui.resolve_open = !ui.resolve_open;
-        } else {
-            ui.message = Some(Message::new(
-                MessageLevel::Info,
-                "no conflicts to resolve".into(),
-                Message::DEFAULT_TTL,
-            ));
-        }
     }
 
     fn switch(&self, view: String) {

@@ -234,7 +234,7 @@ scenario_jj_resolve() {
   fi
   printf 'Running "jj resolve" in %s\n' "$repo"
   (cd "$repo" && jj --config-toml "merge-tools.oyui.program = \"$BIN\"" \
-    --config-toml 'merge-tools.oyui.merge-args = ["merge", "$base", "$left", "$right"]' \
+    --config-toml 'merge-tools.oyui.merge-args = ["merge", "$base", "$left", "$right", "--allow-unresolved"]' \
     resolve --tool oyui)
 }
 

@@ -26,13 +26,11 @@ pub struct HelpState {
     pub scroll: usize,
 }
 
-/// Interactive conflict-resolution state for the merge target.
+/// Conflict-resolution state for the merge target, rendered inline.
 #[derive(Clone, Debug)]
 pub struct ResolveState {
-    /// Parsed conflicts from the target file.
+    /// Parsed conflicts from the working file.
     pub conflicts: crate::diff::ConflictedFile,
-    /// Index of the conflict being inspected.
-    pub cursor: usize,
     /// Chosen side per conflict; `None` keeps the markers.
     pub choices: Vec<Option<crate::diff::Side>>,
 }
@@ -41,11 +39,7 @@ impl ResolveState {
     /// Builds a resolver with nothing chosen yet.
     pub fn new(conflicts: crate::diff::ConflictedFile) -> Self {
         let choices = vec![None; conflicts.conflict_count()];
-        Self {
-            conflicts,
-            cursor: 0,
-            choices,
-        }
+        Self { conflicts, choices }
     }
 
     /// Number of conflicts.
@@ -53,45 +47,26 @@ impl ResolveState {
         self.conflicts.conflict_count()
     }
 
-    /// The conflict currently under the cursor.
-    pub fn current(&self) -> Option<&crate::diff::conflict::Conflict> {
-        self.conflicts
-            .segments
-            .iter()
-            .filter_map(|s| match s {
-                crate::diff::conflict::Segment::Conflict(c) => Some(c),
-                _ => None,
-            })
-            .nth(self.cursor)
+    /// Number of conflicts that have a chosen side.
+    pub fn resolved_count(&self) -> usize {
+        self.choices.iter().filter(|c| c.is_some()).count()
     }
 
-    /// Moves the cursor by `delta`, clamped to the conflict range.
-    pub fn move_cursor(&mut self, delta: isize) {
-        let count = self.count();
-        if count == 0 {
-            self.cursor = 0;
-            return;
-        }
-        self.cursor = (self.cursor as isize + delta).clamp(0, count as isize - 1) as usize;
+    /// The chosen side for conflict `index`.
+    pub fn choice(&self, index: usize) -> Option<crate::diff::Side> {
+        self.choices.get(index).copied().flatten()
     }
 
-    /// Chooses a side for the current conflict.
-    pub fn set_choice(&mut self, side: crate::diff::Side) {
-        if let Some(slot) = self.choices.get_mut(self.cursor) {
+    /// Sets the chosen side for conflict `index`.
+    pub fn set_choice(&mut self, index: usize, side: crate::diff::Side) {
+        if let Some(slot) = self.choices.get_mut(index) {
             *slot = Some(side);
         }
     }
 
-    /// Clears the current conflict's choice.
-    pub fn clear_choice(&mut self) {
-        if let Some(slot) = self.choices.get_mut(self.cursor) {
-            *slot = None;
-        }
-    }
-
-    /// Number of conflicts that have a chosen side.
-    pub fn resolved_count(&self) -> usize {
-        self.choices.iter().filter(|c| c.is_some()).count()
+    /// The conflict whose line range contains `line` in the current rendering.
+    pub fn conflict_at_line(&self, line: usize) -> Option<usize> {
+        self.conflicts.conflict_at_line(line, &self.choices)
     }
 
     /// Renders the file with the chosen sides; unresolved conflicts keep markers.
@@ -159,8 +134,6 @@ pub struct UiState {
     pub help: Option<HelpState>,
     /// Conflict-resolution state for the merge target, if any.
     pub resolve: Option<ResolveState>,
-    /// Whether the conflict resolver overlay is visible.
-    pub resolve_open: bool,
     /// Whether the session may write a result (false for `diff --no-write`).
     pub writable: bool,
     /// Bounded undo/redo history for staging mutations.
@@ -182,7 +155,6 @@ impl UiState {
             status: String::new(),
             help: None,
             resolve: None,
-            resolve_open: false,
             writable: true,
             undo: crate::app::undo::UndoStack::default(),
         }
@@ -194,7 +166,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn resolve_state_navigates_and_chooses_sides() {
+    fn resolve_state_tracks_choices_and_line_ranges() {
         let source = "\
 a
 <<<<<<< ours
@@ -209,14 +181,16 @@ b
 
         assert_eq!(state.count(), 1);
         assert_eq!(state.resolved_count(), 0);
+        assert!(state.resolved_text().contains("<<<<<<<"));
+        // The unresolved marker block spans lines 1..6 in the rendering.
+        assert_eq!(state.conflict_at_line(3), Some(0));
 
-        state.set_choice(crate::diff::Side::Ours);
+        state.set_choice(0, crate::diff::Side::Ours);
         assert_eq!(state.resolved_count(), 1);
         assert!(state.resolved_text().contains("one"));
         assert!(!state.resolved_text().contains("two"));
-
-        state.clear_choice();
-        assert!(state.resolved_text().contains("<<<<<<<"));
+        // After resolving, the block is just the "one" line at index 1.
+        assert_eq!(state.conflict_at_line(1), Some(0));
     }
 
     #[test]

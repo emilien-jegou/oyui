@@ -249,7 +249,6 @@ fn the_full_api_surface_compiles() {
             global::clear_message();
             global::copy("text");
             global::help();
-            global::resolve();
             global::undo();
             global::redo();
 
@@ -279,6 +278,10 @@ fn the_full_api_surface_compiles() {
             view::file::staging::set_hunk(0, true);
             view::file::staging::stage_all();
             view::file::staging::unstage_all();
+
+            view::file::conflict::ours();
+            view::file::conflict::theirs();
+            view::file::conflict::both();
 
             let _ = view::file::inspect::hunk_has();
             if let Some(_hunk) = view::file::inspect::hunk_index() {}

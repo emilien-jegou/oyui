@@ -22,6 +22,8 @@ pub struct Session {
     pub right_path: PathBuf,
     /// Destination for the confirmed result; `None` means read-only.
     pub write_target: Option<PathBuf>,
+    /// Whether confirming is allowed with unresolved conflicts.
+    pub allow_unresolved: bool,
     pub view: ViewArgs,
 }
 
@@ -37,24 +39,51 @@ pub async fn run_diff(
         left_path: args.left.clone(),
         right_path: args.right.clone(),
         write_target: (!args.no_write).then(|| args.right.clone()),
+        allow_unresolved: false,
         view: args.view.clone(),
     };
     run(options, config_path, session).await
 }
 
 /// Runs the three-way merge editor (`oyui merge`).
+///
+/// The working file (the output target) is populated with the conflict markers
+/// and then compared against the base, so conflicts render inline in the file
+/// view alongside normal hunks.
 pub async fn run_merge(
     options: &RunOptions,
     args: &MergeArgs,
     config_path: PathBuf,
 ) -> Result<(), CommandError> {
     let output = args.output.clone().unwrap_or_else(|| args.right.clone());
+    let read = |p: &PathBuf| std::fs::read_to_string(p).unwrap_or_default();
+
+    // Keep existing markers; otherwise synthesize a merge from the three sides.
+    let content = match std::fs::read_to_string(&output) {
+        Ok(text) if crate::diff::ConflictedFile::is_conflicted(&text) => text,
+        _ => {
+            let merged = crate::diff::merge3::merge3(
+                &read(&args.base),
+                &read(&args.left),
+                &read(&args.right),
+                args.view.diff_algorithm,
+            );
+            let choices = vec![None; merged.conflict_count()];
+            merged.resolve_optional(&choices)
+        }
+    };
+
+    if let Err(e) = std::fs::write(&output, &content) {
+        return Err(eyre::eyre!("failed to write merge target: {e}").into());
+    }
+
     let session = Session {
         operation: Operation::Merge,
         base_path: Some(args.base.clone()),
-        left_path: args.left.clone(),
-        right_path: args.right.clone(),
+        left_path: args.base.clone(),
+        right_path: output.clone(),
         write_target: Some(output),
+        allow_unresolved: args.allow_unresolved,
         view: args.view.clone(),
     };
     run(options, config_path, session).await
@@ -98,6 +127,7 @@ async fn run(
         right_path: session.right_path.clone(),
         base_path: session.base_path.clone(),
         write_target: session.write_target.clone(),
+        allow_unresolved: session.allow_unresolved,
         algorithm: session.view.diff_algorithm,
         color_mode: options.color_mode.clone(),
         error: config_error.clone(),
@@ -120,6 +150,7 @@ async fn run(
         .left_path(session.left_path.clone())
         .right_path(session.right_path.clone())
         .write_target(session.write_target.clone())
+        .allow_unresolved(session.allow_unresolved)
         .tree(tree)
         .theme(theme)
         .ui(ui)
@@ -132,42 +163,20 @@ async fn run(
     Ok(())
 }
 
-/// Prepares conflict resolution for a merge session.
+/// Loads the merge target's conflicts for inline resolution.
 ///
-/// Prefers markers already present in the target (git's `$MERGED`); otherwise
-/// synthesizes a three-way merge from `base`/`left`/`right`.
+/// The working file was already populated (markers kept or synthesized) by
+/// [`run_merge`], so parsing it yields the conflicts to display alongside hunks.
 fn detect_conflicts(session: &Session, ui: &Arc<Mutex<UiState>>) {
     if session.operation != Operation::Merge {
         return;
     }
-
-    if let Some(target) = &session.write_target {
-        if let Ok(content) = std::fs::read_to_string(target) {
-            if let Some(conflicts) = crate::diff::ConflictedFile::parse(&content) {
-                install(ui, conflicts);
-                return;
-            }
-        }
-    }
-
-    let Some(base) = &session.base_path else {
+    let Some(target) = &session.write_target else {
         return;
     };
-    let read = |path: &PathBuf| std::fs::read_to_string(path).unwrap_or_default();
-    let merged = crate::diff::merge3::merge3(
-        &read(base),
-        &read(&session.left_path),
-        &read(&session.right_path),
-        session.view.diff_algorithm,
-    );
-    install(ui, merged);
-}
-
-/// Stores the parsed/synthesized result and opens the resolver when conflicts
-/// remain (a clean merge stays hidden and is written on confirm).
-fn install(ui: &Arc<Mutex<UiState>>, conflicts: crate::diff::ConflictedFile) {
-    let open = conflicts.conflict_count() > 0;
-    let mut guard = ui.lock();
-    guard.resolve = Some(crate::app::ui_state::ResolveState::new(conflicts));
-    guard.resolve_open = open;
+    if let Ok(content) = std::fs::read_to_string(target) {
+        if let Some(conflicts) = crate::diff::ConflictedFile::parse(&content) {
+            ui.lock().resolve = Some(crate::app::ui_state::ResolveState::new(conflicts));
+        }
+    }
 }

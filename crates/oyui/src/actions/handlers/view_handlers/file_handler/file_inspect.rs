@@ -116,7 +116,7 @@ impl AppActionsHandler {
         let DiffResult::Text(file_diff) = diff.as_ref() else {
             return None;
         };
-        let mut ui = self.ui.lock();
+        let ui = self.ui.lock();
         let row = ui
             .file_view
             .scroll_states

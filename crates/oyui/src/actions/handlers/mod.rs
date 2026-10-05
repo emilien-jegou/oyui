@@ -31,6 +31,8 @@ pub struct AppActionsHandler {
     pub base_path: Option<PathBuf>,
     /// Destination for the confirmed result; `None` means read-only.
     pub write_target: Option<PathBuf>,
+    /// Whether confirming is allowed with unresolved conflicts.
+    pub allow_unresolved: bool,
     pub algorithm: crate::cli::DiffAlgorithm,
     pub worker: Arc<EventRegistry>,
     pub color_mode: TerminalColorMode,
