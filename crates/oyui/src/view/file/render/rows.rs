@@ -7,6 +7,7 @@ use syntect::highlighting::Style;
 
 use crate::config::UiTheme;
 use crate::diff::FileDiff;
+use crate::view::file::view_model::ConflictRegions;
 
 use super::line::LineRenderer;
 use super::separator::render_separator;
@@ -45,6 +46,7 @@ pub(crate) struct RowBuilder<'a> {
     pub is_folded: bool,
     pub default_staged: bool,
     pub selected_row_idx: usize,
+    pub regions: &'a ConflictRegions,
 }
 
 impl<'a> RowBuilder<'a> {
@@ -118,6 +120,34 @@ impl<'a> RowBuilder<'a> {
                 let is_selected = visual_row_idx == self.selected_row_idx;
                 let is_staged = diff.line_selections.get(selection_idx, self.default_staged);
                 selection_idx += 1;
+
+                // A folded conflict collapses its whole span into one summary.
+                let folded = match diff_line {
+                    crate::diff::DiffLine::Context { new_line_idx, .. }
+                    | crate::diff::DiffLine::Addition { new_line_idx, .. } => {
+                        self.regions.folded_span(*new_line_idx)
+                    }
+                    crate::diff::DiffLine::Deletion { .. } => self.regions.folded_span(current_new),
+                };
+                if let Some((ci, is_first)) = folded {
+                    if is_first {
+                        let is_selected = visual_row_idx == self.selected_row_idx;
+                        push_row!(conflict_summary_row(
+                            self.regions.summary(ci),
+                            visual_row_idx,
+                            is_selected,
+                            self.area_width,
+                            theme,
+                            self.use_gradient,
+                        ));
+                    }
+                    if let crate::diff::DiffLine::Context { new_line_idx, .. }
+                    | crate::diff::DiffLine::Addition { new_line_idx, .. } = diff_line
+                    {
+                        current_new = *new_line_idx + 1;
+                    }
+                    continue;
+                }
 
                 let line_mode = if is_first_line_of_hunk {
                     hunk.marker
@@ -264,6 +294,27 @@ impl<'a> RowBuilder<'a> {
     }
 }
 
+/// Renders a folded conflict as a single summary row.
+fn conflict_summary_row<'a>(
+    content: &'a str,
+    idx: usize,
+    is_selected: bool,
+    area_width: u16,
+    theme: &'a UiTheme,
+    use_gradient: bool,
+) -> Row<'a> {
+    LineRenderer::builder()
+        .content(content)
+        .idx(idx)
+        .is_selected(is_selected)
+        .is_conflict(true)
+        .area_width(area_width)
+        .use_gradient(use_gradient)
+        .theme(theme)
+        .build()
+        .render()
+}
+
 /// Tracks whether `line` lies inside a conflict block (markers inclusive).
 ///
 /// A folded conflict is a single line containing both markers; it is treated as
@@ -324,6 +375,12 @@ mod tests {
         }
     }
 
+    static EMPTY_REGIONS: ConflictRegions = ConflictRegions {
+        ranges: Vec::new(),
+        folded: Vec::new(),
+        summaries: Vec::new(),
+    };
+
     fn builder<'a>(
         diff: &'a FileDiff,
         lines: &'a [&'a str],
@@ -343,6 +400,7 @@ mod tests {
             is_folded: folded,
             default_staged: true,
             selected_row_idx: 0,
+            regions: &EMPTY_REGIONS,
         }
     }
 

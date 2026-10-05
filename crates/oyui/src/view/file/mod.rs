@@ -3,7 +3,7 @@ pub mod render;
 pub mod utils;
 pub mod view_model;
 
-use crate::view::file::view_model::FileViewModel;
+use crate::view::file::view_model::{ConflictRegions, FileViewModel};
 use ratatui::widgets::TableState;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -18,6 +18,8 @@ pub struct FileViewData {
     pub last_height: usize,
     pub last_width: usize,
     pub use_gradient: bool,
+    /// Foldable conflict regions, refreshed from the resolver before drawing.
+    pub conflict_regions: ConflictRegions,
     view_model: FileViewModel,
     view_model_dirty: bool,
 }
@@ -34,6 +36,7 @@ impl FileViewData {
             last_height: 0,
             last_width: 0,
             use_gradient,
+            conflict_regions: ConflictRegions::default(),
             view_model: FileViewModel::default(),
             view_model_dirty: true,
         }
@@ -71,12 +74,21 @@ impl FileViewData {
     pub fn recompute_view_model(&mut self, diff: &crate::diff::FileDiff) {
         if let Some(path) = &self.current_path {
             if self.view_model_dirty
-                || !self
-                    .view_model
-                    .is_fresh(path, diff, self.is_folded, self.context_lines)
+                || !self.view_model.is_fresh(
+                    path,
+                    diff,
+                    self.is_folded,
+                    self.context_lines,
+                    &self.conflict_regions,
+                )
             {
-                self.view_model
-                    .recompute(path, diff, self.is_folded, self.context_lines);
+                self.view_model.recompute(
+                    path,
+                    diff,
+                    self.is_folded,
+                    self.context_lines,
+                    &self.conflict_regions,
+                );
                 self.view_model_dirty = false;
             }
         }

@@ -242,6 +242,7 @@ impl FileViewData {
             is_folded: self.is_folded,
             default_staged,
             selected_row_idx,
+            regions: &self.conflict_regions,
         };
 
         // Pass 1 counts every visual row without rendering; pass 2 renders

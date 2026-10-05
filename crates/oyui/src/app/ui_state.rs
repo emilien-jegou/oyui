@@ -85,10 +85,13 @@ impl ResolveState {
         }
     }
 
-    /// The conflict whose line range contains `line` in the current rendering.
+    /// The conflict whose (canonical) line range contains `line`.
+    ///
+    /// The cursor indexes the underlying diff content, which always carries the
+    /// full markers — folding only affects rendering.
     pub fn conflict_at_line(&self, line: usize) -> Option<usize> {
         self.conflicts
-            .display_ranges(&self.folded)
+            .marker_ranges()
             .into_iter()
             .position(|r| r.contains(&line))
     }
@@ -96,6 +99,17 @@ impl ResolveState {
     /// On-screen content: folded conflicts collapse to a summary marker.
     pub fn display_text(&self) -> String {
         self.conflicts.display(&self.folded, &self.choices)
+    }
+
+    /// Foldable regions for the file-view row model.
+    pub fn regions(&self) -> crate::view::file::view_model::ConflictRegions {
+        crate::view::file::view_model::ConflictRegions {
+            ranges: self.conflicts.marker_ranges(),
+            folded: self.folded.clone(),
+            summaries: (0..self.count())
+                .map(|i| crate::diff::conflict::summary_line(self.choice(i)))
+                .collect(),
+        }
     }
 
     /// Content to write on confirm: chosen sides applied, others keep markers.
@@ -219,10 +233,11 @@ b
         assert!(state.resolved_text().contains("one"));
         assert!(!state.resolved_text().contains("two"));
 
-        // Folding collapses the block to a single summary line.
+        // Folding changes only the rendering: the canonical cursor mapping and
+        // the summary text, never the underlying content.
         state.set_folded(0, true);
         assert_eq!(state.conflict_at_line(1), Some(0));
-        assert_eq!(state.conflict_at_line(3), None);
+        assert_eq!(state.conflict_at_line(3), Some(0));
         assert!(state.display_text().contains("<<<<<<< ours ⋯ >>>>>>>"));
     }
 

@@ -4,6 +4,40 @@ use crate::diff::FileDiff;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+/// Foldable conflict regions over the new-side line indices.
+///
+/// A folded region renders as a single summary line; this is display-only, so
+/// the underlying diff (and its staging selections) are untouched.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ConflictRegions {
+    /// New-content line spans of each conflict.
+    pub ranges: Vec<std::ops::Range<usize>>,
+    /// Whether each conflict is collapsed to its summary line.
+    pub folded: Vec<bool>,
+    /// Summary line text per conflict (shown when folded).
+    pub summaries: Vec<String>,
+}
+
+impl ConflictRegions {
+    /// True when there is nothing to fold.
+    pub fn is_empty(&self) -> bool {
+        self.ranges.is_empty()
+    }
+
+    /// For a new-content line in a folded conflict: `(index, is_first_line)`.
+    pub fn folded_span(&self, line: usize) -> Option<(usize, bool)> {
+        self.ranges.iter().enumerate().find_map(|(i, r)| {
+            (self.folded.get(i).copied().unwrap_or(false) && r.contains(&line))
+                .then_some((i, line == r.start))
+        })
+    }
+
+    /// Summary text for conflict `i`.
+    pub fn summary(&self, i: usize) -> &str {
+        self.summaries.get(i).map(String::as_str).unwrap_or("")
+    }
+}
+
 /// Identity of every input that determines the file view's row layout.
 #[derive(PartialEq, Eq)]
 struct LayoutKey {
@@ -17,17 +51,25 @@ struct LayoutKey {
     is_folded: bool,
     /// Collapsed context lines around each hunk.
     context_lines: usize,
+    /// Folded conflict flags; folding changes the row layout.
+    conflict_folded: Vec<bool>,
 }
 
 impl LayoutKey {
     /// Reads the layout-identifying attributes of `diff` and its render mode.
-    fn new(diff: &FileDiff, is_folded: bool, context_lines: usize) -> Self {
+    fn new(
+        diff: &FileDiff,
+        is_folded: bool,
+        context_lines: usize,
+        regions: &ConflictRegions,
+    ) -> Self {
         Self {
             content_ptr: (&*diff.new_file_content).as_ptr() as usize,
             content_len: diff.new_file_content.len(),
             hunks: diff.hunks.len(),
             is_folded,
             context_lines,
+            conflict_folded: regions.folded.clone(),
         }
     }
 }
@@ -52,6 +94,7 @@ impl FileViewModel {
         diff: &FileDiff,
         is_folded: bool,
         context_lines: usize,
+        regions: &ConflictRegions,
     ) {
         let mut line_map = Vec::new();
         let mut hunk_starts = Vec::new();
@@ -80,6 +123,25 @@ impl FileViewModel {
 
             let mut recorded_hunk_start = false;
             for diff_line in &hunk.lines {
+                // A folded conflict collapses its whole span into one row.
+                if let Some((ci, is_first)) = folded_line(diff_line, current_new, regions) {
+                    if is_first {
+                        if !recorded_hunk_start {
+                            hunk_starts.push(visual_row_idx);
+                            recorded_hunk_start = true;
+                        }
+                        line_map.push(regions.ranges[ci].start);
+                        row_to_hunk.push(Some(i));
+                        visual_row_idx += 1;
+                    }
+                    if let crate::diff::DiffLine::Context { new_line_idx, .. }
+                    | crate::diff::DiffLine::Addition { new_line_idx, .. } = diff_line
+                    {
+                        current_new = *new_line_idx + 1;
+                    }
+                    continue;
+                }
+
                 if !recorded_hunk_start {
                     hunk_starts.push(visual_row_idx);
                     recorded_hunk_start = true;
@@ -144,7 +206,7 @@ impl FileViewModel {
         self.row_to_hunk.insert(path.to_path_buf(), row_to_hunk);
         self.keys.insert(
             path.to_path_buf(),
-            LayoutKey::new(diff, is_folded, context_lines),
+            LayoutKey::new(diff, is_folded, context_lines, regions),
         );
     }
 
@@ -155,8 +217,9 @@ impl FileViewModel {
         diff: &FileDiff,
         is_folded: bool,
         context_lines: usize,
+        regions: &ConflictRegions,
     ) -> bool {
-        self.keys.get(path) == Some(&LayoutKey::new(diff, is_folded, context_lines))
+        self.keys.get(path) == Some(&LayoutKey::new(diff, is_folded, context_lines, regions))
     }
 
     /// Returns the row count for a path.
@@ -177,6 +240,21 @@ impl FileViewModel {
     /// Returns the row-to-hunk mapping for a path.
     pub fn row_to_hunk(&self, path: &Path) -> Option<&Vec<Option<usize>>> {
         self.row_to_hunk.get(path)
+    }
+}
+
+/// For a diff line inside a folded conflict: `(conflict index, is_first_line)`.
+fn folded_line(
+    line: &crate::diff::DiffLine,
+    current_new: usize,
+    regions: &ConflictRegions,
+) -> Option<(usize, bool)> {
+    match line {
+        crate::diff::DiffLine::Context { new_line_idx, .. }
+        | crate::diff::DiffLine::Addition { new_line_idx, .. } => {
+            regions.folded_span(*new_line_idx)
+        }
+        crate::diff::DiffLine::Deletion { .. } => regions.folded_span(current_new),
     }
 }
 
@@ -241,7 +319,7 @@ mod tests {
         let diff = two_hunk_diff();
         let mut model = FileViewModel::default();
         let path = Path::new("a.txt");
-        model.recompute(path, &diff, true, 4);
+        model.recompute(path, &diff, true, 4, &ConflictRegions::default());
 
         let starts = model.hunk_starts(path).expect("starts computed");
         let mapping = model.row_to_hunk(path).expect("mapping computed");
@@ -265,18 +343,18 @@ mod tests {
         let diff = two_hunk_diff();
         let mut model = FileViewModel::default();
         let path = Path::new("a.txt");
-        model.recompute(path, &diff, true, 4);
+        model.recompute(path, &diff, true, 4, &ConflictRegions::default());
 
         assert!(
-            model.is_fresh(path, &diff, true, 4),
+            model.is_fresh(path, &diff, true, 4, &ConflictRegions::default()),
             "unchanged input is fresh"
         );
         assert!(
-            !model.is_fresh(path, &diff, false, 4),
+            !model.is_fresh(path, &diff, false, 4, &ConflictRegions::default()),
             "fold mode changes layout"
         );
         assert!(
-            !model.is_fresh(path, &diff, true, 2),
+            !model.is_fresh(path, &diff, true, 2, &ConflictRegions::default()),
             "context size changes layout"
         );
 
@@ -291,16 +369,97 @@ mod tests {
             marker: Default::default(),
         });
         assert!(
-            !model.is_fresh(path, &split, true, 4),
+            !model.is_fresh(path, &split, true, 4, &ConflictRegions::default()),
             "split/join invalidates"
         );
 
         let mut replaced = two_hunk_diff();
         replaced.new_file_content = "brand\nnew\ncontent".into();
         assert!(
-            !model.is_fresh(path, &replaced, true, 4),
+            !model.is_fresh(path, &replaced, true, 4, &ConflictRegions::default()),
             "new diff invalidates"
         );
+    }
+
+    /// A folded conflict must collapse to one row in both the view model and
+    /// the render builder, or navigation and rendering desync.
+    #[test]
+    fn folded_conflict_count_matches_render_builder() {
+        let diff = FileDiff {
+            old_file_content: std::sync::Arc::from("a\nbase\nb"),
+            new_file_content: std::sync::Arc::from(
+                "a\n<<<<<<< ours\none\n=======\ntwo\n>>>>>>> theirs\nb",
+            ),
+            hunks: vec![Hunk {
+                before_lines: 0..3,
+                after_lines: 0..7,
+                lines: vec![
+                    DiffLine::Context {
+                        new_line_idx: 0,
+                        old_line_idx: 0,
+                    },
+                    DiffLine::Addition {
+                        new_line_idx: 1,
+                        inline_highlights: Vec::new(),
+                    },
+                    DiffLine::Addition {
+                        new_line_idx: 2,
+                        inline_highlights: Vec::new(),
+                    },
+                    DiffLine::Addition {
+                        new_line_idx: 3,
+                        inline_highlights: Vec::new(),
+                    },
+                    DiffLine::Addition {
+                        new_line_idx: 4,
+                        inline_highlights: Vec::new(),
+                    },
+                    DiffLine::Addition {
+                        new_line_idx: 5,
+                        inline_highlights: Vec::new(),
+                    },
+                    DiffLine::Context {
+                        new_line_idx: 6,
+                        old_line_idx: 2,
+                    },
+                ],
+                marker: Default::default(),
+            }],
+            line_selections: LineSelections::default(),
+        };
+
+        let regions = ConflictRegions {
+            ranges: vec![1..6],
+            folded: vec![true],
+            summaries: vec!["<<<<<<< ours ⋯ >>>>>>>".to_string()],
+        };
+
+        let theme = ansi_default_theme(&TerminalColorMode::NoColor);
+        let new_lines: Vec<&str> = diff.new_file_content.split('\n').collect();
+
+        let mut model = FileViewModel::default();
+        let path = Path::new("a.txt");
+        model.recompute(path, &diff, false, 4, &regions);
+
+        let builder = RowBuilder {
+            diff: &diff,
+            old_lines: &new_lines,
+            new_lines: &new_lines,
+            syntax_opt: None,
+            theme: &theme,
+            hscroll: 0,
+            area_width: 80,
+            use_gradient: false,
+            context_lines: 4,
+            is_folded: false,
+            default_staged: true,
+            selected_row_idx: 0,
+            regions: &regions,
+        };
+        let total = builder.build(None, &mut Vec::new());
+
+        assert_eq!(model.row_count(path), total);
+        assert_eq!(total, 3, "a folded conflict renders as a single row");
     }
 
     /// The view model and the render row builder must count the same rows —
@@ -314,7 +473,7 @@ mod tests {
         for folded in [false, true] {
             let mut model = FileViewModel::default();
             let path = Path::new("a.txt");
-            model.recompute(path, &diff, folded, 4);
+            model.recompute(path, &diff, folded, 4, &ConflictRegions::default());
 
             let builder = RowBuilder {
                 diff: &diff,
@@ -329,6 +488,7 @@ mod tests {
                 is_folded: folded,
                 default_staged: true,
                 selected_row_idx: 0,
+                regions: &ConflictRegions::default(),
             };
             let total = builder.build(None, &mut Vec::new());
 

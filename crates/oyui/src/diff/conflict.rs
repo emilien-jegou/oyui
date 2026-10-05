@@ -189,6 +189,11 @@ impl ConflictedFile {
         out
     }
 
+    /// New-content line ranges of each conflict, fully expanded.
+    pub fn marker_ranges(&self) -> Vec<std::ops::Range<usize>> {
+        self.display_ranges(&vec![false; self.conflict_count()])
+    }
+
     /// Line ranges of each conflict in [`display`](Self::display) output.
     pub fn display_ranges(&self, folded: &[bool]) -> Vec<std::ops::Range<usize>> {
         let mut ranges = Vec::new();
@@ -245,7 +250,7 @@ impl ConflictedFile {
 }
 
 /// A single line summarising a folded conflict and its current choice.
-fn summary_line(choice: Option<Side>) -> String {
+pub fn summary_line(choice: Option<Side>) -> String {
     let label = match choice {
         Some(Side::Ours) => "ours",
         Some(Side::Theirs) => "theirs",

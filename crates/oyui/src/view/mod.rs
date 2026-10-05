@@ -57,7 +57,14 @@ impl UiState {
                     color_mode,
                 )
             }
-            ViewKind::File => self.file_view.draw(frame, area, cache, tree, theme),
+            ViewKind::File => {
+                self.file_view.conflict_regions = self
+                    .resolve
+                    .as_ref()
+                    .map(|r| r.regions())
+                    .unwrap_or_default();
+                self.file_view.draw(frame, area, cache, tree, theme)
+            }
         }
     }
 }

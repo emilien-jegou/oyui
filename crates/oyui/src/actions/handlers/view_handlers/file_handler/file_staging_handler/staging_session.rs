@@ -30,6 +30,12 @@ impl StagingSession {
         // Diff mutations (split/join) can happen between draws — notably
         // inside one batched key burst — refresh before trusting the layout.
         let path = guard.file_view.current_path.clone()?;
+        let regions = guard
+            .resolve
+            .as_ref()
+            .map(|r| r.regions())
+            .unwrap_or_default();
+        guard.file_view.conflict_regions = regions;
         if let Some(crate::diff::DiffResult::Text(diff)) = cache.diffs.get(&path).as_deref() {
             guard.file_view.recompute_view_model(diff);
         }
@@ -184,7 +190,13 @@ mod tests {
         };
         let mut fresh = FileViewModel::default();
         let fresh_path = path.clone();
-        fresh.recompute(&fresh_path, &mutated, folded, 4);
+        fresh.recompute(
+            &fresh_path,
+            &mutated,
+            folded,
+            4,
+            &crate::view::file::view_model::ConflictRegions::default(),
+        );
         let expected =
             fresh.row_to_hunk(&fresh_path).expect("fresh mapping")[session.current_row_idx];
 
