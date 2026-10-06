@@ -25,9 +25,7 @@
 
 ### Command support
 
-- Full support: `jj commit -i`, `jj squash -i`, `jj split`, `jj diffedit`, `jj restore -i`
-- Partial support: `git difftool`, `jj diff`, `jj interdiff` 🚧
-- Planned features: `jj resolve`, `git mergetool`
+- Full support: `jj commit -i`, `jj squash -i`, `jj split`, `jj diffedit`, `jj restore -i`, `jj resolve`, `jj diff --tool`, `jj interdiff --tool`, `git difftool`, `git mergetool`
 
 ## Why Another merge editor?
 
@@ -116,43 +114,112 @@ diff-instructions = false
 [merge-tools.oyui]
 program = "oyui"
 # Two-way diff editor: jj commit -i, squash -i, split, diffedit, restore -i.
-edit-args = ["diff", "$left", "$right"]
+edit-args = ["jj", "edittool", "$left", "$right"]
+# Read-only viewer: jj diff --tool oyui, jj interdiff --tool oyui.
+diff-args = ["jj", "difftool", "$left", "$right"]
 # Three-way merge editor: jj resolve. jj allows confirming with conflicts left.
-merge-args = ["merge", "$base", "$left", "$right", "--allow-unresolved"]
+merge-args = ["jj", "mergetool", "$base", "$left", "$right"]
 ```
 
-`oyui diff` edits the two-way diff (`$left` vs `$right`, writing back to
-`$right`); `oyui merge` resolves a three-way conflict (`$base`, `$left`,
+`oyui jj edittool` edits the two-way diff (`$left` vs `$right`, writing back to
+`$right`); `oyui jj mergetool` resolves a three-way conflict (`$base`, `$left`,
 `$right`) and writes the result back to `$right`.
 
-`oyui merge` shows conflicts **inline in the file view**, with the marker
+`oyui jj mergetool` shows conflicts **inline in the file view**, with the marker
 blocks highlighted among the normal hunks. Conflicts are read from markers
 already in the target (git's `$MERGED`); when the target is clean, oyui
 synthesizes a three-way merge from `$base`/`$left`/`$right` instead. With the
 cursor on a conflict side, `space` folds it with that side; `space` on the
 frame expands it back, `enter` writes the resolved file. Conflict hunks are
-not stageable. Following git, confirming with conflicts left is refused unless
-`--allow-unresolved` is passed (as the jj config above does).
+not stageable. `jj resolve` stores conflicts structurally, so `oyui jj
+mergetool` permits confirming with conflicts left. `oyui git mergetool` follows
+git and refuses.
 
 ### Usage with Git
 
-As a difftool:
+As a difftool (read-only viewer):
 
 ```sh
-git config --global difftool.oyui.cmd 'oyui diff "$LOCAL" "$REMOTE" --no-write'
+git config --global difftool.oyui.cmd 'oyui git difftool "$LOCAL" "$REMOTE"'
+git config --global difftool.prompt false
 git difftool --tool=oyui
 ```
 
 As a mergetool:
 
 ```sh
-git config --global mergetool.oyui.cmd 'oyui merge "$BASE" "$LOCAL" "$REMOTE" -o "$MERGED"'
+git config --global mergetool.oyui.cmd 'oyui git mergetool "$BASE" "$LOCAL" "$REMOTE" -o "$MERGED"'
+git config --global mergetool.prompt false
 git mergetool --tool=oyui
 ```
 
-`--no-write` makes `oyui diff` purely inspect; the mergetool form writes the
-resolved result to `$MERGED`. Git passes `/dev/null` for added or deleted
-files; oyui treats that as a missing side automatically.
+> Quitting with `q` instead of confirming exits 0 without writing, so git
+> cannot tell an abort from a success via the exit code — do **not** set
+> `mergetool.oyui.trustExitCode`. Always check the file after a session you
+> did not explicitly confirm with `enter`.
+
+Git passes `/dev/null` for added or deleted files; oyui treats that as a
+missing side automatically.
+
+### Standalone and VCS-agnostic commands
+
+Run oyui with no arguments inside a repository to open the current change. It
+detects whether the directory is a Jujutsu or Git working copy:
+
+```sh
+oyui                      # jj: `jj diffedit` on @; git: working-tree diff
+oyui diff                 # diff the current change
+oyui diff -r @-           # Jujutsu-style revision selection
+oyui diff --from main --to @
+oyui interdiff --from @- --to @
+oyui split                # split the current change into two commits
+oyui split -m "part one"  # message for the selected (first) commit
+oyui resolve              # resolve the current change's conflicts
+oyui squash               # squash the selected hunks into the parent
+oyui squash -k            # ... and keep the emptied source change (jj)
+```
+
+`oyui diff` and `oyui interdiff` accept the same revision selection as
+`jj diff` / `jj interdiff` (`-r/--revisions`, `-f/--from`, `-t/--to`, and
+trailing paths). When neither revision is given, `oyui interdiff` compares the
+current change with its parent.
+
+- **Jujutsu** delegates to `jj interdiff --tool oyui`.
+- **Git** reproduces jj's interdiff by rebasing the `--from` patch onto `--to`'s
+  parent with `git merge-tree` (conflict-free, since one side is the merge base)
+  and diffing the result against `--to`.
+
+`oyui split` opens the change with nothing selected; pick the hunks for the
+**first** commit with `space`, then press `enter`. The unselected changes stay
+in the second commit.
+
+- **Jujutsu** delegates to `jj split` with oyui as the interactive diff editor,
+  so jj owns snapshotting, descriptions and rebasing. Use `-r` to split another
+  revision.
+- **Git** is implemented by oyui: it compares HEAD with the working tree and
+  creates two commits (the selected hunks, then the rest). The previous HEAD is
+  kept at `refs/oyui/split-backup` and in the branch reflog, so
+  `git reset --hard <old>` undoes it. Only regular files are supported
+  (submodules, symlinks and `--` path restrictions are refused), and the
+  working tree is left clean.
+
+`oyui resolve` opens every conflict of the current change in the merge editor:
+
+- **Jujutsu** delegates to `jj resolve --tool oyui`; conflicts may be confirmed
+  as-is (jj stores them structurally).
+- **Git** delegates to `git mergetool --tool=oyui` over the unmerged files;
+  every conflict must be resolved before confirming.
+
+`oyui squash` folds changes into the parent. It starts with everything
+selected (jj errors with "No changes selected" otherwise), so `enter` squashes
+all of the change; unstage the hunks to keep.
+
+- **Jujutsu** delegates to `jj squash --tool oyui` (`-f/--from`, `-t/--into`,
+  `-k/--keep-emptied` are forwarded).
+- **Git** is implemented by oyui: it amends HEAD with the selected working-tree
+  hunks (preserving the parent, merge parents and author) and leaves the
+  unselected changes in the working tree. The previous HEAD is again at
+  `refs/oyui/split-backup` for `git reset --hard`.
 
 ### Enabling config LSP with neovim
 

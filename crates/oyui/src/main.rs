@@ -16,6 +16,7 @@ pub mod terminal_colors;
 pub mod theme;
 pub mod tree;
 pub mod ui_state;
+pub mod vcs;
 pub mod view;
 pub mod worker;
 
@@ -45,6 +46,7 @@ async fn main() -> Result<ExitCode, Box<dyn Error>> {
         Ok(()) => Ok(ExitCode::SUCCESS),
         Err(CommandError::NoModifications) => Ok(ExitCode::from(2)),
         Err(CommandError::Aborted) => Ok(ExitCode::from(1)),
+        Err(CommandError::ChildExit(code)) => Ok(ExitCode::from(code.clamp(0, 255) as u8)),
         Err(CommandError::Runtime(err)) => {
             eprintln!("Error: {err}");
             Ok(ExitCode::from(1))

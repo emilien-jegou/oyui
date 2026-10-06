@@ -56,6 +56,8 @@ pub struct App {
     pub write_target: Option<PathBuf>,
     /// Whether confirming is allowed with unresolved conflicts.
     pub allow_unresolved: bool,
+    /// Start every discovered change staged (used by `oyui squash`).
+    pub default_staged: bool,
     pub config: Config,
     pub handler: BoxedHandler,
     pub color_mode: TerminalColorMode,
@@ -167,6 +169,7 @@ impl App {
             .send(tasks::calculate_file_tree::CalculateFileTreeReq {
                 left: self.left_path.clone(),
                 right: self.right_path.clone(),
+                default_staged: self.default_staged,
             })?;
         Ok(())
     }

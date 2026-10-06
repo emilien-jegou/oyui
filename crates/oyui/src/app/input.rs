@@ -80,16 +80,10 @@ impl App {
 
             for target in matched_targets {
                 match target {
+                    // `q` quits gracefully: the VCS reads a zero exit as
+                    // "tool closed, keep the target unchanged".
                     crate::actions::keybinds::ActionTarget::Static(action) => {
                         self.handler.dispatch(&action);
-
-                        // Clean abort hook during transition
-                        if let crate::actions::Action(crate::actions::Actions::global(
-                            crate::actions::GlobalActions::quit,
-                        )) = action
-                        {
-                            return true;
-                        }
                     }
                     crate::actions::keybinds::ActionTarget::Dynamic(id) => {
                         tracing::debug!("Matched script keybind, executing callback");

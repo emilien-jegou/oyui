@@ -39,9 +39,11 @@ pub fn toggle_conflict_at_cursor(session: &StagingSession) -> bool {
 
     let (index, folded) = {
         let ui = session.ui.lock();
-        match ui.resolve.as_ref().and_then(|s| {
-            s.conflict_at_line(line).map(|i| (i, s.is_folded(i)))
-        }) {
+        match ui
+            .resolve
+            .as_ref()
+            .and_then(|s| s.conflict_at_line(line).map(|i| (i, s.is_folded(i))))
+        {
             Some(v) => v,
             None => return false,
         }
@@ -584,7 +586,8 @@ fn main() {
             *st.offset_mut() = offset;
         }
         let tree = Arc::new(RwLock::new(FileTree::default()));
-        let session = StagingSession::try_new(tree, cache, ui.clone(), crate::app::Operation::Diff).expect("session");
+        let session = StagingSession::try_new(tree, cache, ui.clone(), crate::app::Operation::Diff)
+            .expect("session");
         (session, ui, path)
     }
 
@@ -623,9 +626,13 @@ fn main() {
 
         // Space on the kept center line unfolds back to the markers,
         // anchored to the range start.
-        let session2 =
-            StagingSession::try_new(session.tree.clone(), session.cache.clone(), ui.clone(), session.operation)
-                .expect("session");
+        let session2 = StagingSession::try_new(
+            session.tree.clone(),
+            session.cache.clone(),
+            ui.clone(),
+            session.operation,
+        )
+        .expect("session");
         assert!(toggle_conflict_at_cursor(&session2));
         let guard = ui.lock();
         let state = guard.resolve.as_ref().expect("resolve");
@@ -714,7 +721,9 @@ fn main() {
         // harness cache; rebuild the session against the same ui so the
         // cursor maps through the folded layout. Selections are untouched
         // by conflict folds, so rebuilding the cache is loss-free here.
-        let session2 = StagingSession::try_new(tree, cache, ui.clone(), crate::app::Operation::Diff).expect("session");
+        let session2 =
+            StagingSession::try_new(tree, cache, ui.clone(), crate::app::Operation::Diff)
+                .expect("session");
         assert!(toggle_conflict_at_cursor(&session2));
 
         let guard = ui.lock();

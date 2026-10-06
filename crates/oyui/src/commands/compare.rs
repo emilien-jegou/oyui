@@ -12,6 +12,7 @@ use crate::worker::context::AppWorkerContext;
 use crate::worker::EventRegistry;
 use parking_lot::{Mutex, RwLock};
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 /// Everything a session needs, independent of how it was requested.
@@ -24,36 +25,46 @@ pub struct Session {
     pub write_target: Option<PathBuf>,
     /// Whether confirming is allowed with unresolved conflicts.
     pub allow_unresolved: bool,
+    /// Start every discovered change staged (used by `oyui squash`).
+    pub default_staged: bool,
     pub view: ViewArgs,
 }
 
-/// Runs the two-way diff editor (`oyui diff`).
+/// Runs a two-way diff session.
+///
+/// `writable` distinguishes the diff editor (`oyui jj edittool`) from the
+/// read-only viewer (`oyui jj difftool`, `oyui git difftool`).
 pub async fn run_diff(
     options: &RunOptions,
     args: &DiffArgs,
     config_path: PathBuf,
+    writable: bool,
 ) -> Result<(), CommandError> {
     let session = Session {
         operation: Operation::Diff,
         base_path: None,
         left_path: args.left.clone(),
         right_path: args.right.clone(),
-        write_target: (!args.no_write).then(|| args.right.clone()),
+        write_target: writable.then(|| args.right.clone()),
         allow_unresolved: false,
+        default_staged: args.start_staged,
         view: args.view.clone(),
     };
-    run(options, config_path, session).await
+    let confirmed = Arc::new(AtomicBool::new(false));
+    run_session(options, config_path, session, confirmed).await
 }
 
-/// Runs the three-way merge editor (`oyui merge`).
+/// Runs a three-way merge session.
 ///
 /// The working file (the output target) is populated with the conflict markers
 /// and then compared against the base, so conflicts render inline in the file
-/// view alongside normal hunks.
+/// view alongside normal hunks. `allow_unresolved` follows the integration:
+/// jj stores conflicts structurally and permits confirming them, git does not.
 pub async fn run_merge(
     options: &RunOptions,
     args: &MergeArgs,
     config_path: PathBuf,
+    allow_unresolved: bool,
 ) -> Result<(), CommandError> {
     let output = args.output.clone().unwrap_or_else(|| args.right.clone());
     let read = |p: &PathBuf| std::fs::read_to_string(p).unwrap_or_default();
@@ -83,16 +94,20 @@ pub async fn run_merge(
         left_path: args.base.clone(),
         right_path: output.clone(),
         write_target: Some(output),
-        allow_unresolved: args.allow_unresolved,
+        allow_unresolved,
+        default_staged: false,
         view: args.view.clone(),
     };
-    run(options, config_path, session).await
+    let confirmed = Arc::new(AtomicBool::new(false));
+    run_session(options, config_path, session, confirmed).await
 }
 
-async fn run(
+/// Runs a prepared session; `confirmed` is set when the user confirms.
+pub(crate) async fn run_session(
     options: &RunOptions,
     config_path: PathBuf,
     session: Session,
+    confirmed: Arc<AtomicBool>,
 ) -> Result<(), CommandError> {
     let tree = Arc::new(RwLock::new(crate::tree::FileTree::default()));
     let cache = DiffCache::default();
@@ -131,6 +146,7 @@ async fn run(
         algorithm: session.view.diff_algorithm,
         color_mode: options.color_mode.clone(),
         error: config_error.clone(),
+        confirmed,
     });
 
     let config = Config {
@@ -151,6 +167,7 @@ async fn run(
         .right_path(session.right_path.clone())
         .write_target(session.write_target.clone())
         .allow_unresolved(session.allow_unresolved)
+        .default_staged(session.default_staged)
         .tree(tree)
         .theme(theme)
         .ui(ui)

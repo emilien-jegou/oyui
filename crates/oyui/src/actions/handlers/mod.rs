@@ -38,6 +38,8 @@ pub struct AppActionsHandler {
     pub color_mode: TerminalColorMode,
     /// Shared config-error cell; action failures surface through it.
     pub error: Arc<RwLock<Option<String>>>,
+    /// Set once the user confirmed; lets callers distinguish confirm from quit.
+    pub confirmed: Arc<std::sync::atomic::AtomicBool>,
 }
 
 pub fn generate(actions_handler: AppActionsHandler) -> BoxedHandler {

@@ -51,9 +51,15 @@ impl ConflictRegions {
     /// For a new-content line in a folded conflict: `(index, is_first_line)`.
     /// Kept (chosen-side) lines return `None` so they render as normal rows.
     pub fn folded_span(&self, line: usize) -> Option<(usize, bool)> {
-        self.fold_action(line).and_then(|(i, header, visible)| {
-            if visible { None } else { Some((i, header)) }
-        })
+        self.fold_action(line).and_then(
+            |(i, header, visible)| {
+                if visible {
+                    None
+                } else {
+                    Some((i, header))
+                }
+            },
+        )
     }
 
     /// Fold status of a conflict line: `(index, is_header, visible_as_normal_row)`.
@@ -79,11 +85,7 @@ impl ConflictRegions {
     /// Lines above the `=======` separator (markers and ours) map to ours,
     /// the separator itself and everything below map to theirs, the base
     /// block maps to ours.
-    pub fn side_at_line(
-        &self,
-        index: usize,
-        line: usize,
-    ) -> Option<crate::diff::Side> {
+    pub fn side_at_line(&self, index: usize, line: usize) -> Option<crate::diff::Side> {
         use crate::diff::Side;
         let range = self.ranges.get(index)?;
         if !range.contains(&line) {

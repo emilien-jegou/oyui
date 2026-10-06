@@ -751,7 +751,10 @@ mod tests {
         let mut view = TreeViewData::default();
         let cache = DiffCache::default();
         let tree = tree_with_file();
-        assert_eq!(view.flat_rows(&tree, &cache)[0].conflict, ConflictBadge::None);
+        assert_eq!(
+            view.flat_rows(&tree, &cache)[0].conflict,
+            ConflictBadge::None
+        );
 
         cache.diffs.set(
             PathBuf::from("a.txt"),

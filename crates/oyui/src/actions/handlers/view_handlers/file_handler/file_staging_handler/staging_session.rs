@@ -187,13 +187,8 @@ mod tests {
         });
 
         let tree = Arc::new(RwLock::new(FileTree::default()));
-        let session = StagingSession::try_new(
-            tree,
-            cache.clone(),
-            ui,
-            crate::app::Operation::Diff,
-        )
-        .expect("session for the open file");
+        let session = StagingSession::try_new(tree, cache.clone(), ui, crate::app::Operation::Diff)
+            .expect("session for the open file");
         assert_eq!(session.current_row_idx, 2);
 
         // Reference: what the mapping says with a freshly recomputed model.

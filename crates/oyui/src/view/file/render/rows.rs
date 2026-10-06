@@ -271,8 +271,7 @@ impl<'a> RowBuilder<'a> {
                         // other conflict line keeps its sign but never shows
                         // staged colors either: conflict hunks are not
                         // stageable, so identical states always look identical.
-                        let is_marker =
-                            crate::diff::conflict::is_marker_line(line);
+                        let is_marker = crate::diff::conflict::is_marker_line(line);
                         let covered = self.regions.covers(*new_line_idx);
                         push_row!(LineRenderer::builder()
                             .content(line)

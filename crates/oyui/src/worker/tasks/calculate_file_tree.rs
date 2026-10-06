@@ -11,6 +11,8 @@ pub struct CalculateFileTree;
 pub struct CalculateFileTreeReq {
     pub left: PathBuf,
     pub right: PathBuf,
+    /// When set, every discovered change starts staged (kept on confirm).
+    pub default_staged: bool,
 }
 
 #[derive(Clone)]
@@ -32,10 +34,16 @@ impl Listener<CalculateFileTreeReq> for CalculateFileTree {
         tracing::debug!("Calculating file tree...");
         let left = event.left;
         let right = event.right;
-        let (tree, files_to_stat) =
+        let default_staged = event.default_staged;
+        let (mut tree, files_to_stat) =
             tokio::task::spawn_blocking(move || FileTree::build_from_dir_diff(&left, &right))
                 .await
                 .map_err(|e| eyre::eyre!("file tree task panicked: {e}"))?;
+        if default_staged {
+            for file in tree.files_mut() {
+                file.state = crate::tree::StagingState::Staged;
+            }
+        }
         tx.send(CalculateFileTreeRes {
             tree,
             files_to_stat,

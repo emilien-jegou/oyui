@@ -67,6 +67,8 @@ impl GlobalActionsHandler for AppActionsHandler {
         let res = crate::app::merge::confirm_and_write(&mut tree, &target, &self.cache);
         match res {
             Ok(crate::app::events::ExitAction::QuitAndMerge) => {
+                self.confirmed
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
                 self.ui.lock().should_quit = true;
             }
             Ok(_) => {}
@@ -246,7 +248,10 @@ impl AppActionsHandler {
     /// conflict choices alone, so staging selections never take effect.
     pub(crate) fn reject_merge(&self) -> bool {
         if self.operation == crate::app::Operation::Merge {
-            self.set_message(MessageLevel::Info, "merge mode: staging has no effect".into());
+            self.set_message(
+                MessageLevel::Info,
+                "merge mode: staging has no effect".into(),
+            );
             true
         } else {
             false
@@ -257,6 +262,8 @@ impl AppActionsHandler {
     pub(crate) fn write_result(&self, target: &std::path::Path, text: String) {
         match std::fs::write(target, text) {
             Ok(()) => {
+                self.confirmed
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
                 self.set_message(MessageLevel::Info, format!("wrote {}", target.display()));
                 self.ui.lock().should_quit = true;
             }

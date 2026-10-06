@@ -125,9 +125,7 @@ impl ResolveState {
                     let theirs_start = ours_end + base_len + 1;
                     let theirs_end = theirs_start + c.theirs.len();
                     return match self.choices.get(index).copied().flatten() {
-                        Some(crate::diff::Side::Ours) => {
-                            (ours_start..ours_end).contains(&line)
-                        }
+                        Some(crate::diff::Side::Ours) => (ours_start..ours_end).contains(&line),
                         Some(crate::diff::Side::Theirs) => {
                             (theirs_start..theirs_end).contains(&line)
                         }

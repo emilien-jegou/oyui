@@ -260,11 +260,11 @@ theme::file_conflict_highlight_opacity::set(0.6);
 
 Confirming follows the integration's rules:
 
-- **git / mergetool** (default): `enter` refuses to confirm while conflicts
-  remain, reporting how many are left.
-- **jj resolve**: pass `--allow-unresolved` (see the jj config in the README)
-  to confirm with conflicts still present — jj stores them structurally, so
-  committing a conflict is intended, not an error.
+- **`oyui git mergetool`** (default): `enter` refuses to confirm while
+  conflicts remain, reporting how many are left.
+- **`oyui jj mergetool`**: confirming with conflicts still present is allowed —
+  jj stores them structurally, so committing a conflict is intended, not an
+  error.
 
 In a merge session, confirm never runs the two-way staging write; it writes the
 resolved working file, so the merge target is never clobbered.

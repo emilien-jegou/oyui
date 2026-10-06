@@ -62,6 +62,7 @@ async fn startup_pipeline_delivers_tree_and_stats() {
         .send(CalculateFileTreeReq {
             left: left.clone(),
             right: right.clone(),
+            default_staged: false,
         })
         .expect("startup request queued");
 

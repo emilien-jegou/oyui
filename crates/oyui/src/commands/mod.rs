@@ -3,16 +3,19 @@ use std::io;
 use std::path::PathBuf;
 
 use crate::{
-    cli::{Args, Commands},
+    cli::{Args, Commands, GitTool, JjTool},
     terminal_colors::TerminalColorMode,
 };
 
 pub mod compare;
+pub mod standalone;
 
 #[derive(Debug)]
 pub enum CommandError {
     NoModifications,
     Aborted,
+    /// A delegated VCS command exited non-zero; propagate its code.
+    ChildExit(i32),
     Runtime(Box<dyn Error>),
 }
 
@@ -23,6 +26,7 @@ impl std::fmt::Display for CommandError {
                 write!(f, "No modifications found between directories.")
             }
             CommandError::Aborted => write!(f, "Application aborted."),
+            CommandError::ChildExit(code) => write!(f, "VCS command exited with status {code}."),
             CommandError::Runtime(err) => write!(f, "{}", err),
         }
     }
@@ -61,8 +65,23 @@ pub async fn run(opts: RunOptions) -> Result<(), CommandError> {
     });
 
     match opts.args.command {
-        Commands::Diff(ref diff_args) => compare::run_diff(&opts, diff_args, config_path).await,
-        Commands::Merge(ref merge_args) => compare::run_merge(&opts, merge_args, config_path).await,
-        Commands::LanguageServer => crate::script::language_server::run_lsp().await,
+        Some(Commands::Jj(ref jj)) => match jj.tool {
+            JjTool::Edittool(ref args) => compare::run_diff(&opts, args, config_path, true).await,
+            JjTool::Difftool(ref args) => compare::run_diff(&opts, args, config_path, false).await,
+            JjTool::Mergetool(ref args) => compare::run_merge(&opts, args, config_path, true).await,
+        },
+        Some(Commands::Git(ref git)) => match git.tool {
+            GitTool::Difftool(ref args) => compare::run_diff(&opts, args, config_path, false).await,
+            GitTool::Mergetool(ref args) => {
+                compare::run_merge(&opts, args, config_path, false).await
+            }
+        },
+        Some(Commands::Diff(ref args)) => standalone::run_diff(&opts, args, config_path),
+        Some(Commands::Interdiff(ref args)) => standalone::run_interdiff(&opts, args, config_path),
+        Some(Commands::Split(ref args)) => standalone::run_split(&opts, args, config_path).await,
+        Some(Commands::Resolve(ref args)) => standalone::run_resolve(&opts, args, config_path),
+        Some(Commands::Squash(ref args)) => standalone::run_squash(&opts, args, config_path).await,
+        Some(Commands::LanguageServer) => crate::script::language_server::run_lsp().await,
+        None => standalone::run_current_change(&opts, config_path),
     }
 }

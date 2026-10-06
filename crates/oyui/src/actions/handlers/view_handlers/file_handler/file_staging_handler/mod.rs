@@ -32,11 +32,15 @@ impl ViewFileStagingActionsHandler for AppActionsHandler {
     }
 
     fn set_hunk(&self, hunk: u32, staged: bool) {
-        self.with_staging_session(false, |s| operations::set_hunk_staged(s, hunk as usize, staged));
+        self.with_staging_session(false, |s| {
+            operations::set_hunk_staged(s, hunk as usize, staged)
+        });
     }
 
     fn split_at(&self, hunk: u32, line: u32) {
-        self.with_staging_session(false, |s| operations::split_at(s, hunk as usize, line as usize));
+        self.with_staging_session(false, |s| {
+            operations::split_at(s, hunk as usize, line as usize)
+        });
     }
 
     fn join(&self) {

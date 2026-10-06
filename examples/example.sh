@@ -58,6 +58,50 @@ run_oyui() {
   "$BIN" "$@"
 }
 
+# Prints a git commit's changed files and their full content, so a split's
+# effect on each commit is visible (not just the file names).
+git_show_commit() {
+  local repo="$1" rev="$2" label="$3"
+  printf '%s:\n' "$label"
+  local changed
+  changed="$(git -C "$repo" diff-tree --no-commit-id --name-only -r "$rev" 2>/dev/null || true)"
+  if [[ -z "$changed" ]]; then
+    printf '  (no changes)\n'
+    return 0
+  fi
+  local f
+  while IFS= read -r f; do
+    [[ -z "$f" ]] && continue
+    printf '  %s:\n' "$f"
+    if git -C "$repo" cat-file -e "$rev:$f" 2>/dev/null; then
+      git -C "$repo" show "$rev:$f" | sed 's/^/    /'
+    else
+      printf '    (deleted)\n'
+    fi
+  done <<< "$changed"
+}
+
+# jj equivalent of git_show_commit.
+jj_show_commit() {
+  local repo="$1" rev="$2" label="$3"
+  (
+    cd "$repo" || return 1
+    printf '%s:\n' "$label"
+    local changed
+    changed="$(jj diff --name-only -r "$rev" 2>/dev/null || true)"
+    if [[ -z "$changed" ]]; then
+      printf '  (empty)\n'
+      return 0
+    fi
+    local f
+    while IFS= read -r f; do
+      [[ -z "$f" ]] && continue
+      printf '  %s:\n' "$f"
+      jj file show -r "$rev" -- "$f" 2>/dev/null | sed 's/^/    /'
+    done <<< "$changed"
+  )
+}
+
 usage() {
   cat <<EOF
 oyui example runner
@@ -72,8 +116,13 @@ Scenarios:
   conflict        resolve a target that already has conflict markers
   git-difftool    run oyui through "git difftool"
   git-mergetool   run oyui through "git mergetool"
+  git-split       split the working-tree changes into two commits
+  git-squash      fold selected working-tree hunks into HEAD
+  git-resolve     resolve a conflict via "oyui resolve"
   jj-diffedit     run oyui through "jj diffedit" (needs jj)
   jj-resolve      run oyui through "jj resolve" (needs jj)
+  jj-split        split the current change via "jj split" (needs jj)
+  jj-squash       squash the current change via "jj squash" (needs jj)
   check           verify fixtures and run the oyui test suite
   clean           remove the scratch directory ($WORK)
 
@@ -82,14 +131,14 @@ EOF
 }
 
 list_scenarios() {
-  printf 'diff\nstaged\nmerge\nmerge-clean\nconflict\ngit-difftool\ngit-mergetool\njj-diffedit\njj-resolve\ncheck\nclean\n'
+  printf 'diff\nstaged\nmerge\nmerge-clean\nconflict\ngit-difftool\ngit-mergetool\ngit-split\ngit-squash\ngit-resolve\njj-diffedit\njj-resolve\njj-split\njj-squash\ncheck\nclean\n'
 }
 
 # --- scenarios -------------------------------------------------------------
 
 scenario_diff() {
   # Read-only: confirming exits without writing.
-  run_oyui diff "$EXAMPLES/diff/left" "$EXAMPLES/diff/right" --no-write
+  run_oyui jj difftool "$EXAMPLES/diff/left" "$EXAMPLES/diff/right"
 }
 
 scenario_staged() {
@@ -97,8 +146,8 @@ scenario_staged() {
   dir="$(prepare staged)"
   copy_dir "$EXAMPLES/diff/left" "$dir/left"
   copy_dir "$EXAMPLES/diff/right" "$dir/right"
-  printf 'Editing %s/right -- stage hunks and press enter to write back.\n' "$dir"
-  run_oyui diff "$dir/left" "$dir/right"
+  printf 'Editing %s/right -- unstage hunks to drop, press enter to write back.\n' "$dir"
+  run_oyui jj edittool "$dir/left" "$dir/right"
   printf 'Result written under %s/right\n' "$dir"
 }
 
@@ -110,7 +159,7 @@ scenario_merge() {
   cp "$EXAMPLES/merge/theirs.txt" "$dir/theirs.txt"
   cp "$EXAMPLES/merge/theirs.txt" "$dir/result.txt"
   printf 'Conflicting merge; oyui synthesizes the conflict. Writes %s/result.txt\n' "$dir"
-  run_oyui merge "$dir/base.txt" "$dir/ours.txt" "$dir/theirs.txt" -o "$dir/result.txt"
+  run_oyui jj mergetool "$dir/base.txt" "$dir/ours.txt" "$dir/theirs.txt" -o "$dir/result.txt"
   printf 'Result:\n'; sed 's/^/  /' "$dir/result.txt"
 }
 
@@ -122,7 +171,7 @@ scenario_merge_clean() {
   cp "$EXAMPLES/merge/clean_theirs.txt" "$dir/theirs.txt"
   cp "$EXAMPLES/merge/theirs.txt" "$dir/result.txt"
   printf 'Clean merge; non-overlapping edits from both sides are combined.\n'
-  run_oyui merge "$dir/base.txt" "$dir/ours.txt" "$dir/theirs.txt" -o "$dir/result.txt"
+  run_oyui jj mergetool "$dir/base.txt" "$dir/ours.txt" "$dir/theirs.txt" -o "$dir/result.txt"
   printf 'Result:\n'; sed 's/^/  /' "$dir/result.txt"
 }
 
@@ -134,7 +183,7 @@ scenario_conflict() {
   cp "$EXAMPLES/conflict/theirs.txt" "$dir/theirs.txt"
   cp "$EXAMPLES/conflict/merged.txt" "$dir/merged.txt"
   printf 'Target already contains markers; the resolver opens automatically.\n'
-  run_oyui merge "$dir/base.txt" "$dir/ours.txt" "$dir/theirs.txt" -o "$dir/merged.txt"
+  run_oyui jj mergetool "$dir/base.txt" "$dir/ours.txt" "$dir/theirs.txt" -o "$dir/merged.txt"
   printf 'Result:\n'; sed 's/^/  /' "$dir/merged.txt"
 }
 
@@ -155,7 +204,7 @@ scenario_git_difftool() {
   cp "$EXAMPLES/diff/right/hello.txt" "$repo/hello.txt"
   (cd "$repo" && git add hello.txt && git commit -qm base && \
     cp "$EXAMPLES/diff/left/hello.txt" hello.txt && \
-    git config difftool.oyui.cmd "$BIN diff \"\$LOCAL\" \"\$REMOTE\" --no-write" && \
+    git config difftool.oyui.cmd "$BIN git difftool \"\$LOCAL\" \"\$REMOTE\"" && \
     git config difftool.prompt false)
   printf 'Running "git difftool" in %s (press q/enter to move on)\n' "$repo"
   (cd "$repo" && git difftool --tool=oyui -y)
@@ -178,11 +227,97 @@ scenario_git_mergetool() {
     printf 'common\nvalue = ours\n' > file.txt && git commit -qam ours)
   (cd "$repo" && git merge side >/dev/null 2>&1 || true)
   (cd "$repo" && \
-    git config mergetool.oyui.cmd "$BIN merge \"\$BASE\" \"\$LOCAL\" \"\$REMOTE\" -o \"\$MERGED\"" && \
+    git config mergetool.oyui.cmd "$BIN git mergetool \"\$BASE\" \"\$LOCAL\" \"\$REMOTE\" -o \"\$MERGED\"" && \
     git config mergetool.prompt false)
   printf 'Running "git mergetool" in %s (choose a side, enter to write)\n' "$repo"
   (cd "$repo" && git mergetool --tool=oyui)
   printf 'Resolved file:\n'; sed 's/^/  /' "$repo/file.txt"
+}
+
+scenario_git_split() {
+  if ! have_git; then
+    printf 'git is not installed; skipping.\n'; return 0
+  fi
+  local dir repo
+  dir="$(prepare git-split)"
+  repo="$dir/repo"
+  mkdir -p "$repo"
+  (cd "$repo" && git init -q -b main && git_identity >/dev/null 2>&1)
+  printf 'alpha\nbravo\ncharlie\n' > "$repo/file.txt"
+  (cd "$repo" && git add . && git commit -qm base >/dev/null)
+  printf 'ALPHA\nbravo\nCHARLIE\n' > "$repo/file.txt"
+  printf 'fresh\n' > "$repo/new.txt"
+
+  printf 'Base commit:\n'
+  (cd "$repo" && git show --format='  %h %s' --stat HEAD | sed 's/^/  /')
+  printf '\nRunning "oyui split" in %s\n' "$repo"
+  printf 'Select the hunks for the FIRST commit with space, then press enter.\n'
+  (cd "$repo" && run_oyui split)
+
+  printf '\nHistory after split:\n'
+  (cd "$repo" && git log --reverse --format='%h %s' --name-status | sed 's/^/  /')
+  printf '\n'
+  git_show_commit "$repo" 'HEAD~1' 'Selected (first) commit content'
+  printf '\n'
+  git_show_commit "$repo" 'HEAD' 'Remaining (second) commit content'
+  printf '\nUndo: git reset --hard %s\n' \
+    "$(cd "$repo" && git rev-parse --short refs/oyui/split-backup 2>/dev/null || echo '<none>')"
+}
+
+scenario_git_squash() {
+  if ! have_git; then
+    printf 'git is not installed; skipping.\n'; return 0
+  fi
+  local dir repo
+  dir="$(prepare git-squash)"
+  repo="$dir/repo"
+  mkdir -p "$repo"
+  (cd "$repo" && git init -q -b main && git_identity >/dev/null 2>&1)
+  printf 'alpha\nbravo\ncharlie\n' > "$repo/file.txt"
+  (cd "$repo" && git add . && git commit -qm base >/dev/null)
+  printf 'second\n' > "$repo/other.txt"
+  (cd "$repo" && git add . && git commit -qm second >/dev/null)
+  printf 'ALPHA\nbravo\nCHARLIE\n' > "$repo/file.txt"
+
+  printf 'Working change:\n'
+  (cd "$repo" && git diff | sed 's/^/  /')
+  printf '\nRunning "oyui squash" in %s\n' "$repo"
+  printf 'Everything starts selected; unstage hunks to keep, then press enter.\n'
+  (cd "$repo" && run_oyui squash)
+
+  printf '\nHistory after squash:\n'
+  (cd "$repo" && git log --reverse --format='%h %s' --name-status | sed 's/^/  /')
+  printf '\n'
+  git_show_commit "$repo" 'HEAD' 'HEAD content'
+  printf '\nWorking tree status (unselected changes stay here):\n'
+  (cd "$repo" && git status --short | sed 's/^/  /')
+  printf '\nUndo: git reset --hard %s\n' \
+    "$(cd "$repo" && git rev-parse --short refs/oyui/split-backup 2>/dev/null || echo '<none>')"
+}
+
+scenario_git_resolve() {
+  if ! have_git; then
+    printf 'git is not installed; skipping.\n'; return 0
+  fi
+  local dir repo
+  dir="$(prepare git-resolve)"
+  repo="$dir/repo"
+  mkdir -p "$repo"
+  (cd "$repo" && git init -q -b main && git_identity >/dev/null 2>&1)
+  printf 'common\nvalue = base\n' > "$repo/file.txt"
+  (cd "$repo" && git add . && git commit -qm base >/dev/null)
+  (cd "$repo" && git checkout -qb side && \
+    printf 'common\nvalue = theirs\n' > file.txt && git commit -qam theirs >/dev/null)
+  (cd "$repo" && git checkout -q main && \
+    printf 'common\nvalue = ours\n' > file.txt && git commit -qam ours >/dev/null)
+  (cd "$repo" && git merge --no-ff side >/dev/null 2>&1 || true)
+
+  printf 'Conflicted files:\n'
+  (cd "$repo" && git diff --name-only --diff-filter=U | sed 's/^/  /')
+  printf '\nRunning "oyui resolve" in %s (pick a side, enter to confirm)\n' "$repo"
+  (cd "$repo" && run_oyui resolve)
+  printf '\nStatus after resolve:\n'; (cd "$repo" && git status --short | sed 's/^/  /')
+  printf 'Resolved file.txt:\n'; sed 's/^/  /' "$repo/file.txt"
 }
 
 have_git() { command -v git >/dev/null 2>&1; }
@@ -203,8 +338,9 @@ scenario_jj_diffedit() {
   (cd "$repo" && jj commit -qm base)
   printf 'value = ours\n' > "$repo/file.txt"
   printf 'Running "jj diffedit" in %s\n' "$repo"
-  (cd "$repo" && jj --config-toml \
-    "ui.diff-editor = [\"$BIN\", \"diff\", \"\$left\", \"\$right\"]" diffedit)
+  (cd "$repo" && jj --config "merge-tools.oyui.program=\"$BIN\"" \
+    --config 'merge-tools.oyui.edit-args = ["jj", "edittool", "$left", "$right"]' \
+    diffedit --tool oyui)
 }
 
 scenario_jj_resolve() {
@@ -233,9 +369,65 @@ scenario_jj_resolve() {
     return 0
   fi
   printf 'Running "jj resolve" in %s\n' "$repo"
-  (cd "$repo" && jj --config-toml "merge-tools.oyui.program = \"$BIN\"" \
-    --config-toml 'merge-tools.oyui.merge-args = ["merge", "$base", "$left", "$right", "--allow-unresolved"]' \
+  (cd "$repo" && jj --config "merge-tools.oyui.program=\"$BIN\"" \
+    --config 'merge-tools.oyui.merge-args = ["jj", "mergetool", "$base", "$left", "$right"]' \
     resolve --tool oyui)
+}
+
+scenario_jj_split() {
+  if ! have_jj; then
+    printf 'jj is not installed; skipping.\n'; return 0
+  fi
+  local dir repo
+  dir="$(prepare jj-split)"
+  repo="$dir/repo"
+  mkdir -p "$repo"
+  (cd "$repo" && jj git init >/dev/null 2>&1 && \
+    jj config set --repo user.name "Example" >/dev/null 2>&1 && \
+    jj config set --repo user.email "you@example.com" >/dev/null 2>&1)
+  printf 'alpha\nbravo\ncharlie\n' > "$repo/file.txt"
+  (cd "$repo" && jj commit -m base >/dev/null 2>&1)
+  printf 'ALPHA\nbravo\nCHARLIE\n' > "$repo/file.txt"
+
+  printf 'Change to split:\n'
+  (cd "$repo" && jj diff | sed 's/^/  /')
+  printf '\nRunning "oyui split" in %s\n' "$repo"
+  printf 'Select the hunks for the FIRST commit with space, then press enter.\n'
+  (cd "$repo" && run_oyui split -m selected)
+
+  printf '\nHistory after split:\n'
+  (cd "$repo" && jj log --reversed -T log_with_files | sed 's/^/  /')
+  printf '\n'
+  jj_show_commit "$repo" '@-' 'Selected (first) commit content'
+  printf '\n'
+  jj_show_commit "$repo" '@' 'Remaining (second) commit content'
+}
+
+scenario_jj_squash() {
+  if ! have_jj; then
+    printf 'jj is not installed; skipping.\n'; return 0
+  fi
+  local dir repo
+  dir="$(prepare jj-squash)"
+  repo="$dir/repo"
+  mkdir -p "$repo"
+  (cd "$repo" && jj git init >/dev/null 2>&1 && \
+    jj config set --repo user.name "Example" >/dev/null 2>&1 && \
+    jj config set --repo user.email "you@example.com" >/dev/null 2>&1)
+  printf 'alpha\nbravo\ncharlie\n' > "$repo/file.txt"
+  (cd "$repo" && jj commit -m base >/dev/null 2>&1)
+  printf 'ALPHA\nbravo\nCHARLIE\n' > "$repo/file.txt"
+
+  printf 'Change to squash:\n'
+  (cd "$repo" && jj diff | sed 's/^/  /')
+  printf '\nRunning "oyui squash" in %s\n' "$repo"
+  printf 'Everything starts selected; unstage hunks to keep, then press enter.\n'
+  (cd "$repo" && run_oyui squash)
+
+  printf '\nHistory after squash:\n'
+  (cd "$repo" && jj log --reversed -T log_with_files | sed 's/^/  /')
+  printf '\n'
+  jj_show_commit "$repo" '@-' 'Parent commit content'
 }
 
 scenario_clean() {
@@ -269,6 +461,15 @@ EOF
       die "dry-run for '$s' produced no oyui command"
     fi
   done
+  for s in git-split:git git-squash:git git-resolve:git jj-split:jj jj-squash:jj; do
+    scenario="${s%%:*}"; tool="${s##*:}"
+    if "have_$tool"; then
+      out="$(OYUI_EXAMPLE_DRY=1 "$0" "$scenario")"
+      if [[ "$out" != *DRY:* ]]; then
+        die "dry-run for '$scenario' produced no oyui command"
+      fi
+    fi
+  done
   printf 'dry-run ok\n'
 
   if [[ ! -x "$BIN" ]]; then
@@ -285,7 +486,7 @@ scenario="${1:-help}"
 case "$scenario" in
   list) list_scenarios ;;
   help|-h|--help) usage ;;
-  diff|staged|merge|merge-clean|conflict|git-difftool|git-mergetool|jj-diffedit|jj-resolve)
+  diff|staged|merge|merge-clean|conflict|git-difftool|git-mergetool|git-split|git-squash|git-resolve|jj-diffedit|jj-resolve|jj-split|jj-squash)
     ensure_bin
     "scenario_${scenario//-/_}"
     ;;
