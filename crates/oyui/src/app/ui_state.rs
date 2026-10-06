@@ -119,22 +119,11 @@ impl ResolveState {
         for segment in &self.conflicts.segments {
             if let crate::diff::conflict::Segment::Conflict(c) = segment {
                 if idx == index {
-                    let ours_start = start + 1;
-                    let ours_end = ours_start + c.ours.len();
-                    let base_len = c.base.as_ref().map(|b| b.len() + 1).unwrap_or(0);
-                    let theirs_start = ours_end + base_len + 1;
-                    let theirs_end = theirs_start + c.theirs.len();
-                    return match self.choices.get(index).copied().flatten() {
-                        Some(crate::diff::Side::Ours) => (ours_start..ours_end).contains(&line),
-                        Some(crate::diff::Side::Theirs) => {
-                            (theirs_start..theirs_end).contains(&line)
-                        }
-                        Some(crate::diff::Side::Both) => {
-                            (ours_start..ours_end).contains(&line)
-                                || (theirs_start..theirs_end).contains(&line)
-                        }
-                        None => false,
-                    };
+                    let choice = self.choices.get(index).copied().flatten();
+                    return c
+                        .kept_ranges(start, choice)
+                        .iter()
+                        .any(|r| r.contains(&line));
                 }
                 idx += 1;
             }
@@ -156,27 +145,10 @@ impl ResolveState {
         for segment in &self.conflicts.segments {
             if let Segment::Conflict(c) = segment {
                 let start = ranges.get(idx).map(|r| r.start).unwrap_or(0);
-                let ours_start = start + 1;
-                let ours_end = ours_start + c.ours.len();
-                let base_len = c.base.as_ref().map(|b| b.len() + 1).unwrap_or(0);
-                let sep = ours_end + base_len;
-                let theirs_start = sep + 1;
-                let theirs_end = theirs_start + c.theirs.len();
-                sides.push(ConflictSides {
-                    ours: ours_start..ours_end,
-                    theirs: theirs_start..theirs_end,
-                    sep,
-                });
+                let (ours, sep, theirs) = c.layout_ranges(start);
+                sides.push(ConflictSides { ours, theirs, sep });
                 let choice = self.choices.get(idx).copied().flatten();
-                let k = match choice {
-                    Some(crate::diff::Side::Ours) => vec![ours_start..ours_end],
-                    Some(crate::diff::Side::Theirs) => vec![theirs_start..theirs_end],
-                    Some(crate::diff::Side::Both) => {
-                        vec![ours_start..ours_end, theirs_start..theirs_end]
-                    }
-                    None => Vec::new(),
-                };
-                kept.push(k);
+                kept.push(c.kept_ranges(start, choice));
                 idx += 1;
             }
         }

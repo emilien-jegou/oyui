@@ -123,6 +123,11 @@ Scenarios:
   jj-resolve      run oyui through "jj resolve" (needs jj)
   jj-split        split the current change via "jj split" (needs jj)
   jj-squash       squash the current change via "jj squash" (needs jj)
+  jj-diff         show a revision diff via "oyui diff" (needs jj)
+  git-diff        show a revision diff via "oyui diff" (needs git)
+  jj-interdiff    compare two patches via "oyui interdiff" (needs jj)
+  git-interdiff   compare two patches via "oyui interdiff" (needs git)
+  current         open the current change via bare "oyui" (needs jj)
   check           verify fixtures and run the oyui test suite
   clean           remove the scratch directory ($WORK)
 
@@ -131,7 +136,7 @@ EOF
 }
 
 list_scenarios() {
-  printf 'diff\nstaged\nmerge\nmerge-clean\nconflict\ngit-difftool\ngit-mergetool\ngit-split\ngit-squash\ngit-resolve\njj-diffedit\njj-resolve\njj-split\njj-squash\ncheck\nclean\n'
+  printf 'diff\nstaged\nmerge\nmerge-clean\nconflict\ngit-difftool\ngit-mergetool\ngit-split\ngit-squash\ngit-resolve\njj-diffedit\njj-resolve\njj-split\njj-squash\njj-diff\ngit-diff\njj-interdiff\ngit-interdiff\ncurrent\ncheck\nclean\n'
 }
 
 # --- scenarios -------------------------------------------------------------
@@ -225,7 +230,7 @@ scenario_git_mergetool() {
     printf 'common\nvalue = theirs\n' > file.txt && git commit -qam theirs)
   (cd "$repo" && git checkout -q main && \
     printf 'common\nvalue = ours\n' > file.txt && git commit -qam ours)
-  (cd "$repo" && git merge side >/dev/null 2>&1 || true)
+  (cd "$repo" && git merge --no-ff side >/dev/null 2>&1 || true)
   (cd "$repo" && \
     git config mergetool.oyui.cmd "$BIN git mergetool \"\$BASE\" \"\$LOCAL\" \"\$REMOTE\" -o \"\$MERGED\"" && \
     git config mergetool.prompt false)
@@ -331,15 +336,15 @@ scenario_jj_diffedit() {
   dir="$(prepare jj-diffedit)"
   local repo="$dir/repo"
   mkdir -p "$repo"
-  (cd "$repo" && jj git init -q && \
+  (cd "$repo" && jj git init >/dev/null 2>&1 && \
     jj config set --repo user.name "Example" && \
     jj config set --repo user.email "you@example.com")
   printf 'value = base\n' > "$repo/file.txt"
-  (cd "$repo" && jj commit -qm base)
+  (cd "$repo" && jj commit --quiet -m base)
   printf 'value = ours\n' > "$repo/file.txt"
   printf 'Running "jj diffedit" in %s\n' "$repo"
   (cd "$repo" && jj --config "merge-tools.oyui.program=\"$BIN\"" \
-    --config 'merge-tools.oyui.edit-args = ["jj", "edittool", "$left", "$right"]' \
+    --config 'merge-tools.oyui.edit-args=["jj", "edittool", "$left", "$right"]' \
     diffedit --tool oyui)
 }
 
@@ -351,7 +356,7 @@ scenario_jj_resolve() {
   dir="$(prepare jj-resolve)"
   local repo="$dir/repo"
   mkdir -p "$repo"
-  (cd "$repo" && jj git init -q && \
+  (cd "$repo" && jj git init >/dev/null 2>&1 && \
     jj config set --repo user.name "Example" && \
     jj config set --repo user.email "you@example.com")
   # Building a jj conflict depends on jj's revset/CLI semantics; treat the
@@ -359,18 +364,18 @@ scenario_jj_resolve() {
   if ! (
     cd "$repo" || exit 1
     printf 'common\nvalue = base\n' > file.txt
-    jj commit -qm base &&
-      jj new -m ours && printf 'common\nvalue = ours\n' > file.txt && jj commit -qm ours &&
-      jj new 'description(base)' -m theirs && \
-        printf 'common\nvalue = theirs\n' > file.txt && jj commit -qm theirs &&
-      jj new 'description(ours)' 'description(theirs)' -m merge
+    jj commit --quiet -m base &&
+      jj new -m ours && printf 'common\nvalue = ours\n' > file.txt && jj commit --quiet -m ours &&
+      jj new 'description(base*)' -m theirs && \
+        printf 'common\nvalue = theirs\n' > file.txt && jj commit --quiet -m theirs &&
+      jj new 'description(ours*)' 'description(theirs*)' -m merge
   ); then
     printf 'could not build a jj conflict automatically (jj version?); skipping.\n'
     return 0
   fi
   printf 'Running "jj resolve" in %s\n' "$repo"
   (cd "$repo" && jj --config "merge-tools.oyui.program=\"$BIN\"" \
-    --config 'merge-tools.oyui.merge-args = ["jj", "mergetool", "$base", "$left", "$right"]' \
+    --config 'merge-tools.oyui.merge-args=["jj", "mergetool", "$base", "$left", "$right", "-o", "$output"]' \
     resolve --tool oyui)
 }
 
@@ -430,6 +435,116 @@ scenario_jj_squash() {
   jj_show_commit "$repo" '@-' 'Parent commit content'
 }
 
+scenario_jj_diff() {
+  if ! have_jj; then
+    printf 'jj is not installed; skipping.\n'; return 0
+  fi
+  local dir repo
+  dir="$(prepare jj-diff)"
+  repo="$dir/repo"
+  mkdir -p "$repo"
+  (cd "$repo" && jj git init >/dev/null 2>&1 && \
+    jj config set --repo user.name "Example" >/dev/null 2>&1 && \
+    jj config set --repo user.email "you@example.com" >/dev/null 2>&1)
+  printf 'value = base\n' > "$repo/file.txt"
+  (cd "$repo" && jj commit -m base >/dev/null 2>&1)
+  printf 'value = ours\nextra = 1\n' > "$repo/file.txt"
+
+  printf 'Working copy change:\n'
+  (cd "$repo" && jj diff | sed 's/^/  /')
+  printf '\nRunning "oyui diff --from @-" in %s (read-only viewer)\n' "$repo"
+  (cd "$repo" && run_oyui diff --from @-)
+}
+
+scenario_git_diff() {
+  if ! have_git; then
+    printf 'git is not installed; skipping.\n'; return 0
+  fi
+  local dir repo
+  dir="$(prepare git-diff)"
+  repo="$dir/repo"
+  mkdir -p "$repo"
+  (cd "$repo" && git init -q -b main && git_identity >/dev/null 2>&1)
+  printf 'value = base\n' > "$repo/file.txt"
+  (cd "$repo" && git add . && git commit -qm base >/dev/null)
+  printf 'value = ours\nextra = 1\n' > "$repo/file.txt"
+  (cd "$repo" && git add . && git commit -qm ours >/dev/null)
+
+  printf 'History:\n'
+  (cd "$repo" && git log --format='  %h %s' | sed 's/^/  /')
+  printf '\nRunning "oyui diff --from HEAD~1 --to HEAD" in %s (read-only viewer)\n' "$repo"
+  (cd "$repo" && run_oyui diff --from 'HEAD~1' --to HEAD)
+}
+
+scenario_jj_interdiff() {
+  if ! have_jj; then
+    printf 'jj is not installed; skipping.\n'; return 0
+  fi
+  local dir repo
+  dir="$(prepare jj-interdiff)"
+  repo="$dir/repo"
+  mkdir -p "$repo"
+  (cd "$repo" && jj git init >/dev/null 2>&1 && \
+    jj config set --repo user.name "Example" >/dev/null 2>&1 && \
+    jj config set --repo user.email "you@example.com" >/dev/null 2>&1)
+  printf 'value = base\n' > "$repo/file.txt"
+  (cd "$repo" && jj commit -m base >/dev/null 2>&1)
+  printf 'value = v1\n' > "$repo/file.txt"
+  (cd "$repo" && jj commit -m v1 >/dev/null 2>&1)
+  printf 'value = v2\nextra = 1\n' > "$repo/file.txt"
+  (cd "$repo" && jj commit -m v2 >/dev/null 2>&1)
+
+  printf 'Patch evolution (@-- vs @-):\n'
+  (cd "$repo" && jj diff -r @-- | sed 's/^/  /')
+  (cd "$repo" && jj diff -r @- | sed 's/^/  /')
+  printf '\nRunning "oyui interdiff --from @-- --to @-" in %s\n' "$repo"
+  (cd "$repo" && run_oyui interdiff --from @-- --to @-)
+}
+
+scenario_git_interdiff() {
+  if ! have_git; then
+    printf 'git is not installed; skipping.\n'; return 0
+  fi
+  local dir repo
+  dir="$(prepare git-interdiff)"
+  repo="$dir/repo"
+  mkdir -p "$repo"
+  (cd "$repo" && git init -q -b main && git_identity >/dev/null 2>&1)
+  printf 'value = base\n' > "$repo/file.txt"
+  (cd "$repo" && git add . && git commit -qm base >/dev/null)
+  printf 'value = v1\n' > "$repo/file.txt"
+  (cd "$repo" && git add . && git commit -qm v1 >/dev/null)
+  printf 'value = v2\nextra = 1\n' > "$repo/file.txt"
+  (cd "$repo" && git add . && git commit -qm v2 >/dev/null)
+
+  printf 'Patch evolution (HEAD~2 vs HEAD~1):\n'
+  (cd "$repo" && git show --format= --patch 'HEAD~1' | sed 's/^/  /')
+  (cd "$repo" && git show --format= --patch HEAD | sed 's/^/  /')
+  printf '\nRunning "oyui interdiff --from HEAD~2 --to HEAD~1" in %s\n' "$repo"
+  (cd "$repo" && run_oyui interdiff --from 'HEAD~2' --to 'HEAD~1')
+}
+
+scenario_current() {
+  if ! have_jj; then
+    printf 'jj is not installed; skipping.\n'; return 0
+  fi
+  local dir repo
+  dir="$(prepare current)"
+  repo="$dir/repo"
+  mkdir -p "$repo"
+  (cd "$repo" && jj git init >/dev/null 2>&1 && \
+    jj config set --repo user.name "Example" >/dev/null 2>&1 && \
+    jj config set --repo user.email "you@example.com" >/dev/null 2>&1)
+  printf 'value = base\n' > "$repo/file.txt"
+  (cd "$repo" && jj commit -m base >/dev/null 2>&1)
+  printf 'value = ours\n' > "$repo/file.txt"
+
+  printf 'Current change:\n'
+  (cd "$repo" && jj diff | sed 's/^/  /')
+  printf '\nRunning bare "oyui" in %s (opens the current change)\n' "$repo"
+  (cd "$repo" && run_oyui)
+}
+
 scenario_clean() {
   rm -rf "$WORK"
   printf 'removed %s\n' "$WORK"
@@ -461,7 +576,7 @@ EOF
       die "dry-run for '$s' produced no oyui command"
     fi
   done
-  for s in git-split:git git-squash:git git-resolve:git jj-split:jj jj-squash:jj; do
+  for s in git-split:git git-squash:git git-resolve:git jj-split:jj jj-squash:jj jj-diff:jj git-diff:git jj-interdiff:jj git-interdiff:git current:jj; do
     scenario="${s%%:*}"; tool="${s##*:}"
     if "have_$tool"; then
       out="$(OYUI_EXAMPLE_DRY=1 "$0" "$scenario")"
@@ -486,7 +601,7 @@ scenario="${1:-help}"
 case "$scenario" in
   list) list_scenarios ;;
   help|-h|--help) usage ;;
-  diff|staged|merge|merge-clean|conflict|git-difftool|git-mergetool|git-split|git-squash|git-resolve|jj-diffedit|jj-resolve|jj-split|jj-squash)
+  diff|staged|merge|merge-clean|conflict|git-difftool|git-mergetool|git-split|git-squash|git-resolve|jj-diffedit|jj-resolve|jj-split|jj-squash|jj-diff|git-diff|jj-interdiff|git-interdiff|current)
     ensure_bin
     "scenario_${scenario//-/_}"
     ;;

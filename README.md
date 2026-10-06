@@ -118,22 +118,25 @@ edit-args = ["jj", "edittool", "$left", "$right"]
 # Read-only viewer: jj diff --tool oyui, jj interdiff --tool oyui.
 diff-args = ["jj", "difftool", "$left", "$right"]
 # Three-way merge editor: jj resolve. jj allows confirming with conflicts left.
-merge-args = ["jj", "mergetool", "$base", "$left", "$right"]
+merge-args = ["jj", "mergetool", "$base", "$left", "$right", "-o", "$output"]
 ```
 
 `oyui jj edittool` edits the two-way diff (`$left` vs `$right`, writing back to
 `$right`); `oyui jj mergetool` resolves a three-way conflict (`$base`, `$left`,
-`$right`) and writes the result back to `$right`.
+`$right`) and writes the result to `$output`.
 
 `oyui jj mergetool` shows conflicts **inline in the file view**, with the marker
 blocks highlighted among the normal hunks. Conflicts are read from markers
-already in the target (git's `$MERGED`); when the target is clean, oyui
-synthesizes a three-way merge from `$base`/`$left`/`$right` instead. With the
+already in the target (git's `$MERGED`, jj's materialized file); when the
+target is clean, oyui synthesizes a three-way merge from `$base`/`$left`/`$right`
+instead — using jj snapshot-style markers for `jj mergetool` and git markers
+for `git mergetool`, so no conversion ever happens. With the
 cursor on a conflict side, `space` folds it with that side; `space` on the
 frame expands it back, `enter` writes the resolved file. Conflict hunks are
 not stageable. `jj resolve` stores conflicts structurally, so `oyui jj
 mergetool` permits confirming with conflicts left. `oyui git mergetool` follows
-git and refuses.
+git and refuses. Quitting with `q` cancels the merge without touching the
+output (non-zero exit, so the VCS discards it).
 
 ### Usage with Git
 

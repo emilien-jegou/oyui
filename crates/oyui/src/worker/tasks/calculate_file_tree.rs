@@ -69,8 +69,8 @@ impl Listener<CalculateFileTreeRes> for CalculateFileTreeResListener {
         tx: crate::worker::EventSender,
     ) -> eyre::Result<()> {
         if event.tree.nodes.is_empty() {
-            tracing::error!("No modifications found. Nothing to split.");
-            *ctx.config_error.write() = Some("No modifications found. Nothing to split.".into());
+            tracing::info!("No modifications found.");
+            ctx.tree.write().replace(event.tree);
         } else {
             ctx.tree.write().replace(event.tree);
             let _ = tx.send(crate::worker::tasks::stats::StatsReq {

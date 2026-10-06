@@ -60,6 +60,9 @@ pub async fn run_diff(
 /// and then compared against the base, so conflicts render inline in the file
 /// view alongside normal hunks. `allow_unresolved` follows the integration:
 /// jj stores conflicts structurally and permits confirming them, git does not.
+///
+/// Quitting without confirming aborts (non-zero exit) so the VCS discards the
+/// output instead of applying it.
 pub async fn run_merge(
     options: &RunOptions,
     args: &MergeArgs,
@@ -70,6 +73,9 @@ pub async fn run_merge(
     let read = |p: &PathBuf| std::fs::read_to_string(p).unwrap_or_default();
 
     // Keep existing markers; otherwise synthesize a merge from the three sides.
+    // For jj (marker-less `$base`/`$left`/`$right` snapshots) the synthesis uses
+    // jj snapshot-style markers so the view — and any unresolved write-back —
+    // stays in jj's representation instead of converting to git markers.
     let content = match std::fs::read_to_string(&output) {
         Ok(text) if crate::diff::ConflictedFile::is_conflicted(&text) => text,
         _ => {
@@ -79,13 +85,17 @@ pub async fn run_merge(
                 &read(&args.right),
                 args.view.diff_algorithm,
             );
-            let choices = vec![None; merged.conflict_count()];
-            merged.resolve_optional(&choices)
+            if allow_unresolved {
+                merged.to_jj_snapshot()
+            } else {
+                let choices = vec![None; merged.conflict_count()];
+                merged.resolve_optional(&choices)
+            }
         }
     };
 
     if let Err(e) = std::fs::write(&output, &content) {
-        return Err(eyre::eyre!("failed to write merge target: {e}").into());
+        return Err(eyre::eyre!("failed to write merge target {}: {e}", output.display()).into());
     }
 
     let session = Session {
@@ -99,7 +109,12 @@ pub async fn run_merge(
         view: args.view.clone(),
     };
     let confirmed = Arc::new(AtomicBool::new(false));
-    run_session(options, config_path, session, confirmed).await
+    run_session(options, config_path, session, confirmed.clone()).await?;
+    if !confirmed.load(std::sync::atomic::Ordering::SeqCst) {
+        eprintln!("merge cancelled; output left unconfirmed");
+        return Err(CommandError::Aborted);
+    }
+    Ok(())
 }
 
 /// Runs a prepared session; `confirmed` is set when the user confirms.

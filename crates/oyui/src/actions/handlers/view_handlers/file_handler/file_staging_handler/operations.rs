@@ -174,11 +174,13 @@ fn conflict_side_at_line(
     for seg in &state.conflicts.segments {
         if let Segment::Conflict(c) = seg {
             if idx == index {
-                // Layout of marker block: `<<<<<<<`(1) + ours + [base] + `=======`(1) + theirs + `>>>>>>>`(1).
-                // The `=======` separator belongs to the side below it.
-                let ours_end = range_start + 1 + c.ours.len();
-                let base_len = c.base.as_ref().map(|b| b.len() + 1).unwrap_or(0);
-                let sep = ours_end + base_len;
+                // Layout of marker block: git is `<<<<<<<`(1) + ours +
+                // [base] + `=======`(1) + theirs + `>>>>>>>`(1); jj native
+                // blocks map the side-one section to ours and the side-two
+                // snapshot header and below to theirs. The separator belongs
+                // to the side below it.
+                let (ours, sep, _) = c.layout_ranges(range_start);
+                let ours_end = ours.end;
                 if line < ours_end {
                     return Some(Side::Ours);
                 } else if line >= sep {

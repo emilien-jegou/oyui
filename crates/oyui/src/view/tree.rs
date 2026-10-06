@@ -277,6 +277,15 @@ impl TreeViewData {
         theme: &UiTheme,
         color_mode: &TerminalColorMode,
     ) {
+        if tree.is_empty() {
+            frame.render_widget(
+                Paragraph::new("no files modified")
+                    .alignment(ratatui::layout::Alignment::Center)
+                    .style(Style::default().fg(theme.dim.into()).bg(theme.bg.into())),
+                area,
+            );
+            return;
+        }
         let mut tokens: Vec<String> = self
             .tree_row_format
             .as_deref()

@@ -69,6 +69,7 @@ pub fn merge3(base: &str, left: &str, right: &str, algo: DiffAlgorithm) -> Confl
                                 .collect(),
                         ),
                         theirs,
+                        jj_raw: None,
                     }));
                 }
             }

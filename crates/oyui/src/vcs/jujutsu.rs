@@ -124,7 +124,15 @@ pub fn resolve(program: &ToolProgram, args: &ResolveArgs) -> ToolInvocation {
     let mut inv = base(
         program,
         "merge-args",
-        &["jj", "mergetool", "$base", "$left", "$right"],
+        &[
+            "jj",
+            "mergetool",
+            "$base",
+            "$left",
+            "$right",
+            "-o",
+            "$output",
+        ],
         "resolve",
         &[],
     );
@@ -282,6 +290,12 @@ mod tests {
         assert_eq!(inv.args[5], "resolve");
         assert!(inv.args.iter().any(|a| a.contains("merge-args")));
         assert!(contains_pair(&inv.args, "--tool", "oyui"));
+        // jj merge tools must write to $output; $left/$right are read-only.
+        let tool = inv.args.iter().find(|a| a.contains("merge-args")).unwrap();
+        assert!(
+            tool.contains("\"$output\""),
+            "merge-args must pass $output: {tool}"
+        );
     }
 
     #[test]
