@@ -16,6 +16,7 @@ pub struct StagingSession {
     pub tree: Arc<RwLock<FileTree>>,
     pub cache: DiffCache,
     pub ui: Arc<Mutex<UiState>>,
+    pub operation: crate::app::Operation,
 }
 
 impl StagingSession {
@@ -24,6 +25,7 @@ impl StagingSession {
         tree: Arc<RwLock<FileTree>>,
         cache: DiffCache,
         ui: Arc<Mutex<UiState>>,
+        operation: crate::app::Operation,
     ) -> Option<Self> {
         let mut guard = ui.lock();
 
@@ -67,7 +69,13 @@ impl StagingSession {
             tree,
             cache,
             ui,
+            operation,
         })
+    }
+
+    /// True in merge sessions, where staging selections never take effect.
+    pub fn is_merge(&self) -> bool {
+        self.operation == crate::app::Operation::Merge
     }
 
     /// Mutates the open file's diff in place; callers persist via `CacheMap::update`.
@@ -179,8 +187,13 @@ mod tests {
         });
 
         let tree = Arc::new(RwLock::new(FileTree::default()));
-        let session =
-            StagingSession::try_new(tree, cache.clone(), ui).expect("session for the open file");
+        let session = StagingSession::try_new(
+            tree,
+            cache.clone(),
+            ui,
+            crate::app::Operation::Diff,
+        )
+        .expect("session for the open file");
         assert_eq!(session.current_row_idx, 2);
 
         // Reference: what the mapping says with a freshly recomputed model.

@@ -49,11 +49,23 @@ macro_rules! define_default_theme {
                 let fg = self.fg();
                 let staged = self.staged();
                 let del_fg = self.del_fg();
+                let partial = self.partial();
                 let dim = self.dim();
                 let dimmer = self.dimmer();
 
                 let cursor_bg = syn_to_color(self.theme().settings.line_highlight)
                     .unwrap_or_else(|| blend(fg, bg, 1.).unwrap_or(fg));
+
+                // Conflict accent tracks the theme like add/del do: the midpoint
+                // between staged (greenish) and deleted (reddish) reads orange
+                // on most palettes without a hardcoded RGB.
+                let conflict_fg = blend(staged, del_fg, 0.5).unwrap_or_else(|| {
+                    if self.is_dark_theme() {
+                        Color::LightYellow
+                    } else {
+                        Color::Yellow
+                    }
+                });
 
                 UiTheme::builder()
                   .bg(bg.clone())
@@ -63,13 +75,14 @@ macro_rules! define_default_theme {
                   .dimmer(dimmer)
                   .staged(staged)
                   .unstaged(dim)
-                  .partial(self.partial())
+                  .partial(partial)
                   .dir(self.dir())
                   .cmd(self.cmd())
                   .add_bg(blend(staged, bg, 1.).unwrap_or(staged))
                   .del_bg(blend(del_fg, bg, 1.).unwrap_or(del_fg))
                   .add_fg(staged)
                   .del_fg(del_fg)
+                  .conflict_fg(conflict_fg)
                   .char_trailing_space_fg(dimmer)
                   .char_tab_fg(dimmer)
                   .char_scroll_fg(dimmer)

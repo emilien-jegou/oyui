@@ -30,6 +30,17 @@ impl AppThemeActionsHandler {
         tracing::error!("{message}");
         *self.error.write() = Some(format!("theme: {message}"));
     }
+
+    /// Broadcasts the current UI theme so workers (syntax cache) stay live.
+    /// Call after any in-place `theme.ui` mutation.
+    fn notify_ui_changed(&self) {
+        let (ui, tm) = {
+            let theme = self.theme.read();
+            (theme.ui.clone(), theme.tm_theme.clone())
+        };
+        let open_file = self.ui.lock().file_view.current_path.clone();
+        let _ = self.worker.send(ThemeUpdate::Full(ui, tm, open_file));
+    }
 }
 
 impl ThemeActionsHandler for AppThemeActionsHandler {
@@ -77,6 +88,8 @@ impl ThemeActionsHandler for AppThemeActionsHandler {
     fn toggle_gradient(&self) {
         let mut ui = self.ui.lock();
         ui.file_view.use_gradient = !ui.file_view.use_gradient;
+        drop(ui);
+        self.notify_ui_changed();
     }
 
     fn syntax(&self, name: String) {
@@ -140,6 +153,7 @@ impl ThemeGradientActionsHandler for AppThemeActionsHandler {
 
     fn set(&self, val: bool) {
         self.ui.lock().file_view.use_gradient = val;
+        self.notify_ui_changed();
     }
 }
 
@@ -163,6 +177,7 @@ macros::impl_color_getset!(char_trailing_space_fg);
 macros::impl_color_getset!(char_tab_fg);
 macros::impl_opt_color_getset!(char_line_split_color);
 macros::impl_opt_color_getset!(char_hunk_split_color);
+macros::impl_color_getset!(conflict_fg);
 macros::impl_opt_color_getset!(conflict_bg);
 
 // String fields
@@ -186,6 +201,7 @@ impl ThemeFileStagedHighlightActionsHandler for AppThemeActionsHandler {
 
     fn set(&self, val: LineHighlightMode) {
         self.theme.write().ui.file_staged_highlight = val;
+        self.notify_ui_changed();
     }
 }
 
@@ -196,6 +212,7 @@ impl ThemeFileStagedHighlightOpacityActionsHandler for AppThemeActionsHandler {
 
     fn set(&self, val: f64) {
         self.theme.write().ui.file_staged_highlight_opacity = val;
+        self.notify_ui_changed();
     }
 }
 
@@ -206,6 +223,7 @@ impl ThemeFileChangeHighlightActionsHandler for AppThemeActionsHandler {
 
     fn set(&self, val: LineHighlightMode) {
         self.theme.write().ui.file_change_highlight = val;
+        self.notify_ui_changed();
     }
 }
 
@@ -216,6 +234,7 @@ impl ThemeFileChangeHighlightOpacityActionsHandler for AppThemeActionsHandler {
 
     fn set(&self, val: f64) {
         self.theme.write().ui.file_change_highlight_opacity = val;
+        self.notify_ui_changed();
     }
 }
 
@@ -226,6 +245,7 @@ impl ThemeFileConflictHighlightActionsHandler for AppThemeActionsHandler {
 
     fn set(&self, val: LineHighlightMode) {
         self.theme.write().ui.file_conflict_highlight = val;
+        self.notify_ui_changed();
     }
 }
 
@@ -236,5 +256,6 @@ impl ThemeFileConflictHighlightOpacityActionsHandler for AppThemeActionsHandler 
 
     fn set(&self, val: f64) {
         self.theme.write().ui.file_conflict_highlight_opacity = val;
+        self.notify_ui_changed();
     }
 }

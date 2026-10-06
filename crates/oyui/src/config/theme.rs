@@ -144,11 +144,14 @@ pub struct UiTheme {
     #[builder(default = 0.1)]
     pub file_change_highlight_opacity: f64,
 
+    /// Conflict accent (markers, frames). Derived from the theme like
+    /// `add_fg`/`del_fg`; override it per-theme instead of hardcoding orange.
+    pub conflict_fg: Color,
     /// Underlay behind conflict blocks. `None` derives it from the background.
     #[builder(default = None)]
     pub conflict_bg: Option<Color>,
     /// Conflict underlay highlight: `None` disables it.
-    #[builder(default = LineHighlightMode::Solid)]
+    #[builder(default = LineHighlightMode::Gradient(0.15))]
     pub file_conflict_highlight: LineHighlightMode,
     #[builder(default = 1.0)]
     pub file_conflict_highlight_opacity: f64,

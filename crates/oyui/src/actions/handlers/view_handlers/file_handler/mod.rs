@@ -7,7 +7,6 @@ use crate::diff::{DiffLine, DiffResult};
 use crate::diff_cache::DiffCache;
 use crate::tree::StagingState;
 
-pub mod file_conflict;
 pub mod file_inspect;
 pub mod file_staging_handler;
 

@@ -45,6 +45,15 @@ impl UiState {
         match self.current {
             ViewKind::Tree => {
                 self.tree_view.hide_staging = !self.writable;
+                // Merge target + resolve progress for the tree conflict badge.
+                // Unresolved markers come from the diff cache; this only adds
+                // the resolved check once every conflict has a chosen side.
+                self.tree_view.conflict_info = self.resolve.as_ref().and_then(|r| {
+                    self.file_view
+                        .current_path
+                        .clone()
+                        .map(|target| (target, r.resolved_count(), r.count()))
+                });
                 self.tree_view.draw(
                     &DevIconProvider,
                     frame,

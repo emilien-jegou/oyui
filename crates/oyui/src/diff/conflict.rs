@@ -162,8 +162,10 @@ impl ConflictedFile {
         self.resolve(&vec![side; self.conflict_count()])
     }
 
-    /// Builds the on-screen content: conflicts are shown in full, or collapsed
-    /// to a single summary marker line when folded.
+    /// Builds the on-screen content: unfolded conflicts show markers; folded
+    /// ones show a header framing the chosen side's lines plus a footer, so
+    /// the choice stays visible and editable while markers, base and the
+    /// losing side stay hidden.
     ///
     /// This never touches the file on disk — it only drives rendering.
     pub fn display(&self, folded: &[bool], choices: &[Option<Side>]) -> String {
@@ -174,7 +176,11 @@ impl ConflictedFile {
                 Segment::Common(text) => lines.extend(text.iter().cloned()),
                 Segment::Conflict(c) => {
                     if folded.get(idx).copied().unwrap_or(false) {
-                        lines.push(summary_line(choices.get(idx).copied().flatten()));
+                        lines.push(header_line(choices.get(idx).copied().flatten()));
+                        if let Some(side) = choices.get(idx).copied().flatten() {
+                            lines.extend(c.resolve(side));
+                        }
+                        lines.push(footer_line());
                     } else {
                         write_markers(&mut lines, c);
                     }
@@ -226,6 +232,9 @@ impl ConflictedFile {
     }
 
     /// Resolves with per-conflict optional choices; `None` keeps the markers.
+    ///
+    /// Merge output is driven by choices alone: conflict hunks are not
+    /// stageable, so staging selections never affect the written resolution.
     pub fn resolve_optional(&self, choices: &[Option<Side>]) -> String {
         let mut lines = Vec::new();
         let mut idx = 0;
@@ -249,15 +258,22 @@ impl ConflictedFile {
     }
 }
 
-/// A single line summarising a folded conflict and its current choice.
-pub fn summary_line(choice: Option<Side>) -> String {
-    let label = match choice {
+/// Header framing a folded conflict's chosen lines (full-width, no file line).
+/// Returns the bare side label; the frame row renders it as `label ———…`.
+pub fn header_line(choice: Option<Side>) -> String {
+    match choice {
         Some(Side::Ours) => "ours",
         Some(Side::Theirs) => "theirs",
-        Some(Side::Both) => "both",
+        Some(Side::Both) => "all",
         None => "unresolved",
-    };
-    format!("<<<<<<< {label} ⋯ >>>>>>>")
+    }
+    .to_string()
+}
+
+/// Footer closing a folded conflict's frame (full-width, no file line).
+/// Empty: the frame row renders a bare `———…` rule.
+pub fn footer_line() -> String {
+    String::new()
 }
 
 /// Emits the unresolved marker block for a conflict.

@@ -136,6 +136,7 @@ pub fn ansi_default_theme(color_mode: &TerminalColorMode) -> crate::config::UiTh
         .add_fg(resolve_color_for_mode(Color::Green, color_mode))
         .del_bg(resolve_color_for_mode(Color::Red, color_mode))
         .del_fg(resolve_color_for_mode(Color::Red, color_mode))
+        .conflict_fg(resolve_color_for_mode(Color::Yellow, color_mode))
         .char_trailing_space_fg(subtle)
         .char_tab_fg(subtle)
         .char_scroll_fg(subtle)

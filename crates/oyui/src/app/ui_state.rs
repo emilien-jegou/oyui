@@ -36,7 +36,7 @@ pub struct ResolveState {
     pub conflicts: crate::diff::ConflictedFile,
     /// Chosen side per conflict; `None` keeps the markers.
     pub choices: Vec<Option<crate::diff::Side>>,
-    /// Whether each conflict is collapsed to a summary line.
+    /// Whether each conflict is collapsed to a header/footer frame.
     pub folded: Vec<bool>,
 }
 
@@ -78,6 +78,13 @@ impl ResolveState {
         }
     }
 
+    /// Clears the chosen side for conflict `index`, keeping the markers.
+    pub fn reset_choice(&mut self, index: usize) {
+        if let Some(slot) = self.choices.get_mut(index) {
+            *slot = None;
+        }
+    }
+
     /// Sets the folded state for conflict `index`.
     pub fn set_folded(&mut self, index: usize, folded: bool) {
         if let Some(slot) = self.folded.get_mut(index) {
@@ -96,19 +103,97 @@ impl ResolveState {
             .position(|r| r.contains(&line))
     }
 
-    /// On-screen content: folded conflicts collapse to a summary marker.
+    /// On-screen content: folded conflicts show a header framing the chosen
+    /// lines plus a footer.
     pub fn display_text(&self) -> String {
         self.conflicts.display(&self.folded, &self.choices)
     }
 
+    /// True when `line` is one of conflict `index`'s kept (chosen-side) lines.
+    pub fn keeps_line(&self, index: usize, line: usize) -> bool {
+        let start = match self.conflicts.marker_ranges().get(index) {
+            Some(r) => r.start,
+            None => return false,
+        };
+        let mut idx = 0;
+        for segment in &self.conflicts.segments {
+            if let crate::diff::conflict::Segment::Conflict(c) = segment {
+                if idx == index {
+                    let ours_start = start + 1;
+                    let ours_end = ours_start + c.ours.len();
+                    let base_len = c.base.as_ref().map(|b| b.len() + 1).unwrap_or(0);
+                    let theirs_start = ours_end + base_len + 1;
+                    let theirs_end = theirs_start + c.theirs.len();
+                    return match self.choices.get(index).copied().flatten() {
+                        Some(crate::diff::Side::Ours) => {
+                            (ours_start..ours_end).contains(&line)
+                        }
+                        Some(crate::diff::Side::Theirs) => {
+                            (theirs_start..theirs_end).contains(&line)
+                        }
+                        Some(crate::diff::Side::Both) => {
+                            (ours_start..ours_end).contains(&line)
+                                || (theirs_start..theirs_end).contains(&line)
+                        }
+                        None => false,
+                    };
+                }
+                idx += 1;
+            }
+        }
+        false
+    }
+
     /// Foldable regions for the file-view row model.
     pub fn regions(&self) -> crate::view::file::view_model::ConflictRegions {
+        use crate::diff::conflict::Segment;
+        use crate::view::file::view_model::ConflictSides;
+        let ranges = self.conflicts.marker_ranges();
+        // Absolute line ranges of the kept side per conflict, so a folded
+        // conflict shows its header plus the chosen lines (editable hunks)
+        // while markers, base and the losing side stay hidden.
+        let mut kept: Vec<Vec<std::ops::Range<usize>>> = Vec::new();
+        let mut sides: Vec<ConflictSides> = Vec::new();
+        let mut idx = 0usize;
+        for segment in &self.conflicts.segments {
+            if let Segment::Conflict(c) = segment {
+                let start = ranges.get(idx).map(|r| r.start).unwrap_or(0);
+                let ours_start = start + 1;
+                let ours_end = ours_start + c.ours.len();
+                let base_len = c.base.as_ref().map(|b| b.len() + 1).unwrap_or(0);
+                let sep = ours_end + base_len;
+                let theirs_start = sep + 1;
+                let theirs_end = theirs_start + c.theirs.len();
+                sides.push(ConflictSides {
+                    ours: ours_start..ours_end,
+                    theirs: theirs_start..theirs_end,
+                    sep,
+                });
+                let choice = self.choices.get(idx).copied().flatten();
+                let k = match choice {
+                    Some(crate::diff::Side::Ours) => vec![ours_start..ours_end],
+                    Some(crate::diff::Side::Theirs) => vec![theirs_start..theirs_end],
+                    Some(crate::diff::Side::Both) => {
+                        vec![ours_start..ours_end, theirs_start..theirs_end]
+                    }
+                    None => Vec::new(),
+                };
+                kept.push(k);
+                idx += 1;
+            }
+        }
         crate::view::file::view_model::ConflictRegions {
-            ranges: self.conflicts.marker_ranges(),
+            ranges,
             folded: self.folded.clone(),
-            summaries: (0..self.count())
-                .map(|i| crate::diff::conflict::summary_line(self.choice(i)))
+            headers: (0..self.count())
+                .map(|i| crate::diff::conflict::header_line(self.choice(i)))
                 .collect(),
+            footers: (0..self.count())
+                .map(|_| crate::diff::conflict::footer_line())
+                .collect(),
+            choices: self.choices.clone(),
+            kept,
+            sides,
         }
     }
 
@@ -234,11 +319,14 @@ b
         assert!(!state.resolved_text().contains("two"));
 
         // Folding changes only the rendering: the canonical cursor mapping and
-        // the summary text, never the underlying content.
+        // the frame text, never the underlying content.
         state.set_folded(0, true);
         assert_eq!(state.conflict_at_line(1), Some(0));
         assert_eq!(state.conflict_at_line(3), Some(0));
-        assert!(state.display_text().contains("<<<<<<< ours ⋯ >>>>>>>"));
+        assert!(state.display_text().contains("ours"));
+        assert!(!state.display_text().contains("<<<<<<<"));
+        assert!(state.keeps_line(0, 2));
+        assert!(!state.keeps_line(0, 4));
     }
 
     #[test]

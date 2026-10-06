@@ -233,13 +233,12 @@ theme::gradient::set(true);
 
 ### Conflicts
 
-Merge sessions only; these resolve the conflict under the cursor inline.
-
-| Function | Returns | Description |
-|---|---|---|
-| `view::file::conflict::ours()` | | Fold the conflict with ours; call again to expand. |
-| `view::file::conflict::theirs()` | | Fold the conflict with theirs. |
-| `view::file::conflict::both()` | | Fold the conflict with ours followed by theirs. |
+Merge sessions only. Put the cursor on a conflict side and press `space` to
+fold the conflict with that side; space anywhere on a folded conflict
+expands it back to the markers. There are no conflict-specific actions, and conflict
+hunks are not stageable: `t`, `split` and in-hunk `space` toggles are no-ops
+there, and conflict colors never reflect staging. The written resolution is
+driven by choices alone — to take a resolution back, unfold it.
 
 ### Folding and file
 

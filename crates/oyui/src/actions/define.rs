@@ -95,7 +95,8 @@ define_actions! {
         file_change_highlight { @getset(LineHighlightMode) }
         file_change_highlight_opacity { @getset(f64) }
 
-        // Conflict-block underlay. `conflict_bg` empty derives it from the bg.
+        // Conflict accent + block underlay. `conflict_bg` empty derives it from the bg.
+        conflict_fg { @getset(String) }
         conflict_bg { @getset(String) }
         file_conflict_highlight { @getset(LineHighlightMode) }
         file_conflict_highlight_opacity { @getset(f64) }
@@ -169,13 +170,6 @@ define_actions! {
             path(|| -> String)
             folded(|| -> bool)
             close()
-
-            // Resolve the conflict under the cursor (merge sessions).
-            conflict {
-                ours()
-                theirs()
-                both()
-            }
 
             // Read-only diff/hunk introspection for the open file.
             inspect {

@@ -223,23 +223,33 @@ prominently among the surrounding hunks. There is no separate window. Markers
 are read from the target (git's `$MERGED`); if the target is clean, oyui
 synthesizes a three-way merge from `base`/`left`/`right` first.
 
-Put the cursor on a conflict and fold it to a summary marker:
+Put the cursor on the side you want and press `space` to fold the conflict
+into a frame around that side's lines:
 
-| Key | Action |
-|---|---|
-| `o` | Fold the conflict with **ours**; press `o` again to expand |
-| `T` | Fold the conflict with **theirs** |
-| `B` | Fold the conflict with **both** |
+- `space` on ours/theirs content folds with that side (`=======` counts as
+  theirs); while the cursor is on a side, that side's marker (`<<<<<<<` for
+  ours, `>>>>>>>` for theirs) takes the frame highlight as a preview.
+- `space` anywhere on a folded conflict — frame or kept center lines —
+  expands back to the markers.
 
-Folding is **display-only**: the working file keeps its markers, so a choice can
-be revisited and the conflict can still be confirmed as-is. A folded conflict
-renders as one line, `<<<<<<< ours ⋯ >>>>>>>`, which re-expands with `o`.
+Selecting a side folds the conflict into a frame, `ours ———…` …
+`———…`, around that side's lines. Folding is **display-only**:
+the working file keeps its markers, so a choice can be revisited and the
+conflict can still be confirmed as-is.
+
+Conflict hunks are not stageable: `t`, `split` and in-hunk `space` toggles
+are no-ops inside conflicts, and conflict colors never reflect staging, so
+identical conflict states always look identical. The written resolution is
+driven by choices alone — to take a resolution back, unfold it to the
+markers.
 `global::conflict_count()` reports how many conflicts were detected.
 
-The whole conflict line — gutter, sign and text — sits on a dedicated
-**conflict underlay** highlight, defaulting to a darkened version of the theme
-background (lightened when the background is near-black). Marker lines use the
-theme's accent colors. Override it like any other highlight:
+Orange is the color of conflict, kept subtle: unfolded conflicts render as
+plain rows (no green/red/blue, no background wash) with orange marker lines
+(`<<<<<<< ours`, …), while the fold frames — and the hovered side's marker
+as a preview — carry a tuned-down orange background using the same gradient
+logic as staged hunks (gradient by default, solid otherwise). Override the
+frame underlay like any other highlight:
 
 ```rune
 theme::conflict_bg::set("#202030");                 // explicit underlay color

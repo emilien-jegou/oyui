@@ -15,6 +15,8 @@ pub struct GutterNumber<'a> {
     pub is_staged: bool,
     #[builder(default)]
     pub is_conflict: bool,
+    #[builder(default)]
+    pub is_preview: bool,
     pub theme: &'a UiTheme,
     #[builder(default)]
     pub custom_style: Option<Style>,
@@ -22,16 +24,8 @@ pub struct GutterNumber<'a> {
 
 impl<'a> GutterNumber<'a> {
     pub fn compute_style(&self) -> Style {
-        if self.is_conflict {
-            let mut style = Style::default()
-                .bg(conflict_underlay(self.theme).into())
-                .fg(self.theme.fg.into());
-            if let Some(override_style) = self.custom_style {
-                style = style.patch(override_style);
-            }
-            return style;
-        }
-
+        // No conflict-specific background: conflict lines are plain rows,
+        // only the fold frames carry the orange tint.
         let mut line_num_style = if self.is_selected {
             if self.is_staged && (self.is_add || self.is_del) {
                 Style::default()
@@ -56,6 +50,11 @@ impl<'a> GutterNumber<'a> {
 
         if let Some(override_style) = self.custom_style {
             line_num_style = line_num_style.patch(override_style);
+        }
+
+        // The hovered side's marker takes the frame wash.
+        if self.is_conflict && self.is_preview && !self.is_selected {
+            line_num_style = line_num_style.bg(conflict_underlay(self.theme).into());
         }
 
         line_num_style

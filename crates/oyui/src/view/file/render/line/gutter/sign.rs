@@ -16,6 +16,8 @@ pub struct GutterSign<'a> {
     pub is_selected: bool,
     #[builder(default)]
     pub is_conflict: bool,
+    #[builder(default)]
+    pub is_preview: bool,
     pub use_gradient: bool,
     pub area_width: u16,
     pub row_style: Style,
@@ -79,6 +81,7 @@ impl<'a> GutterSign<'a> {
             self.use_gradient,
             self.area_width,
             self.theme,
+            self.is_preview,
         );
 
         if !bg_calc.char_by_char() {

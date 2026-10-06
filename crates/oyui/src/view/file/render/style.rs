@@ -1,15 +1,27 @@
 use crate::{
     config::{theme::Color, LineHighlightMode, UiTheme},
-    view::file::utils::colors::{darken_color, lighten_color, safe_lerp_color, underlay_of},
+    view::file::utils::colors::{darken_color, lighten_color, safe_lerp_color},
 };
 use ratatui::style::Style;
 
+/// Conflict accent: a first-class theme color like `add_fg`/`del_fg`
+/// (derived as the staged/deleted midpoint, overridable per theme).
+pub fn conflict_orange(theme: &UiTheme) -> Color {
+    theme.conflict_fg
+}
+
 /// The underlay color behind conflict blocks, blended by the configured
-/// opacity. `conflict_bg` overrides the derived darken/lighten of the theme bg.
+/// opacity. `conflict_bg` overrides the derived tint of the theme bg.
+///
+/// Only fold frames use it now; conflict lines themselves are plain rows.
 pub fn conflict_underlay(theme: &UiTheme) -> Color {
-    let raw = theme
-        .conflict_bg
-        .unwrap_or_else(|| underlay_of(&theme.bg).unwrap_or(theme.cursor_bg));
+    let raw = theme.conflict_bg.unwrap_or_else(|| {
+        safe_lerp_color(
+            &theme.bg,
+            &conflict_orange(theme),
+            0.3 * theme.file_conflict_highlight_opacity as f32,
+        )
+    });
     safe_lerp_color(
         &theme.bg,
         &raw,
@@ -30,7 +42,12 @@ pub fn get_line_style(
     is_conflict: bool,
     use_gradient: bool,
     theme: &UiTheme,
+    is_preview: bool,
 ) -> Style {
+    // Conflict content lines keep their add/del colors (including the green
+    // gradient); only marker lines (which carry no +/- sign) fall back to
+    // the plain background with the orange accent fg. The hover preview wash
+    // still applies on top.
     let is_add_or_del = is_add || is_del;
 
     // We only use an uncolored row background (theme.bg or cursor_bg) if the file change highlight
@@ -131,13 +148,17 @@ pub fn get_line_style(
         }
     }
 
-    // Conflict lines keep their change foreground but sit on the underlay.
-    if is_conflict && conflict_highlight_on(theme) {
-        let mut bg = conflict_underlay(theme);
-        if is_selected {
-            bg = safe_lerp_color(&theme.cursor_bg, &bg, 0.3);
-        }
-        style = style.bg(bg.into());
+    // The hovered side's marker takes the frame wash; conflict rows
+    // otherwise sit on the plain background.
+    if is_conflict && conflict_highlight_on(theme) && is_preview && !is_selected {
+        style = style.bg(conflict_underlay(theme).into());
+    } else if is_preview && !is_selected && !is_conflict {
+        let tint = safe_lerp_color(
+            &theme.bg,
+            &theme.partial,
+            theme.file_staged_highlight_opacity as f32,
+        );
+        style = style.bg(tint.into());
     }
 
     style
@@ -151,14 +172,15 @@ pub fn to_tui_style(style: syntect::highlighting::Style) -> Style {
 pub struct LineBgCalculator {
     grad1_width: f32,
     grad2_width: f32,
-    grad_conflict_width: f32,
+    frame_grad_width: f32,
+    frame_grad_on: bool,
     use_grad_change: bool,
     use_gradient_change_solid: bool,
     use_staged_grad: bool,
     use_staged_solid: bool,
     use_conflict: bool,
-    use_conflict_grad: bool,
     is_selected: bool,
+    is_preview: bool,
     is_staged: bool,
     is_add_or_del: bool,
 
@@ -167,7 +189,7 @@ pub struct LineBgCalculator {
     cursor_bg: Color,
     neutral_change_bg: Color,
     neutral_accent_bg_grad: Color,
-    conflict_bg: Color,
+    frame_accent: Color,
 }
 
 impl LineBgCalculator {
@@ -180,6 +202,7 @@ impl LineBgCalculator {
         use_gradient: bool,
         area_width: u16,
         theme: &UiTheme,
+        is_preview: bool,
     ) -> Self {
         let area_width = area_width.max(10);
         let grad1_width = match theme.file_change_highlight {
@@ -190,20 +213,22 @@ impl LineBgCalculator {
             LineHighlightMode::Gradient(pct) => (area_width as f64 * pct).max(1.0) as f32,
             _ => 1.0,
         };
-        let grad_conflict_width = match theme.file_conflict_highlight {
-            LineHighlightMode::Gradient(pct) => (area_width as f64 * pct).max(1.0) as f32,
-            _ => 1.0,
-        };
-
         let use_conflict = is_conflict && conflict_highlight_on(theme);
-        let use_conflict_grad = use_gradient
+        // Frame-style wash for the hovered marker: same gradient logic as
+        // staged hunks, tuned-down orange.
+        let frame_grad_on = use_gradient
             && use_conflict
             && matches!(
                 theme.file_conflict_highlight,
                 LineHighlightMode::Gradient(_)
             );
-        let conflict_bg = conflict_underlay(theme);
+        let frame_grad_width = match theme.file_conflict_highlight {
+            LineHighlightMode::Gradient(pct) => (area_width as f64 * pct).max(1.0) as f32,
+            _ => 1.0,
+        };
 
+        // Conflict content lines keep their change/staged washes; markers
+        // (no +/- sign) naturally fall back to the plain background.
         let is_add_or_del = is_add || is_del;
         let use_grad_change = use_gradient
             && is_add_or_del
@@ -248,43 +273,49 @@ impl LineBgCalculator {
             &theme.partial,
             theme.file_staged_highlight_opacity as f32,
         );
+        let frame_accent = conflict_underlay(theme);
 
         Self {
             grad1_width,
             grad2_width,
-            grad_conflict_width,
+            frame_grad_width,
+            frame_grad_on,
             use_grad_change,
             use_gradient_change_solid,
             use_staged_grad,
             use_staged_solid,
             use_conflict,
-            use_conflict_grad,
             is_selected,
+            is_preview,
             is_staged,
             is_add_or_del,
             bg: theme.bg,
             cursor_bg: theme.cursor_bg,
             neutral_change_bg,
             neutral_accent_bg_grad,
-            conflict_bg,
+            frame_accent,
         }
     }
 
     pub fn get_bg(&self, visual_x: usize) -> Color {
-        if self.use_conflict {
-            let base = if self.use_conflict_grad {
-                let t = (visual_x as f32 / self.grad_conflict_width).clamp(0.0, 1.0);
-                safe_lerp_color(&self.conflict_bg, &self.bg, t)
-            } else {
-                self.conflict_bg
-            };
-            return if self.is_selected {
-                safe_lerp_color(&self.cursor_bg, &base, 0.2)
-            } else {
-                base
-            };
+        // The hovered side's marker takes the frame wash; anything else
+        // previews like a staged hunk.
+        if self.is_preview && !self.is_selected && self.use_conflict {
+            if self.frame_grad_on {
+                let t = (visual_x as f32 / self.frame_grad_width).clamp(0.0, 1.0);
+                return safe_lerp_color(&self.frame_accent, &self.bg, t);
+            }
+            return self.frame_accent;
         }
+        let base = self.base_bg(visual_x);
+        if self.is_preview && !self.is_selected {
+            safe_lerp_color(&base, &self.neutral_accent_bg_grad, 0.45)
+        } else {
+            base
+        }
+    }
 
+    fn base_bg(&self, visual_x: usize) -> Color {
         let base_bg_neutral = if self.use_grad_change {
             let t1 = (visual_x as f32 / self.grad1_width).clamp(0.0, 1.0);
             safe_lerp_color(&self.neutral_change_bg, &self.bg, t1)
@@ -322,6 +353,47 @@ impl LineBgCalculator {
     }
 
     pub fn char_by_char(&self) -> bool {
-        self.use_grad_change || self.use_staged_grad || self.use_conflict_grad
+        self.use_grad_change
+            || self.use_staged_grad
+            || (self.is_preview && self.use_conflict && self.frame_grad_on)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::terminal_colors::TerminalColorMode;
+    use crate::theme::ansi_default_theme;
+
+    /// Conflict content lines keep their add/del fg; markers carry no sign
+    /// so they fall back to the plain fg. Only the hover preview adds the
+    /// orange underlay.
+    #[test]
+    fn conflict_lines_keep_change_colors() {
+        let theme = ansi_default_theme(&TerminalColorMode::NoColor);
+        let style = get_line_style(true, false, false, true, true, false, &theme, false);
+        assert_eq!(style.fg, Some(theme.add_fg.into()));
+    }
+
+    /// The hover preview puts the frame wash on the hovered side's marker.
+    #[test]
+    fn conflict_preview_tints_orange() {
+        use crate::config::theme::Color;
+        let mut theme = ansi_default_theme(&TerminalColorMode::NoColor);
+        theme.bg = Color::Rgb(20, 20, 20);
+        // Non-preview conflict content keeps its change styling, preview
+        // swaps in the conflict underlay.
+        let plain = get_line_style(false, false, false, false, true, false, &theme, false);
+        let preview = get_line_style(false, false, false, false, true, false, &theme, true);
+        assert_eq!(plain.bg, Some(theme.bg.into()));
+        assert_eq!(preview.bg, Some(conflict_underlay(&theme).into()));
+    }
+
+    /// The conflict accent follows the theme instead of a fixed RGB.
+    #[test]
+    fn conflict_orange_tracks_theme() {
+        let mut theme = ansi_default_theme(&TerminalColorMode::NoColor);
+        theme.conflict_fg = Color::Rgb(1, 2, 3);
+        assert_eq!(conflict_orange(&theme), Color::Rgb(1, 2, 3));
     }
 }

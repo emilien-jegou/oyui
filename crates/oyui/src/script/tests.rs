@@ -279,10 +279,6 @@ fn the_full_api_surface_compiles() {
             view::file::staging::stage_all();
             view::file::staging::unstage_all();
 
-            view::file::conflict::ours();
-            view::file::conflict::theirs();
-            view::file::conflict::both();
-
             let _ = view::file::inspect::hunk_has();
             if let Some(_hunk) = view::file::inspect::hunk_index() {}
             let _ = view::file::inspect::hunk_count();

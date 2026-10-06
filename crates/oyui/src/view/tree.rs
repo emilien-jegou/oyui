@@ -29,9 +29,23 @@ pub struct TreeRow {
     pub is_last: bool,
     pub parent_continuations: Vec<bool>,
     pub staging_state: StagingState,
+    /// Merge-conflict badge; staging symbols are meaningless in merge mode.
+    pub conflict: ConflictBadge,
     pub stats: Option<DiffStats>,
     pub left_path: Option<PathBuf>,
     pub right_path: Option<PathBuf>,
+}
+
+/// Merge-conflict state of a tree row, rendered in orange.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ConflictBadge {
+    /// No conflict (or not a merge session).
+    #[default]
+    None,
+    /// Conflict markers present / choices still open.
+    Unresolved,
+    /// Every conflict has a chosen side.
+    Resolved,
 }
 
 /// Pre-computed flat rows for tree rendering.
@@ -44,12 +58,27 @@ pub struct TreeViewModel {
 
 impl TreeViewModel {
     /// Recomputes the flat rows for the tree.
-    pub fn recompute(&mut self, tree: &FileTree, cache: &DiffCache, ui_state: &TreeUiState) {
+    pub fn recompute(
+        &mut self,
+        tree: &FileTree,
+        cache: &DiffCache,
+        ui_state: &TreeUiState,
+        conflict_info: Option<&(PathBuf, usize, usize)>,
+    ) {
         let mut rows = Vec::new();
         let count = tree.nodes.len();
         for (i, node) in tree.nodes.iter().enumerate() {
             let is_last = i == count - 1;
-            flatten_recursive(node, 0, is_last, &Vec::new(), ui_state, cache, &mut rows);
+            flatten_recursive(
+                node,
+                0,
+                is_last,
+                &Vec::new(),
+                ui_state,
+                cache,
+                conflict_info,
+                &mut rows,
+            );
         }
 
         let mut total_ins = 0;
@@ -102,10 +131,16 @@ pub struct TreeViewData {
     pub tree_row_format: Option<String>,
     /// Hide staging symbols (set in read-only sessions).
     pub hide_staging: bool,
+    /// Merge-conflict target: `(path, resolved, total)` from `ResolveState`.
+    /// Unresolved markers are detected from the diff cache; this only adds
+    /// the resolved check once every conflict has a chosen side.
+    pub conflict_info: Option<(PathBuf, usize, usize)>,
     view_model: TreeViewModel,
     view_model_dirty: bool,
     cached_tree_version: u64,
     cached_stats_version: u64,
+    cached_diffs_version: u64,
+    cached_conflict_info: Option<(PathBuf, usize, usize)>,
 }
 
 impl TreeViewData {
@@ -117,13 +152,19 @@ impl TreeViewData {
     /// Recomputes rows when the fold state, tree, or async stats changed.
     fn ensure_fresh(&mut self, tree: &FileTree, cache: &DiffCache) {
         let stats_version = cache.stats.version();
+        let diffs_version = cache.diffs.version();
         if self.view_model_dirty
             || self.cached_tree_version != tree.version()
             || self.cached_stats_version != stats_version
+            || self.cached_diffs_version != diffs_version
+            || self.cached_conflict_info != self.conflict_info
         {
-            self.view_model.recompute(tree, cache, &self.ui_state);
+            self.view_model
+                .recompute(tree, cache, &self.ui_state, self.conflict_info.as_ref());
             self.cached_tree_version = tree.version();
             self.cached_stats_version = stats_version;
+            self.cached_diffs_version = diffs_version;
+            self.cached_conflict_info = self.conflict_info.clone();
             self.view_model_dirty = false;
         }
     }
@@ -325,6 +366,7 @@ fn flatten_recursive(
     parent_continuations: &[bool],
     ui_state: &TreeUiState,
     cache: &DiffCache,
+    conflict_info: Option<&(PathBuf, usize, usize)>,
     rows: &mut Vec<TreeRow>,
 ) {
     match node {
@@ -340,6 +382,7 @@ fn flatten_recursive(
                 is_last,
                 parent_continuations: parent_continuations.to_vec(),
                 staging_state: file.state,
+                conflict: conflict_badge(&file.path, cache, conflict_info),
                 stats,
                 left_path: file.left_path.clone(),
                 right_path: file.right_path.clone(),
@@ -363,6 +406,9 @@ fn flatten_recursive(
             let folded = ui_state.is_folded(&current_dir.path);
             let staging_state = node.compute_staging_state();
 
+            // Directories aggregate their children's badges: unresolved wins
+            // over resolved so a buried conflict stays visible when folded.
+            let dir_idx = rows.len();
             rows.push(TreeRow {
                 path: current_dir.path.clone(),
                 name: combined_name,
@@ -372,6 +418,7 @@ fn flatten_recursive(
                 is_last,
                 parent_continuations: parent_continuations.to_vec(),
                 staging_state,
+                conflict: ConflictBadge::None,
                 stats: None,
                 left_path: None,
                 right_path: None,
@@ -381,6 +428,7 @@ fn flatten_recursive(
                 let mut child_continuations = parent_continuations.to_vec();
                 child_continuations.push(!is_last);
                 let child_count = current_dir.children.len();
+                let first_child = rows.len();
                 for (i, child) in current_dir.children.iter().enumerate() {
                     let child_is_last = i == child_count - 1;
                     flatten_recursive(
@@ -390,11 +438,52 @@ fn flatten_recursive(
                         &child_continuations,
                         ui_state,
                         cache,
+                        conflict_info,
                         rows,
                     );
                 }
+                // Only the children just pushed belong to this directory.
+                rows[dir_idx].conflict =
+                    rows[first_child..]
+                        .iter()
+                        .fold(ConflictBadge::None, |acc, r| match r.conflict {
+                            ConflictBadge::Unresolved => ConflictBadge::Unresolved,
+                            ConflictBadge::Resolved if acc == ConflictBadge::None => {
+                                ConflictBadge::Resolved
+                            }
+                            _ => acc,
+                        });
             }
         }
+    }
+}
+
+/// Conflict badge for a tree file: markers in the cached diff mean
+/// unresolved; once every conflict has a chosen side the merge target shows
+/// resolved instead.
+fn conflict_badge(
+    path: &PathBuf,
+    cache: &DiffCache,
+    conflict_info: Option<&(PathBuf, usize, usize)>,
+) -> ConflictBadge {
+    let has_markers = cache
+        .diffs
+        .get(path)
+        .as_deref()
+        .and_then(|d| match d {
+            crate::diff::DiffResult::Text(diff) => Some(diff),
+            _ => None,
+        })
+        .map(|diff| crate::diff::ConflictedFile::is_conflicted(&diff.new_file_content))
+        .unwrap_or(false);
+    if has_markers {
+        return ConflictBadge::Unresolved;
+    }
+    match conflict_info {
+        Some((target, resolved, total)) if path == target && *total > 0 && *resolved == *total => {
+            ConflictBadge::Resolved
+        }
+        _ => ConflictBadge::None,
     }
 }
 
@@ -450,6 +539,22 @@ fn render_tree_row(
     for token in tokens {
         match token.as_str() {
             "state" => {
+                // Merge conflicts replace the staging symbol: staging has no
+                // effect there, so the row shows resolve state in orange.
+                // Nerdfonts:  (unresolved) /  (resolved).
+                if row.conflict != ConflictBadge::None {
+                    let sym = match row.conflict {
+                        ConflictBadge::Unresolved => "\u{f071} ",
+                        ConflictBadge::Resolved => "\u{f00c} ",
+                        ConflictBadge::None => unreachable!(),
+                    };
+                    spans.push(Span::styled(
+                        sym,
+                        Style::default().fg(theme.conflict_fg.into()),
+                    ));
+                    spans.push(Span::raw(" "));
+                    continue;
+                }
                 let (sym, color): (&str, Color) = match row.staging_state {
                     StagingState::Staged => ("\u{25cf}", theme.staged.into()),
                     StagingState::Unstaged => ("\u{25cb}", theme.unstaged.into()),
@@ -634,6 +739,51 @@ mod tests {
             rows[0].staging_state,
             StagingState::Staged,
             "staging toggle must invalidate the cached rows"
+        );
+    }
+
+    /// Files whose cached diff still carries conflict markers get the orange
+    /// unresolved badge instead of a staging symbol.
+    #[test]
+    fn conflict_markers_show_unresolved_badge() {
+        use crate::diff::{DiffResult, FileDiff, LineSelections};
+
+        let mut view = TreeViewData::default();
+        let cache = DiffCache::default();
+        let tree = tree_with_file();
+        assert_eq!(view.flat_rows(&tree, &cache)[0].conflict, ConflictBadge::None);
+
+        cache.diffs.set(
+            PathBuf::from("a.txt"),
+            Arc::new(DiffResult::Text(FileDiff {
+                old_file_content: "a".into(),
+                new_file_content: "a\n<<<<<<< ours\none\n=======\ntwo\n>>>>>>> theirs\nb".into(),
+                hunks: Vec::new(),
+                line_selections: LineSelections::default(),
+            })),
+            cache.diffs.generation(),
+        );
+
+        assert_eq!(
+            view.flat_rows(&tree, &cache)[0].conflict,
+            ConflictBadge::Unresolved,
+            "markers in the cached diff must raise the conflict badge"
+        );
+    }
+
+    /// Once every conflict has a chosen side, the merge target shows the
+    /// resolved badge even with no markers left in the cached diff.
+    #[test]
+    fn resolved_choices_show_resolved_badge() {
+        let mut view = TreeViewData::default();
+        view.conflict_info = Some((PathBuf::from("a.txt"), 1, 1));
+        let cache = DiffCache::default();
+        let tree = tree_with_file();
+
+        assert_eq!(
+            view.flat_rows(&tree, &cache)[0].conflict,
+            ConflictBadge::Resolved,
+            "fully-resolved choices must show the resolved badge"
         );
     }
 }

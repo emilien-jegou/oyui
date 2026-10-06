@@ -29,6 +29,10 @@ impl GlobalActionsHandler for AppActionsHandler {
         // Merge sessions resolve through the conflict overlay (or the
         // synthesized result); the two-way staging write would clobber the
         // target, so it must not run here.
+        //
+        // The output is driven by choices alone: conflict hunks are not
+        // stageable, so staging selections never affect the written
+        // resolution. To take a resolution back, unfold it to the markers.
         if self.operation == crate::app::Operation::Merge {
             let (unresolved, text) = {
                 let ui = self.ui.lock();
@@ -232,6 +236,17 @@ impl AppActionsHandler {
     pub(crate) fn reject_read_only(&self) -> bool {
         if self.is_read_only() {
             self.set_message(MessageLevel::Info, "read-only session".into());
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Rejects a staging action in a merge session: the output is driven by
+    /// conflict choices alone, so staging selections never take effect.
+    pub(crate) fn reject_merge(&self) -> bool {
+        if self.operation == crate::app::Operation::Merge {
+            self.set_message(MessageLevel::Info, "merge mode: staging has no effect".into());
             true
         } else {
             false

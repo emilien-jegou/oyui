@@ -1,7 +1,7 @@
 pub mod gutter;
 pub mod text;
 
-use super::style::get_line_style;
+use super::style::{conflict_orange, get_line_style};
 use crate::{
     config::UiTheme,
     diff::{HunkMarker, InlineChange},
@@ -44,6 +44,9 @@ pub struct LineRenderer<'a> {
     /// Conflict-marker line: rendered with a prominent, overriding style.
     #[builder(default)]
     pub is_conflict: bool,
+    /// Hovered side's marker: takes the fold-frame highlight.
+    #[builder(default)]
+    pub is_preview: bool,
     #[builder(default)]
     pub mode: HunkMarker,
     #[builder(default = &[])]
@@ -75,6 +78,7 @@ impl<'a> LineRenderer<'a> {
             self.is_conflict,
             self.use_gradient,
             self.theme,
+            self.is_preview,
         );
 
         if self.is_conflict {
@@ -91,6 +95,7 @@ impl<'a> LineRenderer<'a> {
             is_selected: self.is_selected,
             is_staged: self.is_staged,
             is_conflict: self.is_conflict,
+            is_preview: self.is_preview,
             mode: self.mode,
             use_gradient: self.use_gradient,
             area_width: self.area_width,
@@ -109,13 +114,14 @@ impl<'a> LineRenderer<'a> {
             is_selected: self.is_selected,
             is_staged: self.is_staged,
             is_conflict: self.is_conflict,
+            is_preview: self.is_preview,
             conflict_fg: if self.is_conflict {
                 conflict_marker_fg(self.content, self.theme)
             } else {
                 None
             },
             inline_highlights: self.inline_highlights,
-            syntax_opt: if self.is_conflict {
+            syntax_opt: if crate::diff::conflict::is_marker_line(self.content) {
                 None
             } else {
                 self.syntax_opt
@@ -136,8 +142,8 @@ impl<'a> LineRenderer<'a> {
     }
 }
 
-/// Accent foreground for conflict marker lines: one consistent color for the
-/// whole conflict (no per-marker rainbow).
+/// Accent foreground for conflict marker lines: orange is the color of
+/// conflict (no per-marker rainbow, no green/red/blue).
 fn conflict_marker_fg(content: &str, theme: &UiTheme) -> Option<crate::config::theme::Color> {
-    crate::diff::conflict::is_marker_line(content).then_some(theme.partial)
+    crate::diff::conflict::is_marker_line(content).then(|| conflict_orange(theme))
 }

@@ -13,13 +13,17 @@ macro_rules! impl_opt_color_getset {
                 fn set(&self, val: String) {
                     if val.is_empty() || val == "none" {
                         self.theme.write().ui.$field = None;
+                        self.notify_ui_changed();
                     } else {
                         let parsed = {
                             let theme = self.theme.read();
                             utils::parse_color_val(&val, &theme.ui, &theme.tm_theme, &self.color_mode)
                         };
                         match parsed {
-                            Some(c) => self.theme.write().ui.$field = Some(c),
+                            Some(c) => {
+                                self.theme.write().ui.$field = Some(c);
+                                self.notify_ui_changed();
+                            }
                             None => self.fail(format!(
                                 "invalid color '{val}' for {}",
                                 stringify!($field)
@@ -47,7 +51,10 @@ macro_rules! impl_color_getset {
                         utils::parse_color_val(&val, &theme.ui, &theme.tm_theme, &self.color_mode)
                     };
                     match parsed {
-                        Some(c) => self.theme.write().ui.$field = c,
+                        Some(c) => {
+                            self.theme.write().ui.$field = c;
+                            self.notify_ui_changed();
+                        }
                         None => self.fail(format!(
                             "invalid color '{val}' for {}",
                             stringify!($field)
@@ -69,6 +76,7 @@ macro_rules! impl_ty_getset {
 
                 fn set(&self, val: $ty) {
                     self.theme.write().ui.$field = val;
+                    self.notify_ui_changed();
                 }
             }
         }

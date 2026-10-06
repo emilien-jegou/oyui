@@ -34,6 +34,7 @@ pub struct TextRenderer<'a> {
     pub is_selected: bool,
     pub is_staged: bool,
     pub is_conflict: bool,
+    pub is_preview: bool,
     pub conflict_fg: Option<crate::config::theme::Color>,
     pub inline_highlights: &'a [InlineChange],
     pub syntax_opt: Option<&'a Vec<Vec<(syntect::highlighting::Style, String)>>>,
@@ -64,6 +65,7 @@ impl<'a> TextRenderer<'a> {
             self.use_gradient,
             self.area_width,
             self.theme,
+            self.is_preview,
         );
 
         let char_by_char = bg_calc.char_by_char();

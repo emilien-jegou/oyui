@@ -5,7 +5,13 @@ pub mod separator;
 pub mod style;
 
 use super::FileViewData;
-use crate::{config::UiTheme, diff::DiffResult, diff_cache::DiffCache, tree::FileTree};
+use crate::{
+    config::UiTheme,
+    diff::{DiffResult, Side},
+    diff_cache::DiffCache,
+    tree::FileTree,
+    view::file::view_model::ConflictRegions,
+};
 use rows::{scroll_offset, RowBuilder};
 
 use ratatui::{
@@ -216,8 +222,18 @@ impl FileViewData {
         let path = path.clone();
 
         // Get scroll state for hover styling
+        let selected_row_idx = self
+            .scroll_states
+            .get(&path)
+            .and_then(|st| st.selected())
+            .unwrap_or(0);
+        let preview = selection_preview(
+            &self.conflict_regions,
+            self.line_mapping(&path),
+            selected_row_idx,
+        );
         let scroll_state = self.scroll_states.entry(path.clone()).or_default();
-        let selected_row_idx = scroll_state.selected().unwrap_or(0);
+        let selected_row_idx = scroll_state.selected().unwrap_or(selected_row_idx);
 
         let hscroll = self.hscroll_states.get(&path).copied().unwrap_or(0);
         let area_width = list_area.width;
@@ -243,6 +259,7 @@ impl FileViewData {
             default_staged,
             selected_row_idx,
             regions: &self.conflict_regions,
+            preview,
         };
 
         // Pass 1 counts every visual row without rendering; pass 2 renders
@@ -275,4 +292,25 @@ impl FileViewData {
         }
         frame.render_stateful_widget(table, list_area, &mut rel_state);
     }
+}
+
+/// Side space would select for the cursor's unfolded conflict, if any.
+///
+/// Drives the selection-preview tint; folded conflicts already show their
+/// choice framed, so they need no preview.
+fn selection_preview(
+    regions: &ConflictRegions,
+    line_mapping: Option<&Vec<usize>>,
+    selected_row_idx: usize,
+) -> Option<(usize, Side)> {
+    let line = line_mapping?.get(selected_row_idx).copied()?;
+    regions.ranges.iter().enumerate().find_map(|(i, range)| {
+        if regions.folded.get(i).copied().unwrap_or(false) {
+            return None;
+        }
+        if !range.contains(&line) {
+            return None;
+        }
+        regions.side_at_line(i, line).map(|side| (i, side))
+    })
 }

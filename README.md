@@ -129,8 +129,9 @@ merge-args = ["merge", "$base", "$left", "$right", "--allow-unresolved"]
 blocks highlighted among the normal hunks. Conflicts are read from markers
 already in the target (git's `$MERGED`); when the target is clean, oyui
 synthesizes a three-way merge from `$base`/`$left`/`$right` instead. With the
-cursor on a conflict, `o` takes ours, `T` theirs, `B` both; `enter` writes the
-resolved file. Following git, confirming with conflicts left is refused unless
+cursor on a conflict side, `space` folds it with that side; `space` on the
+frame expands it back, `enter` writes the resolved file. Conflict hunks are
+not stageable. Following git, confirming with conflicts left is refused unless
 `--allow-unresolved` is passed (as the jj config above does).
 
 ### Usage with Git

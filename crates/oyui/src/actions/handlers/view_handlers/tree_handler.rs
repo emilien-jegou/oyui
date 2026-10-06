@@ -193,7 +193,7 @@ fn visit_dirs(nodes: &[crate::tree::TreeNode], f: &mut impl FnMut(&std::path::Pa
 
 impl ViewTreeStagingActionsHandler for AppActionsHandler {
     fn toggle_selected(&self) {
-        if self.reject_read_only() {
+        if self.reject_read_only() || self.reject_merge() {
             return;
         }
         self.push_undo_snapshot();
@@ -218,7 +218,7 @@ impl ViewTreeStagingActionsHandler for AppActionsHandler {
     }
 
     fn invert(&self) {
-        if self.reject_read_only() {
+        if self.reject_read_only() || self.reject_merge() {
             return;
         }
         self.push_undo_snapshot();
@@ -245,7 +245,7 @@ impl ViewTreeStagingActionsHandler for AppActionsHandler {
     }
 
     fn set(&self, path: String, staged: bool) {
-        if self.reject_read_only() {
+        if self.reject_read_only() || self.reject_merge() {
             return;
         }
         self.push_undo_snapshot();
@@ -260,7 +260,7 @@ impl ViewTreeStagingActionsHandler for AppActionsHandler {
     }
 
     fn set_matching(&self, pattern: String, staged: bool) {
-        if self.reject_read_only() {
+        if self.reject_read_only() || self.reject_merge() {
             return;
         }
         self.push_undo_snapshot();
@@ -282,7 +282,7 @@ impl ViewTreeStagingActionsHandler for AppActionsHandler {
     }
 
     fn stage_all(&self) {
-        if self.reject_read_only() {
+        if self.reject_read_only() || self.reject_merge() {
             return;
         }
         self.push_undo_snapshot();
@@ -294,7 +294,7 @@ impl ViewTreeStagingActionsHandler for AppActionsHandler {
     }
 
     fn unstage_all(&self) {
-        if self.reject_read_only() {
+        if self.reject_read_only() || self.reject_merge() {
             return;
         }
         self.push_undo_snapshot();

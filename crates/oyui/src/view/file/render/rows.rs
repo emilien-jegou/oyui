@@ -47,9 +47,30 @@ pub(crate) struct RowBuilder<'a> {
     pub default_staged: bool,
     pub selected_row_idx: usize,
     pub regions: &'a ConflictRegions,
+    /// Unfolded conflict under the cursor: `(index, side space would select)`.
+    /// Only that side's marker (`<<<<<<<` for ours, `>>>>>>>` for theirs)
+    /// takes the frame highlight; content lines stay plain.
+    pub preview: Option<(usize, crate::diff::Side)>,
 }
 
 impl<'a> RowBuilder<'a> {
+    /// True when `line` is the hovered side's marker: `<<<<<<<` for ours,
+    /// `>>>>>>>` for theirs. Only markers take the frame highlight.
+    fn is_preview(&self, line: usize, content: &str) -> bool {
+        let Some((ci, side)) = self.preview else {
+            return false;
+        };
+        let Some(range) = self.regions.ranges.get(ci) else {
+            return false;
+        };
+        if !range.contains(&line) {
+            return false;
+        }
+        let ours_marker = content.starts_with("<<<<<<<") && side == crate::diff::Side::Ours;
+        let theirs_marker = content.starts_with(">>>>>>>") && side == crate::diff::Side::Theirs;
+        ours_marker || theirs_marker
+    }
+
     /// Appends the rows inside `window` and returns the total visual row count.
     ///
     /// `window: None` renders nothing and only counts: the cheap first pass
@@ -72,10 +93,26 @@ impl<'a> RowBuilder<'a> {
             }};
         }
 
+        // Conflict whose header was emitted and whose footer is still pending.
+        let mut open_frame: Option<usize> = None;
+        // Emits the footer closing conflict `ci` as a full-width row.
+        macro_rules! push_footer {
+            ($ci:expr) => {{
+                let is_selected = visual_row_idx == self.selected_row_idx;
+                push_row!(conflict_frame_row(
+                    self.regions.footer($ci),
+                    is_selected,
+                    self.area_width,
+                    self.use_gradient,
+                    theme,
+                ));
+                visual_row_idx += 1;
+            }};
+        }
+
         for (i, hunk) in diff.hunks.iter().enumerate() {
             let hunk_new_start = hunk.after_lines.start;
             let context_start = hunk_new_start.saturating_sub(self.context_lines);
-
             if self.is_folded && current_new < context_start {
                 let hidden_count = context_start - current_new;
                 let is_selected = visual_row_idx == self.selected_row_idx;
@@ -93,6 +130,12 @@ impl<'a> RowBuilder<'a> {
 
             // Print unchanged lines up to the hunk
             while current_new < hunk_new_start && current_new < self.new_lines.len() {
+                // Folded conflicts hide their lines even when the diff leaves
+                // them as inter-hunk context (e.g. base lines matching base).
+                if self.regions.folded_span(current_new).is_some() {
+                    current_new += 1;
+                    continue;
+                }
                 let is_selected = visual_row_idx == self.selected_row_idx;
                 push_row!(LineRenderer::builder()
                     .content(self.new_lines[current_new])
@@ -121,7 +164,8 @@ impl<'a> RowBuilder<'a> {
                 let is_staged = diff.line_selections.get(selection_idx, self.default_staged);
                 selection_idx += 1;
 
-                // A folded conflict collapses its whole span into one summary.
+                // A folded conflict shows its header; hidden lines (markers,
+                // base, losing side) are skipped, kept lines fall through.
                 let folded = match diff_line {
                     crate::diff::DiffLine::Context { new_line_idx, .. }
                     | crate::diff::DiffLine::Addition { new_line_idx, .. } => {
@@ -130,16 +174,17 @@ impl<'a> RowBuilder<'a> {
                     crate::diff::DiffLine::Deletion { .. } => self.regions.folded_span(current_new),
                 };
                 if let Some((ci, is_first)) = folded {
-                    if is_first {
+                    if is_first && open_frame != Some(ci) {
                         let is_selected = visual_row_idx == self.selected_row_idx;
-                        push_row!(conflict_summary_row(
-                            self.regions.summary(ci),
-                            visual_row_idx,
+                        push_row!(conflict_frame_row(
+                            self.regions.header(ci),
                             is_selected,
                             self.area_width,
-                            theme,
                             self.use_gradient,
+                            theme,
                         ));
+                        visual_row_idx += 1;
+                        open_frame = Some(ci);
                     }
                     if let crate::diff::DiffLine::Context { new_line_idx, .. }
                     | crate::diff::DiffLine::Addition { new_line_idx, .. } = diff_line
@@ -147,6 +192,23 @@ impl<'a> RowBuilder<'a> {
                         current_new = *new_line_idx + 1;
                     }
                     continue;
+                }
+
+                // Past the framed range: close it with a footer row.
+                if let Some(ci) = open_frame {
+                    let past_end = match diff_line {
+                        crate::diff::DiffLine::Context { new_line_idx, .. }
+                        | crate::diff::DiffLine::Addition { new_line_idx, .. } => {
+                            *new_line_idx >= self.regions.ranges[ci].end
+                        }
+                        crate::diff::DiffLine::Deletion { .. } => {
+                            current_new >= self.regions.ranges[ci].end
+                        }
+                    };
+                    if past_end {
+                        push_footer!(ci);
+                        open_frame = None;
+                    }
                 }
 
                 let line_mode = if is_first_line_of_hunk {
@@ -163,8 +225,9 @@ impl<'a> RowBuilder<'a> {
                             .content(line)
                             .idx(*new_line_idx)
                             .is_selected(is_selected)
-                            .is_staged(is_staged)
+                            .is_staged(is_staged && !self.regions.covers(*new_line_idx))
                             .is_conflict(conflict_flags(&mut in_conflict, line))
+                            .is_preview(self.is_preview(*new_line_idx, line))
                             .mode(line_mode)
                             .syntax_opt(self.syntax_opt)
                             .area_width(self.area_width)
@@ -203,13 +266,22 @@ impl<'a> RowBuilder<'a> {
                         inline_highlights,
                     } => {
                         let line = self.new_lines.get(*new_line_idx).copied().unwrap_or("");
+                        // Marker lines are context stripped on write, never
+                        // hunk content: no +/- sign, no staged tint. Every
+                        // other conflict line keeps its sign but never shows
+                        // staged colors either: conflict hunks are not
+                        // stageable, so identical states always look identical.
+                        let is_marker =
+                            crate::diff::conflict::is_marker_line(line);
+                        let covered = self.regions.covers(*new_line_idx);
                         push_row!(LineRenderer::builder()
                             .content(line)
                             .idx(*new_line_idx)
-                            .is_add(true)
+                            .is_add(!is_marker)
                             .is_selected(is_selected)
-                            .is_staged(is_staged)
+                            .is_staged(is_staged && !is_marker && !covered)
                             .is_conflict(conflict_flags(&mut in_conflict, line))
+                            .is_preview(self.is_preview(*new_line_idx, line))
                             .mode(line_mode)
                             .inline_highlights(inline_highlights)
                             .syntax_opt(self.syntax_opt)
@@ -225,6 +297,14 @@ impl<'a> RowBuilder<'a> {
                 }
             }
 
+            // End of hunk: close the frame when its range was fully scanned.
+            if let Some(ci) = open_frame {
+                if current_new >= self.regions.ranges[ci].end {
+                    push_footer!(ci);
+                    open_frame = None;
+                }
+            }
+
             if self.is_folded {
                 let next_hunk_start = diff
                     .hunks
@@ -236,6 +316,11 @@ impl<'a> RowBuilder<'a> {
                     .min(next_hunk_start);
 
                 while current_new < context_end && current_new < self.new_lines.len() {
+                    // Same folded-conflict hiding as the pre-hunk gap above.
+                    if self.regions.folded_span(current_new).is_some() {
+                        current_new += 1;
+                        continue;
+                    }
                     let is_selected = visual_row_idx == self.selected_row_idx;
                     push_row!(LineRenderer::builder()
                         .content(self.new_lines[current_new])
@@ -257,6 +342,13 @@ impl<'a> RowBuilder<'a> {
 
         if !self.is_folded {
             while current_new < self.new_lines.len() {
+                // Folded frames hide their lines even in the tail: markers
+                // and kept lines always live inside a hunk, so anything
+                // folded here is hidden base content.
+                if self.regions.folded_span(current_new).is_some() {
+                    current_new += 1;
+                    continue;
+                }
                 let is_selected = visual_row_idx == self.selected_row_idx;
                 push_row!(LineRenderer::builder()
                     .content(self.new_lines[current_new])
@@ -290,29 +382,90 @@ impl<'a> RowBuilder<'a> {
             ));
         }
 
+        // Trailing flush: a frame ending at the very end of the file.
+        if let Some(ci) = open_frame.take() {
+            push_footer!(ci);
+        }
+
         total
     }
 }
 
-/// Renders a folded conflict as a single summary row.
-fn conflict_summary_row<'a>(
+/// Renders a folded conflict's header/footer as a full-width frame row, like
+/// fold separators: it takes no line in the file, just the whole width.
+/// Orange is the color of conflict: the frame takes a tuned-down orange
+/// background with the same gradient logic as staged hunks (gradient by
+/// default, solid otherwise).
+fn conflict_frame_row<'a>(
     content: &'a str,
-    idx: usize,
     is_selected: bool,
     area_width: u16,
-    theme: &'a UiTheme,
     use_gradient: bool,
+    theme: &'a UiTheme,
 ) -> Row<'a> {
-    LineRenderer::builder()
-        .content(content)
-        .idx(idx)
-        .is_selected(is_selected)
-        .is_conflict(true)
-        .area_width(area_width)
-        .use_gradient(use_gradient)
-        .theme(theme)
-        .build()
-        .render()
+    use super::style::{conflict_orange, conflict_underlay};
+    use crate::view::file::utils::colors::safe_lerp_color;
+    use ratatui::{
+        style::Style,
+        text::{Line, Span},
+        widgets::{Cell, Row},
+    };
+    let orange = conflict_orange(theme);
+    let accent = conflict_underlay(theme);
+    let grad_width = match theme.file_conflict_highlight {
+        crate::config::LineHighlightMode::Gradient(pct) if use_gradient => {
+            (area_width as f64 * pct).max(1.0) as f32
+        }
+        _ => 0.0,
+    };
+    // Same gradient coordinates as staged rows: sign runs 0–1, content from
+    // 2, so the wash reads contiguous across the whole row.
+    let wash = |x: usize| {
+        if grad_width <= 0.0 {
+            accent
+        } else {
+            safe_lerp_color(&accent, &theme.bg, (x as f32 / grad_width).clamp(0.0, 1.0))
+        }
+    };
+    let paint = |bg: crate::config::theme::Color, fg: crate::config::theme::Color| {
+        let mut style = Style::default().bg(bg.into()).fg(fg.into());
+        if is_selected {
+            style = style
+                .bg(safe_lerp_color(&theme.cursor_bg, &bg, 0.3).into())
+                .fg(theme.fg.into());
+        }
+        style
+    };
+    // Per-char spans keep the wash continuous; flat cells would seam.
+    let chars_row = |text: &str, start_x: usize| {
+        Line::from(
+            text.chars()
+                .enumerate()
+                .map(|(i, c)| Span::styled(c.to_string(), paint(wash(start_x + i), orange)))
+                .collect::<Vec<_>>(),
+        )
+    };
+
+    // Content fades like a staged hunk; padded so the wash spans the row.
+    // Delimiter style: short fixed `ours ————————` header, bare
+    // `—————————————` rule footer — the wash fills the rest of the row.
+    let code_width = (area_width as usize).saturating_sub(8);
+    let mut framed = if content.is_empty() {
+        "—————————————".to_string()
+    } else {
+        format!("{content} ————————")
+    };
+    while framed.chars().count() < code_width {
+        framed.push(' ');
+    }
+
+    Row::new(vec![
+        Cell::from(chars_row(" ", 0)).style(paint(wash(0), orange)),
+        // Flat number like staged rows; sign and content fade from x=0/2.
+        Cell::from("  ⋮  ").style(paint(accent, orange)),
+        Cell::from(chars_row("  ", 0)).style(paint(wash(0), orange)),
+        Cell::from(chars_row(&framed, 2)),
+    ])
 }
 
 /// Tracks whether `line` lies inside a conflict block (markers inclusive).
@@ -378,7 +531,11 @@ mod tests {
     static EMPTY_REGIONS: ConflictRegions = ConflictRegions {
         ranges: Vec::new(),
         folded: Vec::new(),
-        summaries: Vec::new(),
+        headers: Vec::new(),
+        footers: Vec::new(),
+        choices: Vec::new(),
+        kept: Vec::new(),
+        sides: Vec::new(),
     };
 
     fn builder<'a>(
@@ -401,6 +558,7 @@ mod tests {
             default_staged: true,
             selected_row_idx: 0,
             regions: &EMPTY_REGIONS,
+            preview: None,
         }
     }
 
