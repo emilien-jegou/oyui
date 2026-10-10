@@ -46,8 +46,20 @@ impl App {
         terminal.draw(|f| draw::draw(f, self))?;
 
         loop {
-            let mut branch = "sleep";
+            let mut branch = "idle";
             let mut key_read_at: Option<std::time::Instant> = None;
+
+            // A frame used to be repainted 20x/second so results produced by
+            // listeners that announced nothing could still be picked up. The
+            // worker now signals every state change (tree, stats, diff,
+            // syntax, config, theme) and internal plumbing never wakes the app,
+            // so the only time-based wakeup left is a transient message expiry.
+            // With no message on screen the loop sleeps until something real
+            // happens.
+            let message_expires = self.ui.lock().message.as_ref().map(|m| m.expires_at);
+            let message_deadline = message_expires
+                .unwrap_or_else(|| std::time::Instant::now() + Duration::from_secs(3600));
+            let message_timer = tokio::time::sleep_until(message_deadline.into());
 
             tokio::select! {
                 maybe_input = input_rx.recv() => {
@@ -94,9 +106,8 @@ impl App {
                     // Drain the rest of the burst so one redraw covers it.
                     self.tick();
                 }
-                // Listener tasks finish without notifying the app; repaint
-                // periodically to pick their results up.
-                _ = tokio::time::sleep(Duration::from_millis(50)) => {}
+                // Only fires while a transient message is on screen.
+                _ = message_timer => { branch = "message"; }
             }
 
             if aborted || self.ui.lock().should_quit {
@@ -105,13 +116,21 @@ impl App {
                 }
                 break;
             }
+
+            // Resolve script callbacks waiting on an off-thread answer before
+            // painting, so the frame sees the result they produce.
+            self.drain_pending_scripts();
+
             let draw_started = std::time::Instant::now();
             terminal.draw(|f| draw::draw(f, self))?;
             // key_ms: key read -> painted (handle + draw). -1 when no key.
+            // pending stays near zero: coalescing is what keeps a burst of
+            // per-file results from queueing a frame each.
             tracing::debug!(
                 branch,
                 key_ms = key_read_at.map_or(-1.0, |t| t.elapsed().as_secs_f64() * 1000.0),
                 draw_ms = draw_started.elapsed().as_secs_f64() * 1000.0,
+                pending = worker.pending(),
                 "event loop iteration"
             );
         }

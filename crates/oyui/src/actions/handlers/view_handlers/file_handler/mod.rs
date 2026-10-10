@@ -163,23 +163,13 @@ fn handle_hscroll(
     delta: isize,
     cache: &DiffCache,
 ) {
-    let mut max_line_len = 0;
-
-    if let Some(DiffResult::Text(diff)) = cache.diffs.get(path).as_deref() {
-        let old_max = diff
-            .old_file_content
-            .lines()
-            .map(|l| l.chars().count())
-            .max()
-            .unwrap_or(0);
-        let new_max = diff
-            .new_file_content
-            .lines()
-            .map(|l| l.chars().count())
-            .max()
-            .unwrap_or(0);
-        max_line_len = old_max.max(new_max);
-    }
+    // The diff listener already measured the widest line while it had both
+    // sides in memory; scrolling must not rescan the file on every keypress.
+    let max_line_len = cache
+        .line_widths
+        .get(path)
+        .map(|w| w.max())
+        .unwrap_or_default();
 
     let code_col_width = view.last_width.saturating_sub(6);
     let max_hscroll = max_line_len.saturating_sub(code_col_width) + 10;

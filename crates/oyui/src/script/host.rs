@@ -6,7 +6,7 @@
 
 use super::compile;
 use super::natives::Registration;
-use super::{natives, CallbackId, ScriptError, ScriptHost, ScriptLoad};
+use super::{natives, CallbackId, PendingScriptResult, ScriptError, ScriptHost, ScriptLoad};
 use crate::actions::keybinds::{default_keybinds, KeybindRegistry};
 use crate::actions::BoxedHandler;
 use parking_lot::Mutex;
@@ -14,7 +14,6 @@ use rune::runtime::SyncFunction;
 use rune::{Context, ContextError};
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use tracing::{debug, info, info_span};
 
@@ -22,15 +21,13 @@ use tracing::{debug, info, info_span};
 pub struct RuneHost {
     pub(super) callbacks: Arc<Mutex<HashMap<CallbackId, SyncFunction>>>,
     pub(super) registration: Arc<Mutex<Registration>>,
-    pub(super) next_id: Arc<AtomicU64>,
+    pub(super) next_id: Arc<std::sync::atomic::AtomicU64>,
     /// Named callbacks registered with `command::register`.
     pub(super) commands: Arc<Mutex<HashMap<String, SyncFunction>>>,
     /// Zero-arg callbacks registered with `on`, keyed by event name.
     pub(super) events: Arc<Mutex<HashMap<String, Vec<Arc<SyncFunction>>>>>,
-    /// One-shot callbacks awaiting an off-thread task result.
-    pub(super) tasks: Arc<Mutex<HashMap<u64, SyncFunction>>>,
-    /// Allocator for task callback ids.
-    pub(super) next_task: Arc<AtomicU64>,
+    /// Callbacks waiting on an off-thread result, each owning its reply.
+    pub(super) pending: Arc<Mutex<Vec<Box<dyn PendingScriptResult>>>>,
 }
 
 impl Default for RuneHost {
@@ -45,11 +42,10 @@ impl RuneHost {
         Self {
             callbacks: Arc::new(Mutex::new(HashMap::new())),
             registration: Arc::new(Mutex::new(Registration::fresh())),
-            next_id: Arc::new(AtomicU64::new(0)),
+            next_id: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             commands: Arc::new(Mutex::new(HashMap::new())),
             events: Arc::new(Mutex::new(HashMap::new())),
-            tasks: Arc::new(Mutex::new(HashMap::new())),
-            next_task: Arc::new(AtomicU64::new(0)),
+            pending: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -81,7 +77,10 @@ impl ScriptHost for RuneHost {
         self.callbacks.lock().clear();
         self.commands.lock().clear();
         self.events.lock().clear();
-        self.tasks.lock().clear();
+        // Dropping these abandons the requests they hold: their callbacks
+        // belong to the script being replaced, and each drop releases the reply
+        // slot the registry was keeping for it.
+        self.pending.lock().clear();
         *self.registration.lock() = Registration::fresh();
 
         let context = match natives::build_context(self, handler, worker) {
@@ -142,14 +141,26 @@ impl ScriptHost for RuneHost {
         Ok(())
     }
 
-    fn call_task(&self, task_id: u64, result: String) -> Result<(), ScriptError> {
-        let cb =
-            self.tasks.lock().remove(&task_id).ok_or_else(|| {
-                ScriptError::new(format!("task {task_id} is no longer registered"))
-            })?;
-        cb.call::<()>((result,))
-            .into_result()
-            .map_err(|e| ScriptError::new(format!("task {task_id} failed: {e}")))
+    fn park(&self, task: Box<dyn PendingScriptResult>) {
+        self.pending.lock().push(task);
+    }
+
+    fn drain_pending(&self) -> Vec<ScriptError> {
+        let mut pending = self.pending.lock();
+        let mut failed = Vec::new();
+
+        // `retain_mut` keeps whatever is still running; everything delivered or
+        // failed is consumed here.
+        pending.retain_mut(|task| match task.try_deliver() {
+            Some(Err(e)) => {
+                failed.push(e);
+                false
+            }
+            Some(Ok(())) => false,
+            None => true,
+        });
+
+        failed
     }
 }
 

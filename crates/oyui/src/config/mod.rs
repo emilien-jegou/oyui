@@ -110,12 +110,11 @@ impl Config {
         self.host.call_event(event)
     }
 
-    /// Delivers an off-thread task result to its one-shot callback.
-    pub fn call_task(
-        &self,
-        task_id: u64,
-        result: String,
-    ) -> Result<(), crate::script::ScriptError> {
-        self.host.call_task(task_id, result)
+    /// Delivers every off-thread result that has arrived; returns what failed.
+    ///
+    /// Called from the event loop between frames: nothing here blocks, so a
+    /// slow request costs nothing while it runs.
+    pub fn drain_pending(&self) -> Vec<crate::script::ScriptError> {
+        self.host.drain_pending()
     }
 }

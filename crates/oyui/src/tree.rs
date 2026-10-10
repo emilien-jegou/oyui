@@ -120,18 +120,33 @@ impl FileTree {
     }
 
     /// Returns an iterator over all file nodes in the tree.
+    ///
+    /// Lazy on purpose: callers that only count or fold state must not pay an
+    /// allocation for every file node on each call, and the tree is walked
+    /// several times per frame.
     pub fn files(&self) -> impl Iterator<Item = &TreeNodeFile> {
-        fn collect_files<'a>(nodes: &'a [TreeNode], files: &mut Vec<&'a TreeNodeFile>) {
-            for node in nodes {
+        fn walk<'a>(nodes: &'a [TreeNode]) -> Box<dyn Iterator<Item = &'a TreeNodeFile> + 'a> {
+            let files = |node: &'a TreeNode| -> Box<dyn Iterator<Item = &'a TreeNodeFile> + 'a> {
                 match node {
-                    TreeNode::File(f) => files.push(f),
-                    TreeNode::Directory(d) => collect_files(&d.children, files),
+                    TreeNode::File(f) => Box::new(std::iter::once(f)),
+                    TreeNode::Directory(d) => walk(&d.children),
                 }
-            }
+            };
+            Box::new(nodes.iter().flat_map(files))
         }
-        let mut files = Vec::new();
-        collect_files(&self.nodes, &mut files);
-        files.into_iter()
+        walk(&self.nodes)
+    }
+
+    /// File state and both side paths in a single traversal.
+    ///
+    /// The file view needs all three for the same path; walking the tree once
+    /// per field costs three full traversals per frame.
+    pub fn file_entry(
+        &self,
+        target_path: &Path,
+    ) -> Option<(StagingState, Option<&Path>, Option<&Path>)> {
+        self.file(target_path)
+            .map(|f| (f.state, f.left_path.as_deref(), f.right_path.as_deref()))
     }
 
     /// Returns an iterator over all file nodes with mutable access.

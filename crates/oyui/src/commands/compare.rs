@@ -142,6 +142,7 @@ pub(crate) async fn run_session(
         .cache(cache.clone())
         .config_error(config_error.clone())
         .theme(theme.clone())
+        .cpu(crate::worker::cpu::bounded_pool("oyui-worker")?)
         .build();
 
     let worker = Arc::new(EventRegistry::spawn(worker_context));

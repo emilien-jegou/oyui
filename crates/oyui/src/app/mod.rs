@@ -78,6 +78,15 @@ impl App {
     /// Applies one worker event to the app state.
     fn handle_worker_event(&mut self, event: crate::worker::Event) {
         match event {
+            crate::worker::Event::ListenerFailed(failed) => {
+                // Listeners are detached, so this is the only way a failed
+                // background computation reaches the user at all.
+                tracing::error!("worker listener failed: {failed}");
+                self.set_message(
+                    crate::app::ui_state::MessageLevel::Error,
+                    failed.to_string(),
+                );
+            }
             crate::worker::Event::WatchConfigRes(res) => {
                 self.config.handle_reload_event(&res.path);
             }
@@ -86,17 +95,19 @@ impl App {
                     self.set_message(MessageLevel::Error, e.to_string());
                 }
             }
-            crate::worker::Event::AnalysisRes(res) => {
-                if let Some(err) = &res.error {
-                    self.set_message(MessageLevel::Error, err.clone());
-                }
-                // A result for a task dropped by a config reload is stale, not
-                // an error worth pinning on screen.
-                if let Err(e) = self.config.call_task(res.task_id, res.matches.join("\n")) {
-                    tracing::warn!("stale analysis result: {e}");
-                }
-            }
+            // Scoped answers arrive through the registry's reply slots, not the
+            // event stream, so there is nothing left to route here.
             _ => {}
+        }
+    }
+
+    /// Delivers every off-thread result that has arrived.
+    ///
+    /// Called once per event-loop iteration: a reply only exists for the caller
+    /// that asked, and polling it keeps the main thread free while it runs.
+    pub(crate) fn drain_pending_scripts(&mut self) {
+        for error in self.config.drain_pending() {
+            self.set_message(MessageLevel::Error, error.to_string());
         }
     }
 

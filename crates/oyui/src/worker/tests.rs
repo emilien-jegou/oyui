@@ -55,6 +55,7 @@ async fn startup_pipeline_delivers_tree_and_stats() {
         .cache(cache.clone())
         .config_error(Arc::new(RwLock::new(None)))
         .theme(Arc::new(RwLock::new(ThemeState::new(&color_mode))))
+        .cpu(crate::worker::cpu::bounded_pool("oyui-test").expect("test pool"))
         .build();
 
     let registry = EventRegistry::spawn(context);

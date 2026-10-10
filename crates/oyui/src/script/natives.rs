@@ -1,9 +1,11 @@
 //! Script natives: the `keybind` and `on_mode` functions exposed to scripts.
 
 use super::host::RuneHost;
-use super::CallbackId;
+use super::{CallbackId, PendingScriptResult, ScriptError};
 use crate::actions::keybinds::{default_keybinds, KeybindMode, KeybindRegistry, View};
 use crate::commons::input::Keybind;
+use crate::worker::tasks::analysis::AnalysisRes;
+use oyui_tasker::worker::Reply as ReplyHandle;
 use parking_lot::Mutex;
 use rune::runtime::{Function, SyncFunction};
 use rune::{Context, ContextError, Module};
@@ -231,8 +233,7 @@ pub(super) fn build_context(
 
     // Off-thread analysis native; always registered so the LSP can see it,
     // but a no-op when there is no worker.
-    let tasks = Arc::clone(&host.tasks);
-    let next_task = Arc::clone(&host.next_task);
+    let pending = Arc::clone(&host.pending);
     let mut m = Module::with_item(["analysis"])?;
     m.function(
         "files_containing_async",
@@ -245,9 +246,10 @@ pub(super) fn build_context(
                 error!("analysis callback captures a non-constant value; dropped");
                 return;
             };
-            let task_id = next_task.fetch_add(1, Ordering::Relaxed);
-            tasks.lock().insert(task_id, cb);
-            let _ = worker.send(crate::worker::tasks::analysis::AnalysisReq { task_id, pattern });
+            match worker.ask(crate::worker::tasks::analysis::AnalysisReq { pattern }) {
+                Ok(reply) => pending.lock().push(Box::new(PendingAnalysis { reply, cb })),
+                Err(e) => error!("analysis request failed: {e}"),
+            }
         },
     )
     .build()?;
@@ -255,4 +257,26 @@ pub(super) fn build_context(
 
     crate::actions::register_actions(&mut context, handler)?;
     Ok(context)
+}
+
+/// A script callback waiting on the analysis result it asked for.
+///
+/// It owns the reply, so the answer is delivered to exactly this callback and
+/// the request's state disappears with it — no id to match and no entry left
+/// behind for a result that arrives after a reload.
+struct PendingAnalysis {
+    reply: ReplyHandle<AnalysisRes>,
+    cb: SyncFunction,
+}
+
+impl PendingScriptResult for PendingAnalysis {
+    fn try_deliver(&mut self) -> Option<Result<(), ScriptError>> {
+        let answer = self.reply.try_recv()?;
+        Some(
+            self.cb
+                .call::<()>((answer.matches.join("\n"),))
+                .into_result()
+                .map_err(|e| ScriptError::new(format!("analysis callback failed: {e}"))),
+        )
+    }
 }

@@ -6,7 +6,7 @@ use ratatui::widgets::Row;
 use syntect::highlighting::Style;
 
 use crate::config::UiTheme;
-use crate::diff::FileDiff;
+use crate::diff::{FileDiff, LineAccess};
 use crate::view::file::view_model::ConflictRegions;
 
 use super::line::LineRenderer;
@@ -35,8 +35,8 @@ pub(crate) fn scroll_offset(
 /// Immutable inputs needed to lay out file view rows for one frame.
 pub(crate) struct RowBuilder<'a> {
     pub diff: &'a FileDiff,
-    pub old_lines: &'a [&'a str],
-    pub new_lines: &'a [&'a str],
+    pub old_lines: LineAccess<'a>,
+    pub new_lines: LineAccess<'a>,
     pub syntax_opt: Option<&'a Vec<Vec<(Style, String)>>>,
     pub theme: &'a UiTheme,
     pub hscroll: usize,
@@ -138,13 +138,13 @@ impl<'a> RowBuilder<'a> {
                 }
                 let is_selected = visual_row_idx == self.selected_row_idx;
                 push_row!(LineRenderer::builder()
-                    .content(self.new_lines[current_new])
+                    .content(self.new_lines.line(current_new))
                     .idx(current_new)
                     .is_selected(is_selected)
                     .is_staged(true)
                     .is_conflict(conflict_flags(
                         &mut in_conflict,
-                        self.new_lines[current_new]
+                        self.new_lines.line(current_new)
                     ))
                     .syntax_opt(self.syntax_opt)
                     .area_width(self.area_width)
@@ -220,7 +220,7 @@ impl<'a> RowBuilder<'a> {
 
                 match diff_line {
                     crate::diff::DiffLine::Context { new_line_idx, .. } => {
-                        let line = self.new_lines.get(*new_line_idx).copied().unwrap_or("");
+                        let line = self.new_lines.get(*new_line_idx).unwrap_or("");
                         push_row!(LineRenderer::builder()
                             .content(line)
                             .idx(*new_line_idx)
@@ -243,7 +243,7 @@ impl<'a> RowBuilder<'a> {
                         old_line_idx,
                         inline_highlights,
                     } => {
-                        let line = self.old_lines.get(*old_line_idx).copied().unwrap_or("");
+                        let line = self.old_lines.get(*old_line_idx).unwrap_or("");
                         push_row!(LineRenderer::builder()
                             .content(line)
                             .idx(*old_line_idx)
@@ -265,7 +265,7 @@ impl<'a> RowBuilder<'a> {
                         new_line_idx,
                         inline_highlights,
                     } => {
-                        let line = self.new_lines.get(*new_line_idx).copied().unwrap_or("");
+                        let line = self.new_lines.get(*new_line_idx).unwrap_or("");
                         // Marker lines are context stripped on write, never
                         // hunk content: no +/- sign, no staged tint. Every
                         // other conflict line keeps its sign but never shows
@@ -322,7 +322,7 @@ impl<'a> RowBuilder<'a> {
                     }
                     let is_selected = visual_row_idx == self.selected_row_idx;
                     push_row!(LineRenderer::builder()
-                        .content(self.new_lines[current_new])
+                        .content(self.new_lines.line(current_new))
                         .idx(current_new)
                         .is_selected(is_selected)
                         .is_staged(true)
@@ -350,13 +350,13 @@ impl<'a> RowBuilder<'a> {
                 }
                 let is_selected = visual_row_idx == self.selected_row_idx;
                 push_row!(LineRenderer::builder()
-                    .content(self.new_lines[current_new])
+                    .content(self.new_lines.line(current_new))
                     .idx(current_new)
                     .is_selected(is_selected)
                     .is_staged(true)
                     .is_conflict(conflict_flags(
                         &mut in_conflict,
-                        self.new_lines[current_new]
+                        self.new_lines.line(current_new)
                     ))
                     .syntax_opt(self.syntax_opt)
                     .area_width(self.area_width)
@@ -490,6 +490,7 @@ fn conflict_flags(in_conflict: &mut bool, line: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::diff::{line_ranges, LineRanges};
     use std::sync::Arc;
 
     use crate::diff::{DiffLine, Hunk, LineSelections};
@@ -539,14 +540,14 @@ mod tests {
 
     fn builder<'a>(
         diff: &'a FileDiff,
-        lines: &'a [&'a str],
         folded: bool,
         theme: &'a UiTheme,
+        ranges: &'a LineRanges,
     ) -> RowBuilder<'a> {
         RowBuilder {
             diff,
-            old_lines: lines,
-            new_lines: lines,
+            old_lines: LineAccess::new(&diff.old_file_content, ranges),
+            new_lines: LineAccess::new(&diff.new_file_content, ranges),
             syntax_opt: None,
             theme,
             hscroll: 0,
@@ -567,10 +568,10 @@ mod tests {
     fn window_rows_match_full_build() {
         let diff = one_hunk_diff();
         let theme = ansi_default_theme(&TerminalColorMode::NoColor);
-        let new_lines: Vec<&str> = diff.new_file_content.split('\n').collect();
+        let ranges = line_ranges(&diff.new_file_content);
 
         for folded in [false, true] {
-            let b = builder(&diff, &new_lines, folded, &theme);
+            let b = builder(&diff, folded, &theme, &ranges);
             let mut all = Vec::new();
             let total = b.build(Some(0..usize::MAX), &mut all);
             assert_eq!(total, all.len(), "full build returns the rows it rendered");
@@ -598,8 +599,8 @@ mod tests {
     fn count_pass_renders_nothing() {
         let diff = one_hunk_diff();
         let theme = ansi_default_theme(&TerminalColorMode::NoColor);
-        let new_lines: Vec<&str> = diff.new_file_content.split('\n').collect();
-        let b = builder(&diff, &new_lines, false, &theme);
+        let ranges = line_ranges(&diff.new_file_content);
+        let b = builder(&diff, false, &theme, &ranges);
         let mut rows = Vec::new();
         assert!(b.build(None, &mut rows) > 0);
         assert!(rows.is_empty());
