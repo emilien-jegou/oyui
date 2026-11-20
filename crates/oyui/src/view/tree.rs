@@ -772,6 +772,7 @@ mod tests {
                 new_file_content: "a\n<<<<<<< ours\none\n=======\ntwo\n>>>>>>> theirs\nb".into(),
                 hunks: Vec::new(),
                 line_selections: LineSelections::default(),
+                revision: 0,
             })),
             cache.diffs.generation(),
         );

@@ -41,6 +41,7 @@ pub(super) fn file_diff(lines: Vec<DiffLine>) -> FileDiff {
             lines,
         }],
         line_selections: LineSelections::default(),
+        revision: 0,
     }
 }
 

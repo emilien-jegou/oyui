@@ -375,6 +375,7 @@ mod tests {
                 marker: HunkMarker::None,
             }],
             line_selections: LineSelections::default(),
+            revision: 0,
         };
 
         diff.toggle_hunk(0, true, false);
@@ -401,6 +402,7 @@ mod tests {
             new_file_content: Arc::from("a\nb"),
             hunks: vec![hunk(0), hunk(1)],
             line_selections: LineSelections::default(),
+            revision: 0,
         }
     }
 

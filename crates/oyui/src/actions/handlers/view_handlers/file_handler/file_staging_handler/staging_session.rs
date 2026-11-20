@@ -150,6 +150,7 @@ mod tests {
             new_file_content: new_content.into(),
             hunks: vec![hunk(0), hunk(30)],
             line_selections: LineSelections::default(),
+            revision: 0,
         }
     }
 

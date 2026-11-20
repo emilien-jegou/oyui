@@ -6,6 +6,8 @@ use std::path::PathBuf;
 /// Splits a hunk at the given line index within the hunk.
 pub fn split_hunk_at(diff: &mut FileDiff, hunk_idx: usize, split_idx: usize, marker: HunkMarker) {
     diff.split_hunk(hunk_idx, split_idx, marker);
+    // The row layout is keyed on the diff revision; a split changed it.
+    diff.touch();
 }
 
 /// Joins hunk at `hunk_idx` with the previous hunk.
@@ -22,4 +24,6 @@ pub fn join_hunk_at(
         false
     };
     diff.join_hunk(hunk_idx, sync_staging_before_merge, default);
+    // The row layout is keyed on the diff revision; a join changed it.
+    diff.touch();
 }

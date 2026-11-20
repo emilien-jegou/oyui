@@ -124,6 +124,7 @@ mod tests {
                 marker: Default::default(),
             }],
             line_selections: Default::default(),
+            revision: FileDiff::next_revision(),
         }
     }
 

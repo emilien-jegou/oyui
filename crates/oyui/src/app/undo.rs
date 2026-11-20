@@ -109,6 +109,7 @@ mod tests {
                 marker: Default::default(),
             }],
             line_selections: LineSelections::default(),
+            revision: 0,
         };
         cache.diffs.set(
             PathBuf::from("a.txt"),

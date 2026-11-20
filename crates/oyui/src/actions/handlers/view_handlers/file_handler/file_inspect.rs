@@ -259,6 +259,7 @@ mod tests {
                 marker: Default::default(),
             }],
             line_selections: LineSelections::default(),
+            revision: 0,
         }
     }
 

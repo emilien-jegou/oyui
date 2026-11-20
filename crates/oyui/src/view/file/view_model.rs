@@ -14,7 +14,6 @@ pub struct ConflictSides {
 }
 
 use crate::diff::FileDiff;
-use std::collections::HashMap;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 
@@ -129,10 +128,15 @@ impl ConflictRegions {
 }
 
 /// Identity of every input that determines the file view's row layout.
-#[derive(PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 struct LayoutKey {
-    /// Pointer identity of the diff's content allocation.
-    content_ptr: usize,
+    /// The diff revision this layout was computed from.
+    ///
+    /// Revisions are assigned monotonically on construction and bumped by
+    /// structural mutations, so a replaced diff can never masquerade as
+    /// "unchanged" — the allocation-address check this replaces could, once
+    /// a freed `Arc` had its address reused (finding 3.7).
+    content_revision: u64,
     /// Length of the new-side content in bytes.
     content_len: usize,
     /// Hunk count; split/join change the layout.
@@ -156,7 +160,7 @@ impl LayoutKey {
         regions: &ConflictRegions,
     ) -> Self {
         Self {
-            content_ptr: (&*diff.new_file_content).as_ptr() as usize,
+            content_revision: diff.revision,
             content_len: diff.new_file_content.len(),
             hunks: diff.hunks.len(),
             is_folded,
@@ -167,16 +171,29 @@ impl LayoutKey {
     }
 }
 
+/// The layout data for one path.
+#[derive(Debug)]
+struct PathLayout {
+    path: PathBuf,
+    key: LayoutKey,
+    row_count: usize,
+    line_mapping: Vec<usize>,
+    hunk_starts: Vec<usize>,
+    row_to_hunk: Vec<Option<usize>>,
+}
+
 /// Pre-computed derived state for file rendering.
 ///
 /// Recomputed only when the diff or fold state changes, not every frame.
+///
+/// Holds exactly one path's layout — the file in view. Every frame
+/// recomputes the current path when its key goes stale, so switching files
+/// replaces the previous entry: nothing accumulates per opened path, and a
+/// rename, deletion, or tree rebuild cannot leave orphans behind (finding
+/// 6.14).
 #[derive(Default)]
 pub struct FileViewModel {
-    row_counts: HashMap<PathBuf, usize>,
-    line_mapping: HashMap<PathBuf, Vec<usize>>,
-    hunk_starts: HashMap<PathBuf, Vec<usize>>,
-    row_to_hunk: HashMap<PathBuf, Vec<Option<usize>>>,
-    keys: HashMap<PathBuf, LayoutKey>,
+    current: Option<PathLayout>,
 }
 
 impl FileViewModel {
@@ -194,7 +211,11 @@ impl FileViewModel {
         let mut row_to_hunk = Vec::new();
         let mut current_new = 0;
         let mut visual_row_idx = 0;
-        let new_lines_len = diff.new_file_content.lines().count();
+        // One line count model for the whole crate: the renderer's
+        // `LineRanges` (finding 6.15). It shares `str::lines()`' trailing
+        // newline semantics but is what the rendered rows are built from,
+        // so the model and the builder can no longer disagree at EOF.
+        let new_lines_len = crate::diff::line_ranges(&diff.new_file_content).len();
         // Conflict whose header was emitted and whose footer is still
         // pending (emitted once the scan passes its range end). Hoisted
         // across hunks in case a conflict ever spans a hunk boundary.
@@ -361,14 +382,19 @@ impl FileViewModel {
             row_to_hunk.push(diff.hunks.len().checked_sub(1));
         }
         let total_rows = line_map.len();
-        self.row_counts.insert(path.to_path_buf(), total_rows);
-        self.line_mapping.insert(path.to_path_buf(), line_map);
-        self.hunk_starts.insert(path.to_path_buf(), hunk_starts);
-        self.row_to_hunk.insert(path.to_path_buf(), row_to_hunk);
-        self.keys.insert(
-            path.to_path_buf(),
-            LayoutKey::new(diff, is_folded, context_lines, regions),
-        );
+        self.current = Some(PathLayout {
+            path: path.to_path_buf(),
+            key: LayoutKey::new(diff, is_folded, context_lines, regions),
+            row_count: total_rows,
+            line_mapping: line_map,
+            hunk_starts: hunk_starts,
+            row_to_hunk: row_to_hunk,
+        });
+    }
+
+    /// The entry for `path`, when it is the one the model currently holds.
+    fn layout(&self, path: &Path) -> Option<&PathLayout> {
+        self.current.as_ref().filter(|entry| entry.path == path)
     }
 
     /// True when `path`'s layout metadata matches `diff` and its render mode.
@@ -380,27 +406,29 @@ impl FileViewModel {
         context_lines: usize,
         regions: &ConflictRegions,
     ) -> bool {
-        self.keys.get(path) == Some(&LayoutKey::new(diff, is_folded, context_lines, regions))
+        self.layout(path).is_some_and(|entry| {
+            entry.key == LayoutKey::new(diff, is_folded, context_lines, regions)
+        })
     }
 
     /// Returns the row count for a path.
     pub fn row_count(&self, path: &Path) -> usize {
-        self.row_counts.get(path).copied().unwrap_or(0)
+        self.layout(path).map_or(0, |entry| entry.row_count)
     }
 
     /// Returns the line mapping for a path.
     pub fn line_mapping(&self, path: &Path) -> Option<&Vec<usize>> {
-        self.line_mapping.get(path)
+        self.layout(path).map(|entry| &entry.line_mapping)
     }
 
     /// Returns the hunk starts for a path.
     pub fn hunk_starts(&self, path: &Path) -> Option<&Vec<usize>> {
-        self.hunk_starts.get(path)
+        self.layout(path).map(|entry| &entry.hunk_starts)
     }
 
     /// Returns the row-to-hunk mapping for a path.
     pub fn row_to_hunk(&self, path: &Path) -> Option<&Vec<Option<usize>>> {
-        self.row_to_hunk.get(path)
+        self.layout(path).map(|entry| &entry.row_to_hunk)
     }
 }
 
@@ -466,6 +494,7 @@ mod tests {
             new_file_content: new_content.into(),
             hunks: vec![hunk(0), hunk(30)],
             line_selections: LineSelections::default(),
+            revision: 0,
         }
     }
 
@@ -490,6 +519,67 @@ mod tests {
             assert_eq!(
                 *start, expected,
                 "hunk {hunk_idx} start must be its first mapped row"
+            );
+        }
+    }
+
+    /// A replaced diff with identical geometry (same byte length, same hunk
+    /// count) must still invalidate: the revision, not the allocation
+    /// address, is the identity. The old pointer check read a replacement
+    /// whose reused freed allocation landed at the same address as
+    /// "unchanged" (finding 3.7).
+    #[test]
+    fn same_shape_with_replaced_content_invalidates() {
+        let path = Path::new("a.txt");
+        let diff = two_hunk_diff();
+        let mut model = FileViewModel::default();
+        model.recompute(path, &diff, true, 4, &ConflictRegions::default());
+
+        // Same byte length ("l5" -> "L5"), same hunk count, different text
+        // and revision.
+        let mut lookalike = two_hunk_diff();
+        lookalike.new_file_content = diff.new_file_content.replacen("l5", "L5", 1).into();
+        assert_eq!(
+            lookalike.new_file_content.len(),
+            diff.new_file_content.len()
+        );
+        lookalike.revision = crate::diff::FileDiff::next_revision();
+
+        assert!(
+            !model.is_fresh(path, &lookalike, true, 4, &ConflictRegions::default()),
+            "a same-shape replacement with a new revision must invalidate"
+        );
+    }
+
+    /// The row model derives its line count from the shared `LineRanges`
+    /// model the renderer builds its `LineAccess` on: a trailing newline
+    /// must not manufacture a phantom last row, and CRLF must not change
+    /// the count (finding 6.15).
+    #[test]
+    fn row_count_follows_the_render_line_ranges() {
+        let path = Path::new("a.txt");
+        for content in [
+            "a\nb\nc",
+            "a\nb\nc\n",
+            "a\r\nb\r\nc",
+            "a\r\nb\r\nc\r\n",
+            "a\n\nb",
+            "",
+        ] {
+            let diff = FileDiff {
+                old_file_content: content.into(),
+                new_file_content: content.into(),
+                hunks: Vec::new(),
+                line_selections: LineSelections::default(),
+                revision: 0,
+            };
+            let mut model = FileViewModel::default();
+            model.recompute(path, &diff, false, 4, &ConflictRegions::default());
+
+            assert_eq!(
+                model.row_count(path),
+                crate::diff::line_ranges(content).len(),
+                "rows must equal the rendered line count for {content:?}"
             );
         }
     }

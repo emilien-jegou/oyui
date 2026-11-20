@@ -80,6 +80,30 @@ pub struct FileDiff {
 
     /// Tracks which hunks/lines are staged/selected by the user
     pub line_selections: LineSelections,
+
+    /// Monotonic identity of this diff, stamped once on construction.
+    ///
+    /// Layout caches must not key on allocation addresses: staging and undo
+    /// replace cached diffs without the diff listener running, and a freed
+    /// `Arc` whose address was reused would then read as "unchanged"
+    /// (finding 3.7). Structural mutations (split/join) bump this via
+    /// [`Self::touch`], and so does every fresh diff a recomputation
+    /// produces.
+    pub revision: u64,
+}
+
+impl FileDiff {
+    /// The next unique diff revision.
+    pub fn next_revision() -> u64 {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    }
+
+    /// Invalidates layout caches keyed on the previous revision.
+    pub fn touch(&mut self) {
+        self.revision = Self::next_revision();
+    }
 }
 
 impl fmt::Debug for FileDiff {

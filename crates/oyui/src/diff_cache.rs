@@ -26,13 +26,14 @@ impl Deref for DiffCache {
 pub struct LineIndex {
     pub old: Arc<LineRanges>,
     pub new: Arc<LineRanges>,
-    /// Allocation identity of each side's content, as in `LayoutKey`.
+    /// The diff revision this index was built for.
     ///
     /// Staging and undo can replace a cached diff without the diff listener
     /// running, so the renderer must confirm the index still describes the
-    /// content it is about to index.
-    pub old_ptr: usize,
-    pub new_ptr: usize,
+    /// diff it is about to index. Revisions are monotonically assigned on
+    /// construction, so a replaced diff can never read as "unchanged" —
+    /// unlike the allocation-address check this replaces (finding 3.7).
+    pub revision: u64,
 }
 
 impl LineIndex {
@@ -41,15 +42,13 @@ impl LineIndex {
         Self {
             old: Arc::new(crate::diff::line_ranges(&diff.old_file_content)),
             new: Arc::new(crate::diff::line_ranges(&diff.new_file_content)),
-            old_ptr: Arc::as_ptr(&diff.old_file_content).cast::<u8>() as usize,
-            new_ptr: Arc::as_ptr(&diff.new_file_content).cast::<u8>() as usize,
+            revision: diff.revision,
         }
     }
 
-    /// True when this index still describes `diff`'s content.
+    /// True when this index still describes `diff`.
     pub fn matches(&self, diff: &crate::diff::FileDiff) -> bool {
-        self.old_ptr == Arc::as_ptr(&diff.old_file_content).cast::<u8>() as usize
-            && self.new_ptr == Arc::as_ptr(&diff.new_file_content).cast::<u8>() as usize
+        self.revision == diff.revision
     }
 }
 
@@ -92,6 +91,7 @@ mod tests {
             new_file_content: new.into(),
             hunks: Vec::new(),
             line_selections: Default::default(),
+            revision: FileDiff::next_revision(),
         }
     }
 

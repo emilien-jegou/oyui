@@ -87,6 +87,7 @@ impl Listener<FullDiffReq> for FullDiff {
                             new_file_content: Arc::from(right_text),
                             hunks,
                             line_selections: Default::default(),
+                            revision: FileDiff::next_revision(),
                         }),
                         Err(e) => DiffResult::Error(e.to_string()),
                     }

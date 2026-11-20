@@ -526,6 +526,7 @@ mod tests {
                 marker: Default::default(),
             }],
             line_selections: LineSelections::default(),
+            revision: 0,
         }
     }
 
@@ -643,6 +644,7 @@ mod tests {
             new_file_content: new_content.into(),
             hunks: vec![hunk(0), hunk(30)],
             line_selections: LineSelections::default(),
+            revision: 0,
         }
     }
 
@@ -690,6 +692,7 @@ mod tests {
                 marker: Default::default(),
             }],
             line_selections: LineSelections::default(),
+            revision: 0,
         };
 
         let regions = ConflictRegions {
@@ -797,6 +800,7 @@ mod tests {
                 },
             ],
             line_selections: LineSelections::default(),
+            revision: 0,
         };
 
         // Conflict spans new lines 1..8; line 4 (`base`) is inter-hunk
