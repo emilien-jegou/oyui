@@ -57,7 +57,16 @@ impl GlobalActionsHandler for AppActionsHandler {
             match text {
                 Some(text) => self.write_result(&target, text),
                 None => {
-                    self.ui.lock().should_quit = true;
+                    // A conflict-free merge has no resolver: the staged copy is
+                    // already the final result. Read it back and write it to the
+                    // real target only now, after confirmation.
+                    match std::fs::read_to_string(&self.right_path) {
+                        Ok(text) => self.write_result(&target, text),
+                        Err(e) => self.set_message(
+                            MessageLevel::Error,
+                            format!("failed to read merge result: {e}"),
+                        ),
+                    }
                 }
             }
             return;
@@ -258,9 +267,9 @@ impl AppActionsHandler {
         }
     }
 
-    /// Writes `text` to `target`, quitting the session on success.
+    /// Writes `text` to `target` atomically, quitting the session on success.
     pub(crate) fn write_result(&self, target: &std::path::Path, text: String) {
-        match std::fs::write(target, text) {
+        match crate::commons::fs::write_atomic(target, text.as_bytes()) {
             Ok(()) => {
                 self.confirmed
                     .store(true, std::sync::atomic::Ordering::SeqCst);

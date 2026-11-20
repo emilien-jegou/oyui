@@ -4,10 +4,12 @@
 mod tests;
 
 pub mod context;
+pub mod cpu;
 
 pub mod events {
     pub mod diff_update;
     pub mod file_opened;
+    pub mod syntax_res;
     pub mod theme_update;
 }
 
@@ -20,7 +22,9 @@ pub mod tasks {
     pub mod watch_config;
 }
 
+use crate::worker::tasks::analysis::AnalysisRes;
 use oyui_tasker::tasker_registry;
+use oyui_tasker::worker::Asked;
 
 tasker_registry! {
     events = [
@@ -29,14 +33,39 @@ tasker_registry! {
         Stats                => tasks::stats::StatsReq,
         StatsRes             => tasks::stats::StatsRes,
         FullDiff             => tasks::full_diff::FullDiffReq,
+        DiffUpdate           => events::diff_update::DiffUpdate,
         Syntax               => tasks::syntax::SyntaxReq,
+        SyntaxRes            => events::syntax_res::SyntaxRes,
         WatchConfig          => tasks::watch_config::WatchConfigReq,
         WatchConfigRes       => tasks::watch_config::WatchConfigRes,
-        DiffUpdate           => events::diff_update::DiffUpdate,
         FileOpened           => events::file_opened::FileOpened,
         ThemeUpdate          => events::theme_update::ThemeUpdate,
-        Analysis             => tasks::analysis::AnalysisReq,
+        Analysis             => Asked<tasks::analysis::AnalysisReq>,
         AnalysisRes          => tasks::analysis::AnalysisRes,
+    ],
+    // A scoped answer: routed to its caller, never broadcast.
+    replies = [
+        Analysis => AnalysisRes,
+    ],
+
+    // Worker-to-worker plumbing: dispatched, but it must never reach the app,
+    // because every app-visible event costs a full frame repaint and a frame is
+    // where all the O(file) layout work lives.
+    internal = [
+        CalculateFileTree,
+        Stats,
+        FullDiff,
+        Syntax,
+        WatchConfig,
+        Analysis,
+    ],
+    // Bursty per-file results: the app reacts by re-reading the cache, so a
+    // hundred of them collapse into one pending signal.
+    collapse = [
+        StatsRes,
+        DiffUpdate,
+        SyntaxRes,
+        ThemeUpdate,
     ],
     listeners = [
         CalculateFileTree    => [tasks::calculate_file_tree::CalculateFileTree],

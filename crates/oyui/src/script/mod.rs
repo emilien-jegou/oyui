@@ -68,6 +68,19 @@ pub trait ScriptHost {
     fn call_command(&self, name: &str, args: &str) -> Result<(), ScriptError>;
     /// Runs every callback registered for `event` with `on`.
     fn call_event(&self, event: &str) -> Result<(), ScriptError>;
-    /// Delivers an off-thread task result to its one-shot callback.
-    fn call_task(&self, task_id: u64, result: String) -> Result<(), ScriptError>;
+    /// Parks a callback that is waiting on an off-thread result.
+    fn park(&self, task: Box<dyn PendingScriptResult>);
+    /// Delivers every result that has arrived; returns what went wrong.
+    fn drain_pending(&self) -> Vec<ScriptError>;
+}
+
+/// A script callback waiting on an off-thread result.
+///
+/// It owns the reply the registry handed to whoever asked, so a request
+/// so a request no longer has to be matched by an id afterwards — and the wait
+/// dies with the config that issued it, instead of leaving a stale entry behind
+/// for a result that later arrives to find its callback gone.
+pub trait PendingScriptResult: Send {
+    /// Delivers the result if it has arrived, consuming the callback.
+    fn try_deliver(&mut self) -> Option<Result<(), ScriptError>>;
 }

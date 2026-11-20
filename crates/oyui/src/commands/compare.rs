@@ -11,7 +11,8 @@ use crate::theme::ThemeState;
 use crate::worker::context::AppWorkerContext;
 use crate::worker::EventRegistry;
 use parking_lot::{Mutex, RwLock};
-use std::path::PathBuf;
+use std::io;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
@@ -51,18 +52,47 @@ pub async fn run_diff(
         view: args.view.clone(),
     };
     let confirmed = Arc::new(AtomicBool::new(false));
-    run_session(options, config_path, session, confirmed).await
+    run_session(options, config_path, session, confirmed, None).await
+}
+
+/// Reads one side of a merge, reporting which side failed.
+fn read_side(label: &str, path: &Path) -> Result<String, CommandError> {
+    std::fs::read_to_string(path).map_err(|err| {
+        CommandError::Runtime(
+            io::Error::new(
+                err.kind(),
+                format!("failed to read merge {label} '{}': {err}", path.display()),
+            )
+            .into(),
+        )
+    })
+}
+
+/// Builds the merged content when the target has no markers yet.
+fn synthesize_merge(
+    base: &str,
+    left: &str,
+    right: &str,
+    allow_unresolved: bool,
+    algorithm: crate::cli::DiffAlgorithm,
+) -> String {
+    let merged = crate::diff::merge3::merge3(base, left, right, algorithm);
+    if allow_unresolved {
+        merged.to_jj_snapshot()
+    } else {
+        let choices = vec![None; merged.conflict_count()];
+        merged.resolve_optional(&choices)
+    }
 }
 
 /// Runs a three-way merge session.
 ///
-/// The working file (the output target) is populated with the conflict markers
-/// and then compared against the base, so conflicts render inline in the file
-/// view alongside normal hunks. `allow_unresolved` follows the integration:
-/// jj stores conflicts structurally and permits confirming them, git does not.
-///
-/// Quitting without confirming aborts (non-zero exit) so the VCS discards the
-/// output instead of applying it.
+/// The merged content is staged in a temporary file and compared against the
+/// base, so conflicts render inline in the file view alongside normal hunks.
+/// The real output target is only written when the user confirms; quitting
+/// aborts (non-zero exit) and leaves the target byte-for-byte untouched.
+/// `allow_unresolved` follows the integration: jj stores conflicts structurally
+/// and permits confirming them, git does not.
 pub async fn run_merge(
     options: &RunOptions,
     args: &MergeArgs,
@@ -70,59 +100,109 @@ pub async fn run_merge(
     allow_unresolved: bool,
 ) -> Result<(), CommandError> {
     let output = args.output.clone().unwrap_or_else(|| args.right.clone());
-    let read = |p: &PathBuf| std::fs::read_to_string(p).unwrap_or_default();
+    let base = read_side("base", &args.base)?;
+    let left = read_side("left", &args.left)?;
+    let right = read_side("right", &args.right)?;
 
     // Keep existing markers; otherwise synthesize a merge from the three sides.
     // For jj (marker-less `$base`/`$left`/`$right` snapshots) the synthesis uses
     // jj snapshot-style markers so the view — and any unresolved write-back —
     // stays in jj's representation instead of converting to git markers.
+    //
+    // A missing target is normal (the VCS expects us to create it); any other
+    // read failure is fatal rather than being mistaken for an empty file.
     let content = match std::fs::read_to_string(&output) {
         Ok(text) if crate::diff::ConflictedFile::is_conflicted(&text) => text,
-        _ => {
-            let merged = crate::diff::merge3::merge3(
-                &read(&args.base),
-                &read(&args.left),
-                &read(&args.right),
-                args.view.diff_algorithm,
-            );
-            if allow_unresolved {
-                merged.to_jj_snapshot()
-            } else {
-                let choices = vec![None; merged.conflict_count()];
-                merged.resolve_optional(&choices)
-            }
+        Ok(_) => synthesize_merge(
+            &base,
+            &left,
+            &right,
+            allow_unresolved,
+            args.view.diff_algorithm,
+        ),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => synthesize_merge(
+            &base,
+            &left,
+            &right,
+            allow_unresolved,
+            args.view.diff_algorithm,
+        ),
+        Err(err) => {
+            return Err(CommandError::Runtime(
+                io::Error::new(
+                    err.kind(),
+                    format!(
+                        "failed to read merge target '{}': {err}",
+                        output.display()
+                    ),
+                )
+                .into(),
+            ));
         }
     };
 
-    if let Err(e) = std::fs::write(&output, &content) {
-        return Err(eyre::eyre!("failed to write merge target {}: {e}", output.display()).into());
-    }
+    // Stage the merged view next to a copy of the target's file name so the
+    // file view keeps showing the real names, but never touch the target until
+    // confirmation. The directory is removed on abort and on success alike.
+    let staging = tempfile::Builder::new()
+        .prefix("oyui-merge-")
+        .tempdir()
+        .map_err(|err| CommandError::Runtime(Box::new(err)))?;
+    let staged_output = staging.path().join(
+        output
+            .file_name()
+            .unwrap_or_else(|| std::ffi::OsStr::new("merged")),
+    );
+    std::fs::write(&staged_output, &content).map_err(|err| {
+        CommandError::Runtime(
+            io::Error::new(
+                err.kind(),
+                format!(
+                    "failed to stage merge result for '{}': {err}",
+                    output.display()
+                ),
+            )
+            .into(),
+        )
+    })?;
 
     let session = Session {
         operation: Operation::Merge,
         base_path: Some(args.base.clone()),
         left_path: args.base.clone(),
-        right_path: output.clone(),
+        right_path: staged_output,
         write_target: Some(output),
         allow_unresolved,
         default_staged: false,
         view: args.view.clone(),
     };
     let confirmed = Arc::new(AtomicBool::new(false));
-    run_session(options, config_path, session, confirmed.clone()).await?;
+    run_session(
+        options,
+        config_path,
+        session,
+        confirmed.clone(),
+        Some(&content),
+    )
+    .await?;
     if !confirmed.load(std::sync::atomic::Ordering::SeqCst) {
-        eprintln!("merge cancelled; output left unconfirmed");
+        eprintln!("merge cancelled; output left untouched");
         return Err(CommandError::Aborted);
     }
     Ok(())
 }
 
 /// Runs a prepared session; `confirmed` is set when the user confirms.
+///
+/// `merge_text` is the synthesized merge content, when the session is a merge;
+/// it lets [`detect_conflicts`] parse the exact bytes being displayed instead
+/// of re-reading them from disk.
 pub(crate) async fn run_session(
     options: &RunOptions,
     config_path: PathBuf,
     session: Session,
     confirmed: Arc<AtomicBool>,
+    merge_text: Option<&str>,
 ) -> Result<(), CommandError> {
     let tree = Arc::new(RwLock::new(crate::tree::FileTree::default()));
     let cache = DiffCache::default();
@@ -133,7 +213,7 @@ pub(crate) async fn run_session(
     ui_state.writable = session.write_target.is_some();
     let ui = Arc::new(Mutex::new(ui_state));
 
-    detect_conflicts(&session, &ui);
+    detect_conflicts(&session, &ui, merge_text);
 
     let worker_context = AppWorkerContext::builder()
         .syntax_engine(SyntaxEngine::new())
@@ -142,6 +222,7 @@ pub(crate) async fn run_session(
         .cache(cache.clone())
         .config_error(config_error.clone())
         .theme(theme.clone())
+        .cpu(crate::worker::cpu::bounded_pool("oyui-worker")?)
         .build();
 
     let worker = Arc::new(EventRegistry::spawn(worker_context));
@@ -195,20 +276,18 @@ pub(crate) async fn run_session(
     Ok(())
 }
 
-/// Loads the merge target's conflicts for inline resolution.
+/// Loads the merge content's conflicts for inline resolution.
 ///
-/// The working file was already populated (markers kept or synthesized) by
-/// [`run_merge`], so parsing it yields the conflicts to display alongside hunks.
-fn detect_conflicts(session: &Session, ui: &Arc<Mutex<UiState>>) {
+/// The bytes passed to [`run_session`] are the exact synthesized merge, so
+/// parsing them avoids a second disk read of the staged copy.
+fn detect_conflicts(session: &Session, ui: &Arc<Mutex<UiState>>, content: Option<&str>) {
     if session.operation != Operation::Merge {
         return;
     }
-    let Some(target) = &session.write_target else {
+    let Some(content) = content else {
         return;
     };
-    if let Ok(content) = std::fs::read_to_string(target) {
-        if let Some(conflicts) = crate::diff::ConflictedFile::parse(&content) {
-            ui.lock().resolve = Some(crate::app::ui_state::ResolveState::new(conflicts));
-        }
+    if let Some(conflicts) = crate::diff::ConflictedFile::parse(content) {
+        ui.lock().resolve = Some(crate::app::ui_state::ResolveState::new(conflicts));
     }
 }

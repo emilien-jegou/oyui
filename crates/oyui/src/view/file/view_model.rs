@@ -415,7 +415,7 @@ fn folded_line(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::diff::{DiffLine, Hunk, LineSelections};
+    use crate::diff::{line_ranges, DiffLine, Hunk, LineAccess, LineSelections};
     use crate::terminal_colors::TerminalColorMode;
     use crate::theme::ansi_default_theme;
     use crate::view::file::render::rows::RowBuilder;
@@ -598,7 +598,7 @@ mod tests {
         };
 
         let theme = ansi_default_theme(&TerminalColorMode::NoColor);
-        let new_lines: Vec<&str> = diff.new_file_content.split('\n').collect();
+        let ranges = line_ranges(&diff.new_file_content);
 
         let mut model = FileViewModel::default();
         let path = Path::new("a.txt");
@@ -606,8 +606,8 @@ mod tests {
 
         let builder = RowBuilder {
             diff: &diff,
-            old_lines: &new_lines,
-            new_lines: &new_lines,
+            old_lines: LineAccess::new(&diff.old_file_content, &ranges),
+            new_lines: LineAccess::new(&diff.new_file_content, &ranges),
             syntax_opt: None,
             theme: &theme,
             hscroll: 0,
@@ -705,7 +705,7 @@ mod tests {
         };
 
         let theme = ansi_default_theme(&TerminalColorMode::NoColor);
-        let new_lines: Vec<&str> = diff.new_file_content.split('\n').collect();
+        let ranges = line_ranges(&diff.new_file_content);
 
         let mut model = FileViewModel::default();
         let path = Path::new("a.txt");
@@ -713,8 +713,8 @@ mod tests {
 
         let builder = RowBuilder {
             diff: &diff,
-            old_lines: &new_lines,
-            new_lines: &new_lines,
+            old_lines: LineAccess::new(&diff.old_file_content, &ranges),
+            new_lines: LineAccess::new(&diff.new_file_content, &ranges),
             syntax_opt: None,
             theme: &theme,
             hscroll: 0,
@@ -745,7 +745,7 @@ mod tests {
     fn view_model_count_matches_render_builder() {
         let diff = two_hunk_diff();
         let theme = ansi_default_theme(&TerminalColorMode::NoColor);
-        let new_lines: Vec<&str> = diff.new_file_content.split('\n').collect();
+        let ranges = line_ranges(&diff.new_file_content);
 
         for folded in [false, true] {
             let mut model = FileViewModel::default();
@@ -754,8 +754,8 @@ mod tests {
 
             let builder = RowBuilder {
                 diff: &diff,
-                old_lines: &new_lines,
-                new_lines: &new_lines,
+                old_lines: LineAccess::new(&diff.old_file_content, &ranges),
+                new_lines: LineAccess::new(&diff.new_file_content, &ranges),
                 syntax_opt: None,
                 theme: &theme,
                 hscroll: 0,

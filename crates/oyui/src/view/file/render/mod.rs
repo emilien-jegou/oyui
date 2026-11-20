@@ -7,8 +7,8 @@ pub mod style;
 use super::FileViewData;
 use crate::{
     config::UiTheme,
-    diff::{DiffResult, Side},
-    diff_cache::DiffCache,
+    diff::{DiffResult, LineAccess, Side},
+    diff_cache::{DiffCache, LineIndex},
     tree::FileTree,
     view::file::view_model::ConflictRegions,
 };
@@ -42,21 +42,18 @@ impl FileViewData {
         ])
         .areas(area);
 
-        // Find left and right paths to check if names differ
-        let mut left_path = None;
-        let mut right_path = None;
-
-        if let Some((l, r)) = tree.find_paths(&path) {
-            left_path = l;
-            right_path = r;
-        }
+        // One traversal for the state and both side paths: the view needs all
+        // three for the same path, and walking once per field per frame is
+        // what made the file view scale with the size of the change set.
+        let (default_staged, left_path, right_path) =
+            tree.file_entry(&path)
+                .unwrap_or((crate::tree::StagingState::Unstaged, None, None));
+        let default_staged = default_staged == crate::tree::StagingState::Staged;
 
         let left_name = left_path
-            .as_ref()
             .and_then(|p| p.file_name())
             .map(|s| s.to_string_lossy());
         let right_name = right_path
-            .as_ref()
             .and_then(|p| p.file_name())
             .map(|s| s.to_string_lossy());
 
@@ -214,8 +211,23 @@ impl FileViewData {
         let syntax_df = cache.syntax.get(&path);
         let syntax_opt = syntax_df.as_deref();
 
-        let old_lines: Vec<&str> = diff.old_file_content.lines().collect();
-        let new_lines: Vec<&str> = diff.new_file_content.lines().collect();
+        // The diff listener published the line offsets while it had both sides
+        // in memory; borrowing them keeps the frame off the whole-file
+        // `lines()` walk it used to do for each side. Staging and undo can swap
+        // a cached diff without the listener running, so the index has to prove
+        // it still describes this content.
+        let line_index = cache.line_index.get(&path);
+        let published = line_index.as_deref().filter(|index| index.matches(diff));
+        // Computed here only when the published index is missing or stale.
+        let fallback = (published.is_none()).then(|| LineIndex::of(diff));
+        let (old_ranges, new_ranges) = match (published, fallback.as_ref()) {
+            (Some(index), _) => (index.old.as_slice(), index.new.as_slice()),
+            (None, Some(index)) => (index.old.as_slice(), index.new.as_slice()),
+            // Unreachable: `fallback` is built exactly when `published` is None.
+            (None, None) => (&[][..], &[][..]),
+        };
+        let old_lines = LineAccess::new(&diff.old_file_content, old_ranges);
+        let new_lines = LineAccess::new(&diff.new_file_content, new_ranges);
 
         // Recompute the view model if needed
         self.recompute_view_model(diff);
@@ -232,23 +244,15 @@ impl FileViewData {
             self.line_mapping(&path),
             selected_row_idx,
         );
-        let scroll_state = self.scroll_states.entry(path.clone()).or_default();
-        let selected_row_idx = scroll_state.selected().unwrap_or(selected_row_idx);
 
         let hscroll = self.hscroll_states.get(&path).copied().unwrap_or(0);
         let area_width = list_area.width;
         let use_gradient = self.use_gradient;
 
-        // Find if this file is selected in the file tree, which sets our default state
-        let default_staged = tree
-            .get_file_state(&path)
-            .unwrap_or(crate::tree::StagingState::Unstaged)
-            == crate::tree::StagingState::Staged;
-
         let builder = RowBuilder {
             diff,
-            old_lines: &old_lines,
-            new_lines: &new_lines,
+            old_lines,
+            new_lines,
             syntax_opt,
             theme,
             hscroll,
@@ -262,10 +266,19 @@ impl FileViewData {
             preview,
         };
 
-        // Pass 1 counts every visual row without rendering; pass 2 renders
-        // only the visible window, so frames stay O(viewport), not O(diff).
-        let mut rows = Vec::new();
-        let total_rows = builder.build(None, &mut rows);
+        // Pass 1 used to walk every hunk purely to count rows; the view model
+        // recomputed above already holds that count, and the render-builder
+        // parity tests keep the two in step. The counting pass survives only
+        // for a layout the model has not produced yet.
+        let total_rows = self.view_model.row_count(&path);
+        let total_rows = if total_rows > 0 {
+            total_rows
+        } else {
+            builder.build(None, &mut Vec::new())
+        };
+
+        let scroll_state = self.scroll_states.entry(path.clone()).or_default();
+        let selected_row_idx = scroll_state.selected().unwrap_or(selected_row_idx);
 
         self.last_height = list_area.height as usize;
         self.last_width = list_area.width as usize;
@@ -280,6 +293,7 @@ impl FileViewData {
 
         let start = offset.min(total_rows);
         let end = (start + height).min(total_rows);
+        let mut rows = Vec::new();
         builder.build(Some(start..end), &mut rows);
 
         let table = line::build_line_table(rows, theme);

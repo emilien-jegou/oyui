@@ -89,6 +89,11 @@ Use the `tasker_registry!` macro to bind everything together. This macro generat
 - An `EventSender` and an `EventReceiver`.
 - An `EventRegistry` coordinator.
 
+Two optional lists route each variant to the app:
+
+* `internal` — dispatched to listeners, never mirrored to the app receiver.
+* `collapse` — mirrored, but a burst leaves only the newest pending copy.
+
 ```rust
 use oyui_tasker::tasker_registry;
 
@@ -96,12 +101,99 @@ tasker_registry! {
     events = [
         Echo       => Echo,
         EchoResult => EchoResult,
+        Stats      => StatsReq,
+        StatsRes   => StatsRes,
     ],
+    // The request never needs to wake the app; the result does.
+    internal = [Stats],
+    // A burst of per-file results only needs one repaint.
+    collapse = [StatsRes],
     listeners = [
-        Echo => [EchoListener],
+        Echo       => [EchoListener],
+        Stats      => [StatsListener],
+        StatsRes   => [StatsListener],
     ],
 }
 ```
+
+#### Why routing matters
+
+Every mirrored event wakes whatever is consuming `EventReceiver`, and a
+consumer that repaints on wakeup turns one event into one repaint. Worker
+plumbing (`StatsReq`) and bursty per-file results (`StatsRes`) are exactly the
+two shapes you do not want to pay a repaint for, and they are the common case:
+`internal` stops the plumbing from reaching the consumer at all, and `collapse`
+turns a hundred results into one pending signal while the consumer drains what
+it already has.
+
+Both are opt-in — with neither list, every event is mirrored exactly as before.
+
+`Event::is_internal()` and `Event::is_collapsing()` expose the classification,
+and `EventRegistry::pending()` reports how many mirrored events are waiting,
+which is a cheap way to confirm a burst is being coalesced.
+
+#### Listener failures
+
+Listeners run as detached tasks, so their `Err` has no caller to propagate to.
+The registry mirrors it as an extra variant instead:
+
+```rust
+match event {
+    Event::ListenerFailed(failed) => show(failed.to_string()),
+    _ => {}
+}
+```
+
+This is what turns a background computation that silently did not happen into
+something a UI can explain.
+
+### 6. Requests with a named answer
+
+Broadcast is right for state a listener publishes and wrong for an answer one
+caller asked for. A declared `replies` pairing gives that request a private
+answer:
+
+```rust
+tasker_registry! {
+    events = [
+        Ask    => Asked<Question>,
+        Answer => Answer,
+    ],
+    replies = [
+        Ask => Answer,
+    ],
+    listeners = [
+        Ask => [AnsweringListener],
+    ],
+}
+
+impl Listener<Question> for AnsweringListener {
+    type Sender = EventSender;
+    type Context = ();
+
+    async fn handle(event: Question, _ctx: (), tx: EventSender) -> eyre::Result<()> {
+        tx.reply(Answer { text: format!("got {}", event.id) })?;
+        Ok(())
+    }
+}
+```
+
+The caller holds the continuation:
+
+```rust
+let mut reply: Reply<Answer> = registry.ask(Question { id: 1 })?;
+let answer = reply.recv().await.expect("answer arrived");
+```
+
+**Why it beats an id in the payload.** The payload needs no `task_id`, so the
+listener never learns which caller asked and no one has to match ids after the
+fact. The pairing is checked at compile time (`R: ReplyOf<E>`), a request that
+nobody answers cannot be sent, and dropping the caller releases its reply slot
+— a lost request cannot leak registry state.
+
+`try_recv` lets a single-threaded consumer resolve replies alongside its other
+work, which is what a UI loop needs when the answer must be delivered on the
+thread that asked.
 
 ### 5. Running the Registry
 

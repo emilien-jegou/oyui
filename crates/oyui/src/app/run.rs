@@ -8,8 +8,49 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
-use std::io;
+use std::io::{self, Write};
 use std::time::Duration;
+
+type Tui = Terminal<CrosstermBackend<io::Stdout>>;
+
+/// Restores the terminal when dropped, including during panic unwinding.
+///
+/// Every early return in the event loop (`?`, a panic mid-frame) passes
+/// through this guard, so a crash can no longer leave the user's shell in
+/// raw mode on the alternate screen. The normal teardown path disarms the
+/// guard and restores explicitly so failures are still reported.
+struct TerminalRestore<'a> {
+    terminal: &'a mut Tui,
+    armed: bool,
+}
+
+impl TerminalRestore<'_> {
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+
+    /// Best-effort restore; errors are logged, never propagated.
+    fn restore(&mut self) {
+        if let Err(e) = crossterm::terminal::disable_raw_mode() {
+            tracing::error!("failed to disable raw mode during restore: {e}");
+        }
+        if let Err(e) = crossterm::execute!(self.terminal.backend_mut(), LeaveAlternateScreen) {
+            tracing::error!("failed to leave alternate screen during restore: {e}");
+        }
+        if let Err(e) = self.terminal.show_cursor() {
+            tracing::error!("failed to show cursor during restore: {e}");
+        }
+        let _ = io::stdout().flush();
+    }
+}
+
+impl Drop for TerminalRestore<'_> {
+    fn drop(&mut self) {
+        if self.armed {
+            self.restore();
+        }
+    }
+}
 
 impl App {
     pub async fn run(&mut self) -> Result<(), CommandError> {
@@ -19,6 +60,12 @@ impl App {
         execute!(stdout, EnterAlternateScreen)?;
         let backend = CrosstermBackend::new(stdout);
         let mut terminal = Terminal::new(backend)?;
+        // Armed from here on: both `?` returns and panics unwinding out of
+        // the loop pass through the guard's restore.
+        let mut restore = TerminalRestore {
+            terminal: &mut terminal,
+            armed: true,
+        };
 
         tracing::info!("Entering main event loop");
         let mut aborted = false;
@@ -43,11 +90,23 @@ impl App {
         });
 
         let worker = self.worker.clone();
-        terminal.draw(|f| draw::draw(f, self))?;
+        restore.terminal.draw(|f| draw::draw(f, self))?;
 
         loop {
-            let mut branch = "sleep";
+            let mut branch = "idle";
             let mut key_read_at: Option<std::time::Instant> = None;
+
+            // A frame used to be repainted 20x/second so results produced by
+            // listeners that announced nothing could still be picked up. The
+            // worker now signals every state change (tree, stats, diff,
+            // syntax, config, theme) and internal plumbing never wakes the app,
+            // so the only time-based wakeup left is a transient message expiry.
+            // With no message on screen the loop sleeps until something real
+            // happens.
+            let message_expires = self.ui.lock().message.as_ref().map(|m| m.expires_at);
+            let message_deadline = message_expires
+                .unwrap_or_else(|| std::time::Instant::now() + Duration::from_secs(3600));
+            let message_timer = tokio::time::sleep_until(message_deadline.into());
 
             tokio::select! {
                 maybe_input = input_rx.recv() => {
@@ -94,9 +153,8 @@ impl App {
                     // Drain the rest of the burst so one redraw covers it.
                     self.tick();
                 }
-                // Listener tasks finish without notifying the app; repaint
-                // periodically to pick their results up.
-                _ = tokio::time::sleep(Duration::from_millis(50)) => {}
+                // Only fires while a transient message is on screen.
+                _ = message_timer => { branch = "message"; }
             }
 
             if aborted || self.ui.lock().should_quit {
@@ -105,21 +163,32 @@ impl App {
                 }
                 break;
             }
+
+            // Resolve script callbacks waiting on an off-thread answer before
+            // painting, so the frame sees the result they produce.
+            self.drain_pending_scripts();
+
             let draw_started = std::time::Instant::now();
-            terminal.draw(|f| draw::draw(f, self))?;
+            restore.terminal.draw(|f| draw::draw(f, self))?;
             // key_ms: key read -> painted (handle + draw). -1 when no key.
+            // pending stays near zero: coalescing is what keeps a burst of
+            // per-file results from queueing a frame each.
             tracing::debug!(
                 branch,
                 key_ms = key_read_at.map_or(-1.0, |t| t.elapsed().as_secs_f64() * 1000.0),
                 draw_ms = draw_started.elapsed().as_secs_f64() * 1000.0,
+                pending = worker.pending(),
                 "event loop iteration"
             );
         }
 
         tracing::debug!("Restoring terminal state");
+        // Disarm so the explicit restore reports errors, instead of the Drop
+        // already having consumed the terminal state.
+        restore.disarm();
         disable_raw_mode()?;
-        execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-        terminal.show_cursor()?;
+        execute!(restore.terminal.backend_mut(), LeaveAlternateScreen)?;
+        restore.terminal.show_cursor()?;
 
         tracing::info!("Shutting down background worker...");
         let _ = self.shutdown().await;

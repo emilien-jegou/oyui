@@ -120,18 +120,33 @@ impl FileTree {
     }
 
     /// Returns an iterator over all file nodes in the tree.
+    ///
+    /// Lazy on purpose: callers that only count or fold state must not pay an
+    /// allocation for every file node on each call, and the tree is walked
+    /// several times per frame.
     pub fn files(&self) -> impl Iterator<Item = &TreeNodeFile> {
-        fn collect_files<'a>(nodes: &'a [TreeNode], files: &mut Vec<&'a TreeNodeFile>) {
-            for node in nodes {
+        fn walk<'a>(nodes: &'a [TreeNode]) -> Box<dyn Iterator<Item = &'a TreeNodeFile> + 'a> {
+            let files = |node: &'a TreeNode| -> Box<dyn Iterator<Item = &'a TreeNodeFile> + 'a> {
                 match node {
-                    TreeNode::File(f) => files.push(f),
-                    TreeNode::Directory(d) => collect_files(&d.children, files),
+                    TreeNode::File(f) => Box::new(std::iter::once(f)),
+                    TreeNode::Directory(d) => walk(&d.children),
                 }
-            }
+            };
+            Box::new(nodes.iter().flat_map(files))
         }
-        let mut files = Vec::new();
-        collect_files(&self.nodes, &mut files);
-        files.into_iter()
+        walk(&self.nodes)
+    }
+
+    /// File state and both side paths in a single traversal.
+    ///
+    /// The file view needs all three for the same path; walking the tree once
+    /// per field costs three full traversals per frame.
+    pub fn file_entry(
+        &self,
+        target_path: &Path,
+    ) -> Option<(StagingState, Option<&Path>, Option<&Path>)> {
+        self.file(target_path)
+            .map(|f| (f.state, f.left_path.as_deref(), f.right_path.as_deref()))
     }
 
     /// Returns an iterator over all file nodes with mutable access.
@@ -376,47 +391,45 @@ impl FileTree {
         right_path: Option<PathBuf>,
     ) {
         self.version += 1;
-        let components: Vec<_> = rel_path
-            .iter()
-            .map(|c| c.to_string_lossy().into_owned())
-            .collect();
         let mut current_nodes = &mut self.nodes;
         let mut current_path = PathBuf::new();
-        let len = components.len();
 
-        for (i, name) in components.into_iter().enumerate() {
-            current_path.push(&name);
-            let is_last = i == len - 1;
+        for (i, comp) in rel_path.iter().enumerate() {
+            current_path.push(comp);
+            let is_last = i == rel_path.components().count() - 1;
 
             if is_last {
                 current_nodes.push(TreeNode::File(TreeNodeFile {
-                    name,
+                    name: comp.to_string_lossy().into_owned(),
                     path: current_path.clone(),
                     left_path: left_path.clone(),
                     right_path: right_path.clone(),
                     state: StagingState::Unstaged,
-                }))
+                }));
+                break;
+            }
+
+            // Match directories by lossless path equality, not by display
+            // names: the lossy String `name` is display-only.
+            let pos = current_nodes.iter().position(|n| match n {
+                TreeNode::Directory(d) => d.path == current_path,
+                _ => false,
+            });
+
+            let idx = if let Some(p) = pos {
+                p
             } else {
-                let pos = current_nodes.iter().position(|n| match n {
-                    TreeNode::Directory(d) => d.name == name,
-                    _ => false,
-                });
+                current_nodes.push(TreeNode::Directory(TreeNodeDirectory {
+                    name: comp.to_string_lossy().into_owned(),
+                    path: current_path.clone(),
+                    children: Vec::new(),
+                }));
+                current_nodes.len() - 1
+            };
 
-                let idx = if let Some(p) = pos {
-                    p
-                } else {
-                    current_nodes.push(TreeNode::Directory(TreeNodeDirectory {
-                        name: name.clone(),
-                        path: current_path.clone(),
-                        children: Vec::new(),
-                    }));
-                    current_nodes.len() - 1
-                };
-
-                match &mut current_nodes[idx] {
-                    TreeNode::Directory(d) => current_nodes = &mut d.children,
-                    _ => unreachable!(),
-                }
+            match &mut current_nodes[idx] {
+                TreeNode::Directory(d) => current_nodes = &mut d.children,
+                _ => unreachable!(),
             }
         }
     }

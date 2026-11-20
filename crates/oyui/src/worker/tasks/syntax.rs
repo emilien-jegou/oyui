@@ -9,6 +9,7 @@ use crate::theme::ThemeState;
 use crate::tree::FileTree;
 use crate::worker::events::diff_update::DiffUpdate;
 use crate::worker::events::file_opened::FileOpened;
+use crate::worker::events::syntax_res::SyntaxRes;
 use crate::worker::events::theme_update::ThemeUpdate;
 use crate::worker::EventSender;
 use oyui_tasker::{Listener, TaskerContext};
@@ -100,11 +101,7 @@ impl Listener<SyntaxReq> for Syntax {
     type Context = SyntaxContext;
 
     #[tracing::instrument(skip_all, fields(node_path = %event.node_path.display()))]
-    async fn handle(
-        event: SyntaxReq,
-        ctx: Self::Context,
-        _tx: crate::worker::EventSender,
-    ) -> eyre::Result<()> {
+    async fn handle(event: SyntaxReq, ctx: Self::Context, tx: EventSender) -> eyre::Result<()> {
         tracing::debug!("Computing syntax highlighting");
 
         let theme = ctx.theme.read().tm_theme.clone();
@@ -131,11 +128,15 @@ impl Listener<SyntaxReq> for Syntax {
 
         tracing::trace!("Syntax highlighting finished");
 
-        if !ctx
+        if ctx
             .cache
             .syntax
-            .set(node_path, Arc::new(highlighted), generation)
+            .set(node_path.clone(), Arc::new(highlighted), generation)
         {
+            // Highlighting is cached but nothing else announces it: tell the
+            // app to repaint so the first paint of a file is not colorless.
+            let _ = tx.send(SyntaxRes { path: node_path });
+        } else {
             tracing::debug!("Discarded stale syntax result (cache was cleared)");
         }
 
@@ -201,7 +202,17 @@ impl Listener<DiffUpdate> for Syntax {
 
     #[tracing::instrument(skip_all, fields(node_path = %event.path.display()))]
     async fn handle(event: DiffUpdate, ctx: Self::Context, tx: EventSender) -> eyre::Result<()> {
-        Self::try_queue_syntax_task(event.path.to_path_buf(), &ctx, &tx, &event.diff_result)
+        // The diff was written to the cache before this event was emitted; a
+        // miss means it was invalidated or cleared since, so there is nothing
+        // to highlight.
+        let Some(diff_result) = ctx.cache.diffs.get(&event.path) else {
+            tracing::debug!(
+                node_path = %event.path.display(),
+                "Diff gone from cache before syntax task was queued"
+            );
+            return Ok(());
+        };
+        Self::try_queue_syntax_task(event.path, &ctx, &tx, &diff_result)
     }
 }
 

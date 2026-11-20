@@ -365,16 +365,29 @@ fn changed_paths(root: &Path) -> Result<Vec<PathBuf>> {
     )?;
     let mut paths = Vec::new();
     for entry in out.split(|b| *b == 0) {
-        if entry.len() < 4 {
+        // `XY <path>` where X/Y are the index/worktree status codes. Rename
+        // records are disabled by `--no-renames`, but a stray record without
+        // a status prefix (the original path of a `-z` rename pair) must not
+        // be misread as `path[3..]`; validate the prefix instead.
+        let (status, path) = match entry.split_first() {
+            _ if entry.len() < 4 => continue,
+            _ => (entry[0], &entry[3..]),
+        };
+        let _ = status;
+        if !is_status_byte(entry[0]) || !is_status_byte(entry[1]) || entry[2] != b' ' {
             continue;
         }
-        // `XY <path>`; the two status bytes are fixed-width.
-        let path = &entry[3..];
         paths.push(bytes_to_path(path));
     }
     paths.sort();
     paths.dedup();
     Ok(paths)
+}
+
+/// True for the porcelain status letters (and the blank that pairs with
+/// staged-only or worktree-only states).
+fn is_status_byte(b: u8) -> bool {
+    b.is_ascii_uppercase() || b == b'?' || b == b'!' || b == b' '
 }
 
 /// Reads HEAD's tracked entries (`path -> mode/oid`).

@@ -39,6 +39,83 @@ fn callback_id(reg: &KeybindRegistry, mode: KeybindMode, kb: &str) -> Option<Cal
         })
 }
 
+/// Loads a script against a live worker, so off-thread natives have one to talk
+/// to. Returns the host, the registry, and the worker.
+fn load_with_worker(source: &str) -> (RuneHost, std::sync::Arc<crate::worker::EventRegistry>) {
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    let path =
+        std::env::temp_dir().join(format!("oyui_script_worker_{}_{n}.rn", std::process::id()));
+    fs::write(&path, source).expect("write fixture");
+
+    let color_mode = crate::terminal_colors::TerminalColorMode::NoColor;
+    let registry = crate::worker::EventRegistry::spawn(
+        crate::worker::context::AppWorkerContext::builder()
+            .syntax_engine(crate::syntax::SyntaxEngine::new())
+            .algorithm(crate::cli::DiffAlgorithm::Myers)
+            .tree(std::sync::Arc::new(parking_lot::RwLock::new(
+                crate::tree::FileTree::default(),
+            )))
+            .cache(crate::diff_cache::DiffCache::default())
+            .config_error(std::sync::Arc::new(parking_lot::RwLock::new(None)))
+            .theme(std::sync::Arc::new(parking_lot::RwLock::new(
+                crate::theme::ThemeState::new(&color_mode),
+            )))
+            .cpu(crate::worker::cpu::bounded_pool("oyui-test").expect("pool"))
+            .build(),
+    );
+
+    let worker = std::sync::Arc::new(registry);
+    let mut host = RuneHost::new();
+    let outcome = host.load(&path, BoxedHandler::empty(), Some(worker.clone()));
+    let _ = fs::remove_file(&path);
+    assert!(
+        outcome.error.is_none(),
+        "load failed: {:?}",
+        outcome.error.map(|e| e.message)
+    );
+    (host, worker)
+}
+
+/// A reload used to drop the id a pending request was waiting on, so its result
+/// arrived to find nothing registered. The continuation now owns the request,
+/// so abandoning it releases the reply slot too.
+#[tokio::test]
+async fn reloading_releases_an_in_flight_request() {
+    let source = r#"
+        pub fn config() {
+            analysis::files_containing_async("needle", |matches| {
+                let _ = matches;
+            });
+        }
+    "#;
+    let (mut host, worker) = load_with_worker(source);
+
+    assert_eq!(worker.pending_replies(), 1, "the request must be in flight");
+    assert_eq!(host.pending.lock().len(), 1, "and waiting on its callback");
+
+    // The reload that used to strand the result.
+    let replacement = std::env::temp_dir().join(format!(
+        "oyui_script_reload_{}_{}.rn",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    fs::write(&replacement, "pub fn config() {}").expect("write replacement");
+    let outcome = host.load(&replacement, BoxedHandler::empty(), None);
+    let _ = fs::remove_file(&replacement);
+    assert!(outcome.error.is_none());
+
+    assert_eq!(
+        host.pending.lock().len(),
+        0,
+        "the abandoned wait must not survive a reload"
+    );
+    assert_eq!(
+        worker.pending_replies(),
+        0,
+        "and its reply slot must be released with it"
+    );
+}
+
 #[test]
 fn script_keybinds_arrive_as_opaque_handles_and_still_run() {
     let source = r#"
@@ -62,6 +139,38 @@ fn script_keybinds_arrive_as_opaque_handles_and_still_run() {
     // The handle kept in the registry must still reach a live callback.
     let id = callback_id(&reg, KeybindMode::Global, "ctrl-h").expect("ctrl-h bound");
     host.call(id).expect("callback still registered");
+}
+
+#[test]
+fn a_failed_reload_keeps_the_previous_callbacks_alive() {
+    let (mut host, reg, error) = load(
+        r#"
+        pub fn config() {
+            keybind("ctrl-h", || ());
+        }
+    "#,
+    );
+    assert!(
+        error.is_none(),
+        "load failed: {:?}",
+        error.map(|e| e.message)
+    );
+    let id = callback_id(&reg, KeybindMode::Global, "ctrl-h").expect("ctrl-h bound");
+
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    let path =
+        std::env::temp_dir().join(format!("oyui_script_{}_{n}.rn", std::process::id()));
+    fs::write(&path, "pub fn config() { let = }").expect("write fixture");
+    let outcome = host.load(&path, BoxedHandler::empty(), None);
+    let _ = fs::remove_file(&path);
+
+    assert!(outcome.error.is_some(), "the broken script must report");
+    assert!(
+        outcome.keybinds.is_none(),
+        "a failed reload must not return replacement keybinds"
+    );
+    host.call(id)
+        .expect("the previously registered callback must survive a failed reload");
 }
 
 #[test]
@@ -355,11 +464,21 @@ fn a_script_without_an_entrypoint_is_not_an_error() {
 }
 
 #[test]
-fn a_broken_script_reports_and_falls_back_to_defaults() {
-    let (_host, reg, error) = load("pub fn config() { let = }");
+fn a_broken_script_reports_the_error_and_keeps_current_keybinds() {
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    let path =
+        std::env::temp_dir().join(format!("oyui_script_{}_{n}.rn", std::process::id()));
+    fs::write(&path, "pub fn config() { let = }").expect("write fixture");
 
-    assert!(error.is_some(), "expected a compile error, got success");
-    assert_eq!(reg.bindings.len(), default_keybinds().bindings.len());
+    let mut host = RuneHost::new();
+    let outcome = host.load(&path, BoxedHandler::empty(), None);
+    let _ = fs::remove_file(&path);
+
+    assert!(outcome.error.is_some(), "expected a compile error, got success");
+    assert!(
+        outcome.keybinds.is_none(),
+        "a failed reload must leave the running keybinds in place"
+    );
 }
 
 #[test]

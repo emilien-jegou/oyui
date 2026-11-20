@@ -7,8 +7,8 @@ use std::sync::Arc;
 use tokio::fs;
 
 use crate::cli::DiffAlgorithm;
-use crate::diff::{DiffLine, DiffResult, FileDiff, Hunk, InlineChange};
-use crate::diff_cache::DiffCache;
+use crate::diff::{line_ranges, DiffLine, DiffResult, FileDiff, Hunk, InlineChange};
+use crate::diff_cache::{DiffCache, LineIndex, LineWidths};
 use crate::worker::events::diff_update::DiffUpdate;
 
 const MAX_FILE_SIZE: u64 = 1024 * 1024; // 1 MB limit
@@ -51,14 +51,14 @@ impl Listener<FullDiffReq> for FullDiff {
 
         let left_fut = async {
             if let Some(p) = &left_path_clone {
-                load_file_content_safely(p).await
+                load_file_content_safely(p)
             } else {
                 Ok(String::new())
             }
         };
         let right_fut = async {
             if let Some(p) = &right_path_clone {
-                load_file_content_safely(p).await
+                load_file_content_safely(p)
             } else {
                 Ok(String::new())
             }
@@ -75,8 +75,7 @@ impl Listener<FullDiffReq> for FullDiff {
                         event.generation,
                     );
                     let _ = tx.send(DiffUpdate {
-                        path: event.node_path,
-                        diff_result: DiffResult::Empty,
+                        path: event.node_path.clone(),
                     });
                     return Ok(());
                 }
@@ -103,21 +102,52 @@ impl Listener<FullDiffReq> for FullDiff {
         };
 
         tracing::trace!("Full diff computation finished");
+
+        // Derived layout data the view would otherwise recompute per frame:
+        // horizontal scrolling needs the widest line, and rendering needs the
+        // line offsets. Both are read off the content we already hold here.
+        if let DiffResult::Text(ref diff) = diff_result {
+            let generation = ctx.cache.line_index.generation();
+            let node_path = event.node_path.clone();
+            let widths = Arc::new(LineWidths {
+                old: widest_line(&diff.old_file_content),
+                new: widest_line(&diff.new_file_content),
+            });
+            let index = Arc::new(LineIndex::of(diff));
+            ctx.cache
+                .line_widths
+                .set(node_path.clone(), widths, generation);
+            ctx.cache.line_index.set(node_path, index, generation);
+        }
+
         ctx.cache.diffs.set(
             event.node_path.clone(),
-            Arc::new(diff_result.clone()),
+            Arc::new(diff_result),
             event.generation,
         );
         let _ = tx.send(DiffUpdate {
             path: event.node_path,
-            diff_result,
         });
         Ok(())
     }
 }
 
-async fn load_file_content_safely(path: &PathBuf) -> Result<String, DiffResult> {
-    let meta = match fs::metadata(path).await {
+/// Widest line of `content` in display columns (tabs stay one column here, as
+/// the gutter expands them).
+fn widest_line(content: &str) -> usize {
+    content
+        .lines()
+        .map(|l| l.chars().count())
+        .max()
+        .unwrap_or(0)
+}
+
+/// Shared file loader for both the diff pass and the stats pass.
+///
+/// Returns the decoded text, or an [`DiffResult`] describing why no text
+/// could be produced, so every consumer classifies a file identically.
+pub(crate) fn load_file_content_safely(path: &Path) -> Result<String, DiffResult> {
+    let meta = match std::fs::metadata(path) {
         Ok(m) => m,
         Err(e) => return Err(DiffResult::Error(e.to_string())),
     };
@@ -128,7 +158,7 @@ async fn load_file_content_safely(path: &PathBuf) -> Result<String, DiffResult> 
         return Err(DiffResult::TooLarge(size));
     }
 
-    let buffer = match fs::read(path).await {
+    let buffer = match std::fs::read(path) {
         Ok(b) => b,
         Err(e) => return Err(DiffResult::Error(e.to_string())),
     };
@@ -158,41 +188,15 @@ async fn load_file_content_safely(path: &PathBuf) -> Result<String, DiffResult> 
     }
 }
 
-struct LineIndex<'a> {
-    text: &'a str,
-    starts: Vec<usize>,
-}
-
-impl<'a> LineIndex<'a> {
-    fn new(text: &'a str) -> Self {
-        let mut starts = vec![0];
-        for (i, b) in text.bytes().enumerate() {
-            if b == b'\n' {
-                starts.push(i + 1);
-            }
-        }
-        Self { text, starts }
-    }
-
-    fn printable_byte_range(&self, line_idx: usize) -> Range<usize> {
-        let start = self.starts.get(line_idx).copied().unwrap_or(0);
-        let mut end = self
-            .starts
-            .get(line_idx + 1)
-            .copied()
-            .unwrap_or(self.text.len());
-
-        let bytes = self.text.as_bytes();
-        while end > start {
-            let b = bytes[end - 1];
-            if b == b'\n' || b == b'\r' {
-                end -= 1;
-            } else {
-                break;
-            }
-        }
-        start..end
-    }
+/// Byte range of line `line_idx`, with the terminator stripped.
+///
+/// Mirrors the ranges published for the renderer, so the inline-highlight
+/// offsets the diff computes and the ones the view slices with agree.
+fn printable_byte_range(text: &str, ranges: &[Range<usize>], line_idx: usize) -> Range<usize> {
+    ranges
+        .get(line_idx)
+        .cloned()
+        .unwrap_or_else(|| text.len()..text.len())
 }
 
 pub fn compute(
@@ -211,8 +215,8 @@ pub fn compute(
 
     let diff = Diff::compute(inner_algo, &input);
 
-    let old_idx = LineIndex::new(left_file_content);
-    let new_idx = LineIndex::new(right_file_content);
+    let old_ranges = line_ranges(left_file_content);
+    let new_ranges = line_ranges(right_file_content);
 
     let syntax_res = if *algo == DiffAlgorithm::SyntaxAware {
         match oyui_syndiff::diff_source(left_file_content, right_file_content, path, None) {
@@ -287,7 +291,7 @@ pub fn compute(
         };
 
         for i in (hunk.before.start as usize)..(hunk.before.end as usize) {
-            let line_range = old_idx.printable_byte_range(i);
+            let line_range = printable_byte_range(left_file_content, &old_ranges, i);
             let inline_highlights = get_highlights(
                 line_range,
                 syntax_res
@@ -303,7 +307,7 @@ pub fn compute(
         }
 
         for i in (hunk.after.start as usize)..(hunk.after.end as usize) {
-            let line_range = new_idx.printable_byte_range(i);
+            let line_range = printable_byte_range(right_file_content, &new_ranges, i);
             let inline_highlights = get_highlights(
                 line_range,
                 syntax_res

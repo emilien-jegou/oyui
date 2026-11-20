@@ -153,7 +153,7 @@ async fn run_git_squash(
         view: args.view.clone(),
     };
     let confirmed = Arc::new(AtomicBool::new(false));
-    compare::run_session(opts, config_path, session, confirmed.clone()).await?;
+    compare::run_session(opts, config_path, session, confirmed.clone(), None).await?;
     if !confirmed.load(Ordering::SeqCst) {
         eprintln!("squash cancelled; HEAD unchanged");
         return Ok(());
@@ -202,7 +202,7 @@ async fn run_git_split(
         view: args.view.clone(),
     };
     let confirmed = Arc::new(AtomicBool::new(false));
-    compare::run_session(opts, config_path, session, confirmed.clone()).await?;
+    compare::run_session(opts, config_path, session, confirmed.clone(), None).await?;
     if !confirmed.load(Ordering::SeqCst) {
         eprintln!("split cancelled; no commits created");
         return Ok(());

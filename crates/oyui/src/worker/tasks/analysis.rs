@@ -1,4 +1,7 @@
-//! Off-thread regex scan over file contents, keyed to a script task id.
+//! Off-thread regex scan over file contents, answered to its caller.
+//!
+//! `Reply` in the doc link below is what the caller holds; see
+//! `oyui-tasker`'s `ask`/`reply` pairing.
 use crate::tree::FileTree;
 use oyui_tasker::{Listener, TaskerContext};
 use parking_lot::RwLock;
@@ -6,16 +9,17 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 /// Request to regex-scan the working tree off the UI thread.
+///
+/// Carries no correlation id: whoever asked holds the reply the registry
+/// handed them, so the answer is routed back to that caller and nobody else.
 #[derive(Clone)]
 pub struct AnalysisReq {
-    pub task_id: u64,
     pub pattern: String,
 }
 
-/// Result of an [`AnalysisReq`], delivered to the main thread.
+/// Result of an [`AnalysisReq`], delivered only to its caller.
 #[derive(Clone)]
 pub struct AnalysisRes {
-    pub task_id: u64,
     pub matches: Vec<String>,
     /// Set when the pattern was invalid or the scan could not run.
     pub error: Option<String>,
@@ -47,7 +51,6 @@ impl Listener<AnalysisReq> for Analysis {
                 .collect()
         };
 
-        let task_id = event.task_id;
         let pattern = event.pattern;
         let (matches, error) =
             tokio::task::spawn_blocking(move || match regex::Regex::new(&pattern) {
@@ -55,13 +58,11 @@ impl Listener<AnalysisReq> for Analysis {
                 Err(e) => (Vec::new(), Some(format!("invalid regex '{pattern}': {e}"))),
             })
             .await
-            .unwrap_or_else(|_| (Vec::new(), Some("analysis task panicked".to_string())));
+            .map_err(|join_err| eyre::eyre!("analysis task panicked: {join_err}"))?;
 
-        tx.send(AnalysisRes {
-            task_id,
-            matches,
-            error,
-        })?;
+        // The answer goes to whoever asked, so an empty or failed scan never
+        // reaches a consumer that was not waiting for it.
+        tx.reply(AnalysisRes { matches, error })?;
         Ok(())
     }
 }

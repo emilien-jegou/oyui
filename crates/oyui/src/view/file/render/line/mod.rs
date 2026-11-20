@@ -9,7 +9,7 @@ use crate::{
 use gutter::{GutterConfig, GutterRenderer};
 use ratatui::{
     layout::Constraint,
-    style::{Modifier, Style, Stylize},
+    style::{Modifier, Stylize},
     widgets::{Block, Borders, Row, Table},
 };
 use text::{TextConfig, TextRenderer};

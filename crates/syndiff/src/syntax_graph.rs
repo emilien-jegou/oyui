@@ -215,7 +215,7 @@ pub fn compute_neighbours<'a>(v: &SyntaxVertex<'a>) -> ArrayVec<(SyntaxEdge, Syn
                 .node()
                 .is_some_and(|node| node.hint == Some(SyntaxHint::Punctuation));
             let (lhs, rhs, delimiters) =
-                pop_all_delimiters(v.lhs.next_sibling(), v.rhs.next_sibling(), v.delimiters);
+                pop_all_delimiters(v.lhs.next_sibling(), v.rhs.next_sibling(), v.delimiters.clone());
             neighbours.push((
                 SyntaxEdge::Unchanged {
                     depth_difference,
@@ -235,7 +235,7 @@ pub fn compute_neighbours<'a>(v: &SyntaxVertex<'a>) -> ArrayVec<(SyntaxEdge, Syn
             let levenshtein_pct =
                 (strsim::normalized_levenshtein(lhs_comment, rhs_comment) * 100.0).round() as u8;
             let (lhs, rhs, delimiters) =
-                pop_all_delimiters(v.lhs.next_sibling(), v.rhs.next_sibling(), v.delimiters);
+                pop_all_delimiters(v.lhs.next_sibling(), v.rhs.next_sibling(), v.delimiters.clone());
             neighbours.push((
                 SyntaxEdge::Replaced { levenshtein_pct },
                 SyntaxVertex {
@@ -288,7 +288,7 @@ pub fn compute_neighbours<'a>(v: &SyntaxVertex<'a>) -> ArrayVec<(SyntaxEdge, Syn
     if let Some(lhs_node) = v.lhs.node() {
         if lhs_node.is_atom() {
             let (lhs, rhs, delimiters) =
-                pop_all_delimiters(v.lhs.next_sibling(), v.rhs, v.delimiters);
+                pop_all_delimiters(v.lhs.next_sibling(), v.rhs, v.delimiters.clone());
             neighbours.push((
                 SyntaxEdge::NovelAtomLHS,
                 SyntaxVertex {
@@ -316,7 +316,7 @@ pub fn compute_neighbours<'a>(v: &SyntaxVertex<'a>) -> ArrayVec<(SyntaxEdge, Syn
     if let Some(rhs_node) = v.rhs.node() {
         if rhs_node.is_atom() {
             let (lhs, rhs, delimiters) =
-                pop_all_delimiters(v.lhs, v.rhs.next_sibling(), v.delimiters);
+                pop_all_delimiters(v.lhs, v.rhs.next_sibling(), v.delimiters.clone());
             neighbours.push((
                 SyntaxEdge::NovelAtomRHS,
                 SyntaxVertex {

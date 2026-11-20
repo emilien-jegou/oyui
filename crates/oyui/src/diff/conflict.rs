@@ -12,13 +12,39 @@
 //! >>>>>>> theirs
 //! ```
 
+/// A git/jj conflict open-marker line: bare `<<<<<<<` or `<<<<<<<` + label.
+fn is_open_marker(line: &str) -> bool {
+    let line = line.strip_suffix('\r').unwrap_or(line);
+    line == "<<<<<<<" || line.starts_with("<<<<<<< ")
+}
+
+/// True when `line` closes a conflict block: bare `>>>>>>>`, or
+/// `>>>>>>>` + label (jj snapshot ends are labelled).
+fn is_close_marker(line: &str) -> bool {
+    let line = line.strip_suffix('\r').unwrap_or(line);
+    line == ">>>>>>>" || line.starts_with(">>>>>>> ")
+}
+
+/// A git separator line: the bare `=======` at column 0. Git writes nothing
+/// after the separator.
+fn is_sep_marker(line: &str) -> bool {
+    let line = line.strip_suffix('\r').unwrap_or(line);
+    line == "======="
+}
+
+/// A diff3 base-marker line: the bare `|||||||` at column 0.
+fn is_divider(line: &str) -> bool {
+    let line = line.strip_suffix('\r').unwrap_or(line);
+    line == "|||||||"
+}
+
 /// True when `line` is a conflict marker (`<<<<<<<`, `|||||||`, `=======`, `>>>>>>>`,
 /// plus jj native `%%%%%%%`, `+++++++`/`-------` snapshots and `\\\\\\\` continuations).
 pub fn is_marker_line(line: &str) -> bool {
-    line.starts_with("<<<<<<<")
-        || line.starts_with("|||||||")
-        || line.starts_with("=======")
-        || line.starts_with(">>>>>>>")
+    is_open_marker(line)
+        || is_close_marker(line)
+        || is_sep_marker(line)
+        || is_divider(line)
         || marker_run(line, '%').is_some_and(|n| n >= 7)
         || marker_run(line, '+').is_some_and(|n| n >= 7)
         || marker_run(line, '-').is_some_and(|n| n >= 7 && is_jj_base_header(line))
@@ -44,6 +70,71 @@ pub enum Side {
     Ours,
     Theirs,
     Both,
+}
+
+/// Line terminator captured from the source file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LineEnding {
+    #[default]
+    Lf,
+    Crlf,
+}
+
+impl LineEnding {
+    fn as_str(self) -> &'static str {
+        match self {
+            LineEnding::Lf => "\n",
+            LineEnding::Crlf => "\r\n",
+        }
+    }
+}
+
+/// How text produced from a [`ConflictedFile`] must be terminated.
+///
+/// Parsing records the source file's dominant terminator and whether it ended
+/// with a newline, so resolving or re-rendering never rewrites CRLF as LF or
+/// invents/removes the final newline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TextFormat {
+    pub line_ending: LineEnding,
+    pub final_newline: bool,
+}
+
+impl TextFormat {
+    /// Detects the dominant terminator and final-newline state of `content`.
+    pub fn detect(content: &str) -> Self {
+        let crlf = content.matches("\r\n").count();
+        let lf = content.matches('\n').count().saturating_sub(crlf);
+        Self {
+            line_ending: if crlf > lf {
+                LineEnding::Crlf
+            } else {
+                LineEnding::Lf
+            },
+            final_newline: content.ends_with('\n'),
+        }
+    }
+
+    /// Detects the format from the first non-empty side.
+    pub fn detect_sides(sides: &[&str]) -> Self {
+        sides
+            .iter()
+            .find(|side| !side.is_empty())
+            .map_or_else(Self::default, |side| Self::detect(side))
+    }
+
+    /// Joins `lines` using this format.
+    pub fn join(self, lines: Vec<String>) -> String {
+        if lines.is_empty() {
+            return String::new();
+        }
+        let separator = self.line_ending.as_str();
+        let mut out = lines.join(separator);
+        if self.final_newline {
+            out.push_str(separator);
+        }
+        out
+    }
 }
 
 impl Side {
@@ -208,14 +299,27 @@ pub enum Segment {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ConflictedFile {
     pub segments: Vec<Segment>,
+    /// Terminator style of the source file, applied when rendering text.
+    pub format: TextFormat,
 }
 
 impl ConflictedFile {
-    /// True when `content` contains at least one conflict marker.
+    /// True when `content` contains a well-formed conflict block: an open
+    /// marker followed at some point by a close marker. Lines that merely look
+    /// like a marker (a longer run of the same character, a lone opener) do
+    /// not count.
     pub fn is_conflicted(content: &str) -> bool {
-        content
-            .lines()
-            .any(|l| l.starts_with("<<<<<<<") && l.len() >= 7)
+        let mut open = false;
+        for line in content.lines() {
+            if open {
+                if is_close_marker(line) {
+                    return true;
+                }
+            } else if is_open_marker(line) {
+                open = true;
+            }
+        }
+        false
     }
 
     /// Parses `content`, returning `None` when there are no markers.
@@ -241,7 +345,7 @@ impl ConflictedFile {
         let mut block_start = String::new();
 
         for line in content.lines() {
-            if line.starts_with("<<<<<<<") {
+            if is_open_marker(line) {
                 if !current.is_empty() {
                     segments.push(Segment::Common(std::mem::take(&mut current)));
                 }
@@ -254,7 +358,7 @@ impl ConflictedFile {
                 section = Section::Ours;
                 block_raw.clear();
                 block_start = line.to_string();
-            } else if line.starts_with(">>>>>>>") && conflict.is_some() {
+            } else if is_close_marker(line) && conflict.is_some() {
                 // If the block used jj markers, re-parse its body natively,
                 // preserving the verbatim block (labels included).
                 if let Some(c) = parse_jj_block(&block_start, &block_raw, line) {
@@ -301,7 +405,10 @@ impl ConflictedFile {
             segments.push(Segment::Common(current));
         }
 
-        Some(Self { segments })
+        Some(Self {
+            segments,
+            format: TextFormat::detect(content),
+        })
     }
 
     /// Number of conflicting regions.
@@ -343,11 +450,7 @@ impl ConflictedFile {
                 }
             }
         }
-        let mut out = lines.join("\n");
-        if !out.is_empty() {
-            out.push('\n');
-        }
-        out
+        self.format.join(lines)
     }
 
     /// Renders the file with jj snapshot-style markers (`ui.conflict-marker-style
@@ -380,11 +483,7 @@ impl ConflictedFile {
                 }
             }
         }
-        let mut out = lines.join("\n");
-        if !out.is_empty() {
-            out.push('\n');
-        }
-        out
+        self.format.join(lines)
     }
 
     /// New-content line ranges of each conflict, fully expanded.
@@ -442,11 +541,7 @@ impl ConflictedFile {
                 }
             }
         }
-        let mut out = lines.join("\n");
-        if !out.is_empty() {
-            out.push('\n');
-        }
-        out
+        self.format.join(lines)
     }
 }
 
@@ -837,6 +932,28 @@ c
         assert!(out.contains('1') && !out.contains('2'));
         assert!(out.contains("<<<<<<< ours"));
         assert!(out.contains('3') && out.contains('4'));
+    }
+
+    #[test]
+    fn resolution_preserves_crlf_and_missing_final_newline() {
+        let content = "head\r\n<<<<<<< ours\r\nleft\r\n=======\r\nright\r\n>>>>>>> theirs\r\ntail";
+        let parsed = ConflictedFile::parse(content).expect("conflicted");
+        assert_eq!(parsed.format.line_ending, LineEnding::Crlf);
+        assert!(!parsed.format.final_newline);
+
+        let out = parsed.resolve_optional(&[Some(Side::Ours)]);
+        assert_eq!(out, "head\r\nleft\r\ntail");
+    }
+
+    #[test]
+    fn resolution_preserves_lf_and_final_newline() {
+        let content = "head\n<<<<<<< ours\nleft\n=======\nright\n>>>>>>> theirs\ntail\n";
+        let parsed = ConflictedFile::parse(content).expect("conflicted");
+        assert_eq!(parsed.format.line_ending, LineEnding::Lf);
+        assert!(parsed.format.final_newline);
+
+        let out = parsed.resolve_optional(&[Some(Side::Theirs)]);
+        assert_eq!(out, "head\nright\ntail\n");
     }
 
     #[test]

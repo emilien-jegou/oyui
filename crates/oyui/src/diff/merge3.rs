@@ -3,7 +3,7 @@
 //! Non-overlapping edits from both sides are combined; overlapping edits that
 //! differ become conflicts with `ours`/`base`/`theirs` sections.
 
-use super::conflict::{Conflict, ConflictedFile, Segment};
+use super::conflict::{Conflict, ConflictedFile, Segment, TextFormat};
 use crate::cli::DiffAlgorithm;
 use imara_diff::{Algorithm, Diff, InternedInput};
 
@@ -85,7 +85,32 @@ pub fn merge3(base: &str, left: &str, right: &str, algo: DiffAlgorithm) -> Confl
         ));
     }
 
-    ConflictedFile { segments }
+    ConflictedFile {
+        segments,
+        // `.lines()` strips the trailing terminator, so the final-newline
+        // state cannot be re-detected from the diffed line vectors; pick it
+        // from the whole texts explicitly.
+        format: TextFormat {
+            final_newline: final_newline_consensus(base, left, right),
+            ..TextFormat::detect_sides(&[base, left, right])
+        },
+    }
+}
+
+/// The sides' agreement on whether the file ends with a newline.
+///
+/// `.lines()` erases the terminator, so a change that only adds or removes
+/// the final newline never shows up in the line diff; this reads it from the
+/// texts. A side that flipped the state relative to `base` decides; when both
+/// sides did, the left side's state is taken, matching the ours-before-theirs
+/// order of every other decision in this merge.
+fn final_newline_consensus(base: &str, left: &str, right: &str) -> bool {
+    let base_nl = base.ends_with('\n');
+    if left.ends_with('\n') != base_nl {
+        left.ends_with('\n')
+    } else {
+        right.ends_with('\n')
+    }
 }
 
 /// Computes the changed base ranges when going from `base` to `side`.
@@ -286,5 +311,39 @@ mod tests {
         let right = "a\nR\nb\n";
         let out = merged(base, left, right);
         assert_eq!(out.conflict_count(), 1);
+    }
+
+    #[test]
+    fn newline_only_change_flip_is_kept() {
+        // The line vectors of `base` and `right` are identical; only the
+        // final terminators differ. The merge must notice the removal.
+        let out = merged("a\nb\n", "a\nb\n", "a\nb");
+        assert!(!out.resolve_all(super::super::conflict::Side::Ours).ends_with('\n'));
+
+        // And the inverse: a side that adds a final newline.
+        let out = merged("a\nb", "a\nb\n", "a\nb");
+        assert!(out
+            .resolve_all(super::super::conflict::Side::Ours)
+            .ends_with('\n'));
+    }
+
+    #[test]
+    fn synthesized_output_keeps_crlf_and_final_newline_state() {
+        let base = "a\r\nb\r\nc";
+        let left = "a\r\nL\r\nc";
+        let right = "a\r\nR\r\nc";
+        let out = merged(base, left, right);
+        assert_eq!(out.conflict_count(), 1);
+
+        let text = out.resolve_optional(&[None]);
+        assert_eq!(
+            text,
+            "a\r\n<<<<<<< ours\r\nL\r\n||||||| base\r\nb\r\n=======\r\nR\r\n>>>>>>> theirs\r\nc"
+        );
+        assert!(!text.ends_with('\n'));
+
+        // A chosen side keeps the same terminators.
+        let resolved = out.resolve_all(super::super::conflict::Side::Ours);
+        assert_eq!(resolved, "a\r\nL\r\nc");
     }
 }

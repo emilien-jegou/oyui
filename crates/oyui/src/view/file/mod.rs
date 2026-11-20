@@ -67,7 +67,16 @@ impl FileViewData {
         self.view_model.row_to_hunk(path)
     }
 
-    /// Refreshes the view model for the current path when dirty or stale.
+    /// Row count for the current path, taken from the view model.
+    ///
+    /// The count pass in the row builder is only a fallback for a path the
+    /// model has never seen, so a steady-state frame reads a cached number
+    /// instead of walking every hunk again.
+    pub fn view_model_row_count(&self, path: &PathBuf) -> usize {
+        self.view_model.row_count(path)
+    }
+
+    /// Refreshes the layout metadata for the current path when dirty or stale.
     ///
     /// The layout key also catches diff mutations (split/join) that happen
     /// between draws — e.g. inside one batch of keys handled per frame.
