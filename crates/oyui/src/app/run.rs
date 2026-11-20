@@ -9,6 +9,7 @@ use crossterm::{
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io::{self, Write};
+use std::sync::Arc;
 use std::time::Duration;
 
 type Tui = Terminal<CrosstermBackend<io::Stdout>>;
@@ -73,21 +74,42 @@ impl App {
         // crossterm's blocking read runs on its own thread so the runtime
         // worker is never parked between frames. Each event carries the
         // instant it was read so logs can show key-to-paint latency.
+        //
+        // The reader polls on a tick instead of blocking forever so teardown
+        // can stop and join it before the terminal state is torn down
+        // (finding 6.19): `poll` wakes the instant an event arrives, so the
+        // tick only bounds how long a stop request can go unnoticed — never
+        // key latency.
         let (input_tx, mut input_rx) =
             tokio::sync::mpsc::unbounded_channel::<(std::time::Instant, Event)>();
-        std::thread::spawn(move || loop {
-            match event::read() {
-                Ok(ev) => {
-                    if input_tx.send((std::time::Instant::now(), ev)).is_err() {
+        let reader_stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let reader = {
+            let stop = reader_stop.clone();
+            std::thread::spawn(move || loop {
+                match event::poll(Duration::from_millis(250)) {
+                    Ok(true) => match event::read() {
+                        Ok(ev) => {
+                            if input_tx.send((std::time::Instant::now(), ev)).is_err() {
+                                break;
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!(?e, "terminal input reader failed");
+                            break;
+                        }
+                    },
+                    Ok(false) => {}
+                    Err(e) => {
+                        // Poll fails once stdin is gone; stop reading.
+                        tracing::error!(?e, "terminal input poll failed");
                         break;
                     }
                 }
-                Err(e) => {
-                    tracing::error!(?e, "terminal input reader failed");
-                    break;
+                if stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    return;
                 }
-            }
-        });
+            })
+        };
 
         let worker = self.worker.clone();
         restore.terminal.draw(|f| draw::draw(f, self))?;
@@ -183,6 +205,11 @@ impl App {
         }
 
         tracing::debug!("Restoring terminal state");
+        // Stop and join the input reader before tearing the terminal down,
+        // so no blocked read(2) can outlive raw mode (finding 6.19): the
+        // poll tick bounds the joint wait to one interval.
+        reader_stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        let _ = reader.join();
         // Disarm so the explicit restore reports errors, instead of the Drop
         // already having consumed the terminal state.
         restore.disarm();
