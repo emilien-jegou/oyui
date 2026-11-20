@@ -195,9 +195,6 @@ pub(crate) fn expand(input: &RegistryInput) -> TokenStream {
         }
     });
 
-    let internal_idents = &input.internal;
-    let collapse_idents = &input.collapse;
-
     // `(RequestPayload, ResponseType)` per declared pairing.
     //
     // The request type is the *payload* the caller holds (`Question`, not
@@ -246,35 +243,6 @@ pub(crate) fn expand(input: &RegistryInput) -> TokenStream {
                     Event::Coalesced(_) => "Coalesced",
                     Event::Shutdown => "Shutdown",
                 })
-            }
-        }
-
-        impl Event {
-            /// True when the event is internal plumbing that never reaches the
-            /// app-facing receiver.
-            ///
-            /// Declared with `internal = [...]`. Worker-to-worker events still
-            /// dispatch to their listeners; they simply stop waking the app,
-            /// which is where an uncontrolled repaint per event used to come
-            /// from.
-            pub fn is_internal(&self) -> bool {
-                match self {
-                    #( Event::#internal_idents(_) => true, )*
-                    _ => false,
-                }
-            }
-
-            /// True when bursts of this event are coalesced before the app sees
-            /// them, keeping only the newest pending copy.
-            ///
-            /// Declared with `collapse = [...]`. Only sound for events the app
-            /// reacts to by re-reading shared state rather than by consuming a
-            /// sequence of payloads.
-            pub fn is_collapsing(&self) -> bool {
-                match self {
-                    #( Event::#collapse_idents(_) => true, )*
-                    _ => false,
-                }
             }
         }
 

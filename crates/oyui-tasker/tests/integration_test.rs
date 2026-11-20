@@ -196,13 +196,13 @@ async fn internal_events_dispatch_but_are_not_mirrored() {
             .any(|e| matches!(e, Event::Burst(b) if b.n == 7)),
         "an internal event must still dispatch to listeners: {events:?}"
     );
+    // Behavioral check in place of the removed `is_internal` classifier:
+    // the app-facing receiver only ever sees Burst, never Pong (which stays
+    // listener-internal), Shutdown, or ListenerFailed here.
     assert!(
-        !events.iter().any(|e| e.is_internal()),
+        events.iter().all(|e| matches!(e, Event::Burst(_))),
         "an internal event must never reach the app receiver: {events:?}"
     );
-
-    assert!(Event::Pong(Pong { count: 1 }).is_internal());
-    assert!(!Event::MathResult(MathResult { value: 0 }).is_internal());
 
     registry.shutdown().await.unwrap();
 }
@@ -226,10 +226,6 @@ async fn collapsing_events_are_coalesced() {
         registry.try_recv().is_err(),
         "the 63 stale siblings must have been dropped, not queued"
     );
-
-    // A collapse variant is still mirrored (unlike an internal one).
-    assert!(Event::Burst(Burst { n: 0 }).is_collapsing());
-    assert!(!Event::Burst(Burst { n: 0 }).is_internal());
 
     registry.shutdown().await.unwrap();
 }
