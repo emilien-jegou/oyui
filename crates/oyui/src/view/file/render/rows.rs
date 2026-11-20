@@ -493,9 +493,10 @@ mod tests {
     use crate::diff::{line_ranges, LineRanges};
     use std::sync::Arc;
 
-    use crate::diff::{DiffLine, Hunk, LineSelections};
+    use crate::diff::{DiffLine, Hunk, LineSelections, Side};
     use crate::terminal_colors::TerminalColorMode;
     use crate::theme::ansi_default_theme;
+    use crate::view::file::view_model::{ConflictSides, ConflictView, FileViewModel};
 
     fn one_hunk_diff() -> FileDiff {
         FileDiff {
@@ -596,6 +597,284 @@ mod tests {
         let mut rows = Vec::new();
         assert!(b.build(None, &mut rows) > 0);
         assert!(rows.is_empty());
+    }
+
+    /// Two hunks far enough apart that folding inserts a gap separator.
+    /// (Mirrors the view model's fixture: these tests assert the model and
+    /// the builder agree, so they run both on the same input.)
+    fn two_hunk_diff() -> FileDiff {
+        let new_content = (0..40)
+            .map(|i| format!("l{i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let old_content = (0..38)
+            .map(|i| format!("l{i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let hunk = |new_start: usize| Hunk {
+            before_lines: new_start..new_start + 3,
+            after_lines: new_start..new_start + 5,
+            lines: vec![
+                DiffLine::Context {
+                    new_line_idx: new_start,
+                    old_line_idx: new_start,
+                },
+                DiffLine::Addition {
+                    new_line_idx: new_start + 1,
+                    inline_highlights: Vec::new(),
+                },
+                DiffLine::Context {
+                    new_line_idx: new_start + 2,
+                    old_line_idx: new_start + 1,
+                },
+                DiffLine::Addition {
+                    new_line_idx: new_start + 3,
+                    inline_highlights: Vec::new(),
+                },
+                DiffLine::Context {
+                    new_line_idx: new_start + 4,
+                    old_line_idx: new_start + 2,
+                },
+            ],
+            marker: Default::default(),
+        };
+        FileDiff {
+            old_file_content: old_content.into(),
+            new_file_content: new_content.into(),
+            hunks: vec![hunk(0), hunk(30)],
+            line_selections: LineSelections::default(),
+        }
+    }
+
+    /// A folded conflict renders as header + footer framing its kept lines in
+    /// both the view model and this builder, or navigation and rendering
+    /// desync.
+    #[test]
+    fn folded_conflict_count_matches_render_builder() {
+        let diff = FileDiff {
+            old_file_content: Arc::from("a\nbase\nb"),
+            new_file_content: Arc::from("a\n<<<<<<< ours\none\n=======\ntwo\n>>>>>>> theirs\nb"),
+            hunks: vec![Hunk {
+                before_lines: 0..3,
+                after_lines: 0..7,
+                lines: vec![
+                    DiffLine::Context {
+                        new_line_idx: 0,
+                        old_line_idx: 0,
+                    },
+                    DiffLine::Addition {
+                        new_line_idx: 1,
+                        inline_highlights: Vec::new(),
+                    },
+                    DiffLine::Addition {
+                        new_line_idx: 2,
+                        inline_highlights: Vec::new(),
+                    },
+                    DiffLine::Addition {
+                        new_line_idx: 3,
+                        inline_highlights: Vec::new(),
+                    },
+                    DiffLine::Addition {
+                        new_line_idx: 4,
+                        inline_highlights: Vec::new(),
+                    },
+                    DiffLine::Addition {
+                        new_line_idx: 5,
+                        inline_highlights: Vec::new(),
+                    },
+                    DiffLine::Context {
+                        new_line_idx: 6,
+                        old_line_idx: 2,
+                    },
+                ],
+                marker: Default::default(),
+            }],
+            line_selections: LineSelections::default(),
+        };
+
+        let regions = ConflictRegions {
+            views: vec![ConflictView {
+                range: 1..6,
+                folded: true,
+                header: String::new(),
+                footer: String::new(),
+                choice: None,
+                kept: Vec::new(),
+                sides: ConflictSides {
+                    ours: 2..3,
+                    theirs: 4..5,
+                    sep: 3,
+                },
+            }],
+        };
+
+        let theme = ansi_default_theme(&TerminalColorMode::NoColor);
+        let ranges = line_ranges(&diff.new_file_content);
+
+        let mut model = FileViewModel::default();
+        let path = std::path::Path::new("a.txt");
+        model.recompute(path, &diff, false, 4, &regions);
+
+        let b = RowBuilder {
+            diff: &diff,
+            old_lines: LineAccess::new(&diff.old_file_content, &ranges),
+            new_lines: LineAccess::new(&diff.new_file_content, &ranges),
+            syntax_opt: None,
+            theme: &theme,
+            hscroll: 0,
+            area_width: 80,
+            use_gradient: false,
+            context_lines: 4,
+            is_folded: false,
+            default_staged: true,
+            selected_row_idx: 0,
+            regions: &regions,
+            preview: None,
+        };
+        let total = b.build(None, &mut Vec::new());
+
+        assert_eq!(model.row_count(path), total);
+        assert_eq!(total, 4, "a folded conflict renders as header + footer");
+    }
+
+    /// Base content the diff leaves as inter-hunk context must not leak into
+    /// a folded frame: the base line matches base, so imara can split the
+    /// marker block across two hunks with the base line as context between
+    /// them. Folded, only header + kept + footer may render.
+    #[test]
+    fn folded_conflict_hides_inter_hunk_base_context() {
+        let diff = FileDiff {
+            old_file_content: Arc::from("a\nbase\nb"),
+            new_file_content: Arc::from(
+                "a\n<<<<<<< ours\none\n||||||| base\nbase\n=======\ntwo\n>>>>>>> theirs\nb",
+            ),
+            hunks: vec![
+                Hunk {
+                    before_lines: 0..1,
+                    after_lines: 0..4,
+                    lines: vec![
+                        DiffLine::Context {
+                            new_line_idx: 0,
+                            old_line_idx: 0,
+                        },
+                        DiffLine::Addition {
+                            new_line_idx: 1,
+                            inline_highlights: Vec::new(),
+                        },
+                        DiffLine::Addition {
+                            new_line_idx: 2,
+                            inline_highlights: Vec::new(),
+                        },
+                        DiffLine::Addition {
+                            new_line_idx: 3,
+                            inline_highlights: Vec::new(),
+                        },
+                    ],
+                    marker: Default::default(),
+                },
+                Hunk {
+                    before_lines: 2..3,
+                    after_lines: 5..9,
+                    lines: vec![
+                        DiffLine::Addition {
+                            new_line_idx: 5,
+                            inline_highlights: Vec::new(),
+                        },
+                        DiffLine::Addition {
+                            new_line_idx: 6,
+                            inline_highlights: Vec::new(),
+                        },
+                        DiffLine::Addition {
+                            new_line_idx: 7,
+                            inline_highlights: Vec::new(),
+                        },
+                        DiffLine::Context {
+                            new_line_idx: 8,
+                            old_line_idx: 2,
+                        },
+                    ],
+                    marker: Default::default(),
+                },
+            ],
+            line_selections: LineSelections::default(),
+        };
+
+        // Conflict spans new lines 1..8; line 4 (`base`) is inter-hunk
+        // context, not part of either hunk.
+        let regions = ConflictRegions {
+            views: vec![ConflictView {
+                range: 1..8,
+                folded: true,
+                header: "theirs".to_string(),
+                footer: String::new(),
+                choice: Some(Side::Theirs),
+                kept: vec![6..7],
+                sides: ConflictSides {
+                    ours: 2..3,
+                    theirs: 6..7,
+                    sep: 5,
+                },
+            }],
+        };
+
+        let theme = ansi_default_theme(&TerminalColorMode::NoColor);
+        let ranges = line_ranges(&diff.new_file_content);
+
+        let mut model = FileViewModel::default();
+        let path = std::path::Path::new("a.txt");
+        model.recompute(path, &diff, false, 4, &regions);
+
+        let b = RowBuilder {
+            diff: &diff,
+            old_lines: LineAccess::new(&diff.old_file_content, &ranges),
+            new_lines: LineAccess::new(&diff.new_file_content, &ranges),
+            syntax_opt: None,
+            theme: &theme,
+            hscroll: 0,
+            area_width: 80,
+            use_gradient: false,
+            context_lines: 4,
+            is_folded: false,
+            default_staged: true,
+            selected_row_idx: 0,
+            regions: &regions,
+            preview: None,
+        };
+        let total = b.build(None, &mut Vec::new());
+
+        assert_eq!(model.row_count(path), total);
+        // a, header, kept `two`, footer, b — the inter-hunk `base` line is hidden.
+        assert_eq!(total, 5);
+        let mapping = model.line_mapping(path).expect("mapping");
+        assert!(
+            !mapping.contains(&4),
+            "base context line must not map to any row"
+        );
+    }
+
+    /// The view model and this row builder must count the same rows — the
+    /// cursor highlights render rows while staging keys index the model.
+    #[test]
+    fn view_model_count_matches_render_builder() {
+        let diff = two_hunk_diff();
+        let theme = ansi_default_theme(&TerminalColorMode::NoColor);
+        let ranges = line_ranges(&diff.new_file_content);
+
+        for folded in [false, true] {
+            let mut model = FileViewModel::default();
+            let path = std::path::Path::new("a.txt");
+            model.recompute(path, &diff, folded, 4, &ConflictRegions::default());
+
+            let b = builder(&diff, folded, &theme, &ranges);
+            let total = b.build(None, &mut Vec::new());
+
+            assert_eq!(
+                model.row_to_hunk(path).expect("mapping").len(),
+                total,
+                "mapping rows must equal rendered rows (folded={folded})"
+            );
+            assert_eq!(model.row_count(path), total);
+        }
     }
 
     #[test]
