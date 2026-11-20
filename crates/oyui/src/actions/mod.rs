@@ -8,9 +8,13 @@ pub use define::*;
 pub use keybinds::*;
 
 /// Parse a `#rrggbb` hex string into a [`Color`].
+///
+/// Exactly three hex pairs: anything after the sixth digit is rejected rather
+/// than silently ignored (finding 6.18), so `#1234567` and non-hex text both
+/// fail to parse instead of coloring arbitrarily.
 pub fn parse_hex_color(s: &str) -> Option<Color> {
     let hex = s.strip_prefix('#')?;
-    if hex.len() < 6 {
+    if hex.len() != 6 {
         return None;
     }
     // Byte-slicing at fixed offsets is safe only if every pair is ASCII hex;

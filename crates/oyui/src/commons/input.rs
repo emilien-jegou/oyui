@@ -400,6 +400,44 @@ mod tests {
     }
 
     #[test]
+    fn minus_and_plus_parse_including_in_chords() {
+        // A bare separator is a character binding, and a chord whose key is a
+        // separator recovers it from the input's final character.
+        assert_eq!(Keybind::parse("-"), Keybind::Char("-".to_string()));
+        assert_eq!(Keybind::parse("+"), Keybind::Char("+".to_string()));
+        assert_eq!(
+            Keybind::parse("ctrl--"),
+            Keybind::Combination(
+                Modifiers {
+                    ctrl: true,
+                    alt: false,
+                    shift: false
+                },
+                "-".to_string()
+            )
+        );
+        assert_eq!(
+            Keybind::parse("ctrl-+").canonical(),
+            Keybind::Combination(
+                Modifiers {
+                    ctrl: true,
+                    alt: false,
+                    shift: false
+                },
+                "+".to_string()
+            )
+            .canonical()
+        );
+        // Both round-trip to valid bindings.
+        for binding in ["-", "+", "ctrl--", "ctrl-+"] {
+            assert!(
+                Keybind::parse_checked(binding).is_ok(),
+                "'{binding}' must be expressible"
+            );
+        }
+    }
+
+    #[test]
     fn display_renders_chords() {
         assert_eq!(Keybind::parse("ctrl-shift-j").display(), "ctrl-shift-j");
         assert_eq!(Keybind::Char(" ".to_string()).display(), "space");

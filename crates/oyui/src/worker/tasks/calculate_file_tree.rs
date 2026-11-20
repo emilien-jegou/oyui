@@ -68,15 +68,20 @@ impl Listener<CalculateFileTreeRes> for CalculateFileTreeResListener {
         ctx: Self::Context,
         tx: crate::worker::EventSender,
     ) -> eyre::Result<()> {
-        if event.tree.nodes.is_empty() {
+        // The emptiness verdict is this listener's only special case: an
+        // empty tree is still installed (the TUI must render the empty
+        // state) but no stats are computed over nothing. The app separately
+        // reacts to the same shape by surfacing "no modifications" and
+        // exiting; here the only decision is whether the stats chain runs.
+        let empty = event.tree.nodes.is_empty();
+        ctx.tree.write().replace(event.tree);
+        if empty {
             tracing::info!("No modifications found.");
-            ctx.tree.write().replace(event.tree);
-        } else {
-            ctx.tree.write().replace(event.tree);
-            let _ = tx.send(crate::worker::tasks::stats::StatsReq {
-                files: event.files_to_stat,
-            });
+            return Ok(());
         }
+        let _ = tx.send(crate::worker::tasks::stats::StatsReq {
+            files: event.files_to_stat,
+        });
         Ok(())
     }
 }
