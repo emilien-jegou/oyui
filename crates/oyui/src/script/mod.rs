@@ -21,6 +21,19 @@ use std::path::Path;
 
 pub use crate::commons::ids::CallbackId;
 
+/// The app services a script host needs at load time.
+///
+/// One bundle instead of port parameters: the dispatch table async actions
+/// resolve against and the worker async natives send through. Engines stay
+/// behind them — the port reads neither by name.
+pub struct ScriptContext {
+    /// The dispatch table registered actions resolve against.
+    pub handler: BoxedHandler,
+    /// The event worker async natives send through; `None` in hostless
+    /// contexts like the language server.
+    pub worker: Option<std::sync::Arc<crate::worker::EventRegistry>>,
+}
+
 /// Failure reported by a [`ScriptHost`].
 #[derive(Debug, Clone)]
 pub struct ScriptError {
@@ -42,21 +55,6 @@ impl fmt::Display for ScriptError {
 }
 
 impl Error for ScriptError {}
-
-/// The app services a script host needs at load time.
-///
-/// Bundling them behind one value keeps the [`ScriptHost`] port at
-/// `load(path, ctx)` instead of threading the action dispatch table and the
-/// event worker through every engine implementation. The host owns its own
-/// async plumbing: reloads compile off the UI thread and are applied by the
-/// config on a later frame (finding 3.4 / 4.1).
-pub struct ScriptContext {
-    /// The dispatch table the registered actions resolve against.
-    pub handler: BoxedHandler,
-    /// The event worker async natives send through; `None` in hostless
-    /// contexts like the language server.
-    pub worker: Option<std::sync::Arc<crate::worker::EventRegistry>>,
-}
 
 /// Outcome of a synchronous load.
 ///
