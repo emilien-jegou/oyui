@@ -158,11 +158,22 @@ impl GlobalActionsHandler for AppActionsHandler {
             if self.reject_read_only() {
                 return;
             }
+            // Same policy as keybind staging: merge output is driven by
+            // conflict choices alone (finding 6.10).
+            if self.reject_merge() {
+                return;
+            }
             self.push_undo_snapshot();
         }
-        let mut tree = self.tree.write();
-        let mut ui = self.ui.lock();
-        crate::app::commands::execute(&cmd, &mut tree, &mut ui.tree_view, &self.cache);
+        let matched = {
+            let mut tree = self.tree.write();
+            let mut ui = self.ui.lock();
+            crate::app::commands::execute(&cmd, &mut tree, &mut ui.tree_view, &self.cache)
+        };
+        if let Some(0) = matched {
+            // A pattern that matched nothing must not read as success.
+            self.set_message(MessageLevel::Info, format!("no files matched '{cmd}'"));
+        }
     }
 
     fn clear_error(&self) {

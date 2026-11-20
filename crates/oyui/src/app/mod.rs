@@ -150,6 +150,8 @@ impl App {
         }
 
         // Snapshot before a staging command so palette edits are undoable.
+        // Rejections come first: a refused command must not leave an undo
+        // point behind.
         let is_staging = matches!(
             cmd.trim().split_whitespace().next(),
             Some("add" | "a" | "unstage" | "u" | "invert" | "i")
@@ -159,19 +161,32 @@ impl App {
                 self.set_message(MessageLevel::Info, "read-only session".into());
                 return;
             }
+            if self.operation == Operation::Merge {
+                self.set_message(
+                    MessageLevel::Info,
+                    "merge mode: staging has no effect".into(),
+                );
+                return;
+            }
             let tree = self.tree.read();
             let snap = crate::app::undo::capture(&tree, &self.cache);
             drop(tree);
             self.ui.lock().undo.new_action(snap);
         }
 
-        let handled = {
+        let outcome = {
             let mut tree = self.tree.write();
             let mut ui = self.ui.lock();
             commands::execute(cmd, &mut tree, &mut ui.tree_view, &self.cache)
         };
 
-        if handled {
+        if let Some(matched) = outcome {
+            if matched == 0 {
+                // A pattern that matched nothing must not read as success
+                // (finding 6.10): a typo should be distinguishable from an
+                // empty match.
+                self.set_message(MessageLevel::Warn, format!("no files matched '{cmd}'"));
+            }
             return;
         }
 
