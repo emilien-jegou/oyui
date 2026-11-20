@@ -19,9 +19,7 @@ use std::error::Error;
 use std::fmt;
 use std::path::Path;
 
-/// Opaque handle to a callback the script registered through `keybind`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct CallbackId(pub(crate) u64);
+pub use crate::commons::ids::CallbackId;
 
 /// Failure reported by a [`ScriptHost`].
 #[derive(Debug, Clone)]

@@ -5,8 +5,8 @@ use crate::actions::{
     ViewFileNavActions, ViewFileScrollActions, ViewFileStagingActions, ViewTreeActions,
     ViewTreeCursorActions, ViewTreeDirectoryActions, ViewTreeStagingActions,
 };
+use crate::commons::ids::CallbackId;
 use crate::commons::input::{Keybind, Keybinds};
-use crate::script::CallbackId;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum View {
