@@ -1,4 +1,8 @@
 //! Merge confirmation: applies staged selections to the write target.
+//!
+//! Every write here goes through the atomic helpers in
+//! [`crate::commons::fs`]: the target is user source code, so a crash or full
+//! disk must never leave a truncated mixture behind.
 use crate::app::events::ExitAction;
 use crate::diff_cache::DiffCache;
 use crate::tree::{FileTree, StagingState, TreeNode};
@@ -47,7 +51,7 @@ fn apply_tree_changes(
                             if let Some(parent) = dest.parent() {
                                 std::fs::create_dir_all(parent)?;
                             }
-                            std::fs::copy(left, &dest)?;
+                            crate::commons::fs::copy_atomic(left, &dest)?;
                         }
                     }
                     StagingState::PartiallyStaged => {
@@ -60,7 +64,7 @@ fn apply_tree_changes(
                             if let Some(parent) = dest.parent() {
                                 std::fs::create_dir_all(parent)?;
                             }
-                            std::fs::write(&dest, out)?;
+                            crate::commons::fs::write_atomic(&dest, out.as_bytes())?;
                         }
                     }
                 }
