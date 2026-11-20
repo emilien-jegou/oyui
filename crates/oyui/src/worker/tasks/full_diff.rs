@@ -1,5 +1,5 @@
 //! Full file diff task: async reads plus spawn_blocking hunk computation.
-use imara_diff::{Algorithm, Diff, InternedInput};
+use imara_diff::{Diff, InternedInput};
 use oyui_tasker::{Listener, TaskerContext};
 use std::ops::Range;
 use std::path::{Path, PathBuf};

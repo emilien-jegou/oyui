@@ -5,7 +5,7 @@
 
 use super::conflict::{Conflict, ConflictedFile, Segment, TextFormat};
 use crate::cli::DiffAlgorithm;
-use imara_diff::{Algorithm, Diff, InternedInput};
+use imara_diff::{Diff, InternedInput};
 
 /// A replacement of `base[start..end]` with `lines`.
 #[derive(Debug, Clone)]

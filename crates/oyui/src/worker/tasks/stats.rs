@@ -4,7 +4,7 @@ use crate::diff::DiffResult;
 use crate::diff::DiffStats;
 use crate::diff_cache::DiffCache;
 use crate::worker::tasks::full_diff::load_file_content_safely;
-use imara_diff::{Algorithm, Diff, InternedInput};
+use imara_diff::{Diff, InternedInput};
 use oyui_tasker::{Listener, TaskerContext};
 use rayon::prelude::*;
 use std::fs;

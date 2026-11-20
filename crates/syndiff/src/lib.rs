@@ -155,7 +155,7 @@ use std::ops::Range;
 use arrayvec::ArrayVec;
 
 use crate::syntax_graph::{SyntaxEdge, SyntaxRoute};
-use crate::syntax_tree::{SyntaxHint, SyntaxNode};
+use crate::syntax_tree::SyntaxNode;
 
 mod diff_source;
 mod syntax_delimiters;
