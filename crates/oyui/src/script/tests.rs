@@ -19,7 +19,13 @@ fn load(source: &str) -> (RuneHost, KeybindRegistry, Option<ScriptError>) {
     let path = std::env::temp_dir().join(format!("oyui_script_{}_{n}.rn", std::process::id()));
     fs::write(&path, source).expect("write fixture");
     let mut host = RuneHost::new();
-    let outcome = host.load(&path, BoxedHandler::empty(), None);
+    let outcome = host.load(
+        &&path,
+        &ScriptContext {
+            handler: BoxedHandler::empty(),
+            worker: None,
+        },
+    );
     let _ = fs::remove_file(&path);
     (
         host,
@@ -66,7 +72,13 @@ fn load_with_worker(source: &str) -> (RuneHost, std::sync::Arc<crate::worker::Ev
 
     let worker = std::sync::Arc::new(registry);
     let mut host = RuneHost::new();
-    let outcome = host.load(&path, BoxedHandler::empty(), Some(worker.clone()));
+    let outcome = host.load(
+        &&path,
+        &ScriptContext {
+            handler: BoxedHandler::empty(),
+            worker: Some(worker.clone()),
+        },
+    );
     let _ = fs::remove_file(&path);
     assert!(
         outcome.error.is_none(),
@@ -100,7 +112,13 @@ async fn reloading_releases_an_in_flight_request() {
         NEXT.fetch_add(1, Ordering::Relaxed)
     ));
     fs::write(&replacement, "pub fn config() {}").expect("write replacement");
-    let outcome = host.load(&replacement, BoxedHandler::empty(), None);
+    let outcome = host.load(
+        &&replacement,
+        &ScriptContext {
+            handler: BoxedHandler::empty(),
+            worker: None,
+        },
+    );
     let _ = fs::remove_file(&replacement);
     assert!(outcome.error.is_none());
 
@@ -160,7 +178,13 @@ fn a_failed_reload_keeps_the_previous_callbacks_alive() {
     let n = NEXT.fetch_add(1, Ordering::Relaxed);
     let path = std::env::temp_dir().join(format!("oyui_script_{}_{n}.rn", std::process::id()));
     fs::write(&path, "pub fn config() { let = }").expect("write fixture");
-    let outcome = host.load(&path, BoxedHandler::empty(), None);
+    let outcome = host.load(
+        &&path,
+        &ScriptContext {
+            handler: BoxedHandler::empty(),
+            worker: None,
+        },
+    );
     let _ = fs::remove_file(&path);
 
     assert!(outcome.error.is_some(), "the broken script must report");
@@ -469,7 +493,13 @@ fn a_broken_script_reports_the_error_and_keeps_current_keybinds() {
     fs::write(&path, "pub fn config() { let = }").expect("write fixture");
 
     let mut host = RuneHost::new();
-    let outcome = host.load(&path, BoxedHandler::empty(), None);
+    let outcome = host.load(
+        &&path,
+        &ScriptContext {
+            handler: BoxedHandler::empty(),
+            worker: None,
+        },
+    );
     let _ = fs::remove_file(&path);
 
     assert!(

@@ -43,7 +43,25 @@ impl fmt::Display for ScriptError {
 
 impl Error for ScriptError {}
 
-/// Outcome of loading a config script.
+/// The app services a script host needs at load time.
+///
+/// Bundling them behind one value keeps the [`ScriptHost`] port at
+/// `load(path, ctx)` instead of threading the action dispatch table and the
+/// event worker through every engine implementation. The host owns its own
+/// async plumbing: reloads compile off the UI thread and are applied by the
+/// config on a later frame (finding 3.4 / 4.1).
+pub struct ScriptContext {
+    /// The dispatch table the registered actions resolve against.
+    pub handler: BoxedHandler,
+    /// The event worker async natives send through; `None` in hostless
+    /// contexts like the language server.
+    pub worker: Option<std::sync::Arc<crate::worker::EventRegistry>>,
+}
+
+/// Outcome of a synchronous load.
+///
+/// The only synchronous load is the startup bootstrap; reloads compile off
+/// thread and are applied by [`crate::config::Config::apply_parked_reload`].
 pub struct ScriptLoad {
     /// Keybinds the script produced; `None` leaves current ones alone.
     pub keybinds: Option<KeybindRegistry>,
@@ -52,32 +70,28 @@ pub struct ScriptLoad {
 }
 
 /// The port the application depends on; implementations hide their engine.
+///
+/// The port carries no threading model: async script callbacks park in the
+/// engine's own plumbing (see [`PendingScriptResult`]), and config reloads
+/// are engine-specific off-thread work.
 pub trait ScriptHost {
-    /// Compiles and runs `path`, collecting the keybinds it registers.
-    fn load(
-        &mut self,
-        path: &Path,
-        handler: BoxedHandler,
-        worker: Option<std::sync::Arc<crate::worker::EventRegistry>>,
-    ) -> ScriptLoad;
+    /// Compiles and runs `path` synchronously, collecting the keybinds it
+    /// registers.
+    fn load(&mut self, path: &Path, ctx: &ScriptContext) -> ScriptLoad;
     /// Runs a callback the script registered with `keybind`.
     fn call(&self, id: CallbackId) -> Result<(), ScriptError>;
     /// Runs a named command the script registered with `command::register`.
     fn call_command(&self, name: &str, args: &str) -> Result<(), ScriptError>;
     /// Runs every callback registered for `event` with `on`.
     fn call_event(&self, event: &str) -> Result<(), ScriptError>;
-    /// Parks a callback that is waiting on an off-thread result.
-    fn park(&self, task: Box<dyn PendingScriptResult>);
-    /// Delivers every result that has arrived; returns what went wrong.
-    fn drain_pending(&self) -> Vec<ScriptError>;
 }
 
 /// A script callback waiting on an off-thread result.
 ///
-/// It owns the reply the registry handed to whoever asked, so a request
-/// so a request no longer has to be matched by an id afterwards — and the wait
-/// dies with the config that issued it, instead of leaving a stale entry behind
-/// for a result that later arrives to find its callback gone.
+/// It owns the reply the registry handed to whoever asked, so a request no
+/// longer has to be matched by an id afterwards — and the wait dies with the
+/// config that issued it, instead of leaving a stale entry behind for a
+/// result that later arrives to find its callback gone.
 pub trait PendingScriptResult: Send {
     /// Delivers the result if it has arrived, consuming the callback.
     fn try_deliver(&mut self) -> Option<Result<(), ScriptError>>;

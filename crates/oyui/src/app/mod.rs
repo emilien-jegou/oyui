@@ -60,6 +60,10 @@ impl std::ops::Deref for App {
 
 impl App {
     pub async fn start(&mut self) -> Result<(), CommandError> {
+        // Synchronous bootstrap: the first frame paints with the script's
+        // keybinds, and the watcher is seeded so it does not re-fire the
+        // same revision (finding 4.1).
+        self.config.bootstrap();
         self.start_tree_calculation()?;
         self.config.start_watching(&self.worker)?;
         self.run().await?;
@@ -101,11 +105,14 @@ impl App {
         }
     }
 
-    /// Delivers every off-thread result that has arrived.
+    /// Applies every finished off-thread script result.
     ///
-    /// Called once per event-loop iteration: a reply only exists for the caller
-    /// that asked, and polling it keeps the main thread free while it runs.
+    /// Called once per event-loop iteration, before painting: a completed
+    /// config reload lands here (the compile ran on the blocking pool —
+    /// finding 4.1), and async callback replies are delivered too, so the
+    /// frame sees their results.
     pub(crate) fn drain_pending_scripts(&mut self) {
+        self.config.apply_parked_reload();
         for error in self.config.drain_pending() {
             self.set_message(MessageLevel::Error, error.to_string());
         }

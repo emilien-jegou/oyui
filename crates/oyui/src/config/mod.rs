@@ -74,34 +74,74 @@ impl std::ops::Deref for Config {
 
 impl Config {
     pub fn start_watching(&self, worker: &EventRegistry) -> eyre::Result<()> {
+        // Seed the watcher with the file's current mtime: the config was just
+        // bootstrapped synchronously, so the watcher's first pass must not
+        // re-fire the same revision (finding 4.1).
+        let last_mtime = std::fs::metadata(&self.path)
+            .and_then(|meta| meta.modified())
+            .ok();
         worker.send(watch_config::WatchConfigReq {
             path: self.path.clone(),
-            last_mtime: None,
+            last_mtime,
         })?;
         Ok(())
     }
 
-    /// Recompiles the config script and swaps in whatever it produced.
-    pub fn handle_reload_event(&mut self, path: &Path) {
-        info!("Reloading config on main thread...");
-        let outcome = self
-            .host
-            .load(path, self.handler.clone(), Some(self.worker.clone()));
+    /// The services a load needs: the dispatcher the script's actions
+    /// resolve against and the worker async natives send through.
+    fn script_context(&self) -> crate::script::ScriptContext {
+        crate::script::ScriptContext {
+            handler: self.handler.clone(),
+            worker: Some(self.worker.clone()),
+        }
+    }
+
+    /// Synchronously loads the config before the first frame paints — the
+    /// explicit startup bootstrap (finding 4.1). The script's keybinds are
+    /// in effect from the first keypress instead of after the watcher's
+    /// first event.
+    pub fn bootstrap(&mut self) {
+        let outcome = self.host.load(&self.path, &self.script_context());
+        self.apply(outcome);
+    }
+
+    /// Installs a load outcome: adopts the keybinds and surfaces errors. A
+    /// successful load then fires the script's `config_reload` hook.
+    fn apply(&mut self, outcome: crate::script::ScriptLoad) {
         if let Some(keybinds) = outcome.keybinds {
             self.keybinds = keybinds;
         }
         match outcome.error {
             Some(e) => {
-                tracing::error!("Config compilation error: {}", e);
+                tracing::error!("Config error: {}", e);
                 *self.error.write() = Some(e.to_string());
-                return;
             }
-            None => *self.error.write() = None,
+            None => {
+                // Clear a stale error once a load succeeds.
+                *self.error.write() = None;
+                if let Err(e) = self.host.call_event("config_reload") {
+                    *self.error.write() = Some(e.to_string());
+                }
+            }
         }
+    }
 
-        if let Err(e) = self.host.call_event("config_reload") {
-            *self.error.write() = Some(e.to_string());
+    /// Reacts to a file change: kicks off the off-thread recompile; the
+    /// result is applied by [`Self::apply_parked_reload`] on a later frame
+    /// (finding 4.1: the Rune compile no longer blocks the render loop).
+    pub fn handle_reload_event(&mut self, path: &Path) {
+        self.host.reload(path.to_path_buf(), &self.script_context());
+    }
+
+    /// Applies a finished reload, if one landed since the last frame.
+    ///
+    /// Called from the event loop between frames: nothing here blocks.
+    pub fn apply_parked_reload(&mut self) {
+        if !self.host.has_parked_reload() {
+            return;
         }
+        let (keybinds, error) = self.host.apply_parked();
+        self.apply(crate::script::ScriptLoad { keybinds, error });
     }
 
     /// Runs a callback the script registered through `keybind`.
