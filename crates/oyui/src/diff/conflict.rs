@@ -32,10 +32,12 @@ fn is_sep_marker(line: &str) -> bool {
     line == "======="
 }
 
-/// A diff3 base-marker line: the bare `|||||||` at column 0.
+/// A diff3 base-marker line: bare `|||||||` at column 0, or `|||||||` +
+/// label (git writes `||||||| merged common ancestors`). Longer runs are
+/// body content, not markers.
 fn is_divider(line: &str) -> bool {
     let line = line.strip_suffix('\r').unwrap_or(line);
-    line == "|||||||"
+    line == "|||||||" || line.starts_with("||||||| ")
 }
 
 /// True when `line` is a conflict marker (`<<<<<<<`, `|||||||`, `=======`, `>>>>>>>`,
@@ -334,6 +336,16 @@ impl ConflictedFile {
             return None;
         }
 
+        // Grammar: a conflict is the open marker, body lines split into
+        // ours/base/theirs by the bare `=======` separator (the base section
+        // is introduced by `|||||||`, label allowed), and the close marker.
+        // A jj-style block body (`%%%%%%%`/`+++++++`/`-------`) is re-parsed
+        // natively and kept verbatim, labels included. Runs that extend past
+        // the seven-character markers (a setext underline in a Markdown
+        // side) are body content, not markers. A second open inside a block
+        // and a block that never closes are content too, never half a
+        // conflict.
+
         let mut segments = Vec::new();
         let mut current: Vec<String> = Vec::new();
 
@@ -345,7 +357,14 @@ impl ConflictedFile {
         let mut block_start = String::new();
 
         for line in content.lines() {
-            if is_open_marker(line) {
+            if is_open_marker(line) && conflict.is_some() {
+                // A second open while a block is in flight is content of the
+                // current section, not a new conflict — the block's close
+                // marker owns the sequencing. Otherwise a nested open would
+                // silently discard the outer block's collected side.
+                block_raw.push(line.to_string());
+                push_git_line(conflict.as_mut(), section, line);
+            } else if is_open_marker(line) {
                 if !current.is_empty() {
                     segments.push(Segment::Common(std::mem::take(&mut current)));
                 }
@@ -371,15 +390,16 @@ impl ConflictedFile {
                 section = Section::Ours;
             } else if conflict.is_some() {
                 block_raw.push(line.to_string());
-                if line.starts_with("|||||||") {
+                if is_divider(line) {
                     section = Section::Base;
                     if let Some(c) = conflict.as_mut() {
                         c.base.get_or_insert_with(Vec::new);
                     }
-                } else if line.starts_with("=======") {
+                } else if is_sep_marker(line) {
                     // A bare `=======` at column 0 is the git separator, but
                     // only when this is not a jj block (jj blocks are
-                    // re-parsed above; guard against ` =======` content).
+                    // re-parsed above; longer `=` runs inside a block are
+                    // content, e.g. a Markdown setext underline).
                     if !block_looks_jj(&block_raw) {
                         section = Section::Theirs;
                     } else {
@@ -393,13 +413,13 @@ impl ConflictedFile {
             }
         }
 
-        // An unterminated conflict: try jj first, else treat as git ours.
+        // A block still in flight at EOF never closed: it is not a
+        // resolvable conflict, so its lines go back verbatim. Previously the
+        // half-collected state still drove resolution UI — and for jj blocks
+        // even invented a close marker on write-back (finding 2.3).
         if conflict.is_some() {
-            if let Some(c) = parse_jj_block(&block_start, &block_raw, ">>>>>>>") {
-                segments.push(Segment::Conflict(c));
-            } else if let Some(c) = conflict.take() {
-                segments.push(Segment::Conflict(c));
-            }
+            current.push(block_start);
+            current.append(&mut block_raw);
         }
         if !current.is_empty() {
             segments.push(Segment::Common(current));
@@ -975,6 +995,96 @@ c
         assert_eq!(Side::parse("theirs"), Some(Side::Theirs));
         assert_eq!(Side::parse("both"), Some(Side::Both));
         assert_eq!(Side::parse("nope"), None);
+    }
+
+    #[test]
+    fn unterminated_block_is_never_half_a_conflict() {
+        // Open without close: not conflicted at all — a parser that returned
+        // `Some` here would drive resolution UI over a dangling block.
+        let dangling = "head\n<<<<<<< ours\none\n=======\ntwo\n";
+        assert!(!ConflictedFile::is_conflicted(dangling));
+        assert!(ConflictedFile::parse(dangling).is_none());
+
+        // A well-formed block followed by a dangling one: the well-formed
+        // block resolves, the dangling one stays content and round-trips
+        // verbatim instead of inventing a close marker on write-back.
+        let mixed = "a\n<<<<<<< x\n1\n=======\n2\n>>>>>>> y\nb\n<<<<<<< z\n3\n";
+        let parsed = ConflictedFile::parse(mixed).expect("the well-formed block parses");
+        assert_eq!(parsed.conflict_count(), 1);
+        let resolved = parsed.resolve_optional(&[Some(Side::Ours)]);
+        assert_eq!(resolved, "a\n1\nb\n<<<<<<< z\n3\n");
+    }
+
+    #[test]
+    fn nested_open_marker_is_block_content() {
+        let nested = "a\n<<<<<<< x\n<<<<<<< inner\n1\n=======\n2\n>>>>>>> y\nb\n";
+        let parsed = ConflictedFile::parse(nested).expect("parses");
+        assert_eq!(parsed.conflict_count(), 1);
+        let conflict = parsed
+            .segments
+            .iter()
+            .find_map(|s| match s {
+                Segment::Conflict(c) => Some(c),
+                _ => None,
+            })
+            .unwrap();
+        // The nested open belongs to the ours section; the outer block's
+        // structure survives. (Write-back normalizes git labels, as before.)
+        assert_eq!(conflict.ours, vec!["<<<<<<< inner", "1"]);
+        assert_eq!(conflict.theirs, vec!["2"]);
+    }
+
+    #[test]
+    fn setext_underline_stays_side_content() {
+        // A Markdown setext underline (`=` run longer than the 7-char
+        // marker, or padded) inside the ours section is content, not the
+        // separator.
+        let content = concat!(
+            "a\n",
+            "<<<<<<< ours\n",
+            "Title\n",
+            "===========\n",
+            "1\n",
+            "=======\n",
+            "2\n",
+            ">>>>>>> theirs\n",
+            "b\n",
+        );
+        let parsed = ConflictedFile::parse(content).expect("parses");
+        let conflict = parsed
+            .segments
+            .iter()
+            .find_map(|s| match s {
+                Segment::Conflict(c) => Some(c),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(conflict.ours, vec!["Title", "===========", "1"]);
+        assert_eq!(conflict.theirs, vec!["2"]);
+    }
+
+    #[test]
+    fn labeled_diff3_divider_opens_the_base_section() {
+        // git writes `||||||| merged common ancestors`; the label does not
+        // change the marker's meaning.
+        let content = concat!(
+            "a\n",
+            "<<<<<<< ours\n1\n",
+            "||||||| merged common ancestors\n0\n",
+            "=======\n2\n",
+            ">>>>>>> theirs\n",
+            "b\n",
+        );
+        let parsed = ConflictedFile::parse(content).expect("parses");
+        let conflict = parsed
+            .segments
+            .iter()
+            .find_map(|s| match s {
+                Segment::Conflict(c) => Some(c),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(conflict.base.as_deref(), Some(&["0".to_string()][..]));
     }
 
     const JJ_DIFF_STYLE: &str = "\
