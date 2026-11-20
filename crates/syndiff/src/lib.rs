@@ -242,15 +242,11 @@ fn collect_ranges(
                     vertex.rhs.id().map(|id| rhs_tree.get(id)),
                 ) {
                     if levenshtein_pct > 20 {
-                        if let Some((lhs_replace_ranges, rhs_replace_ranges)) = get_replace_ranges(
-                            lhs_node,
-                            rhs_node,
-                            lhs_bounds.as_ref(),
-                            rhs_bounds.as_ref(),
-                        ) {
-                            lhs_ranges.extend(lhs_replace_ranges);
-                            rhs_ranges.extend(rhs_replace_ranges);
-                        }
+                        // No character-level comment diff yet: fall through to
+                        // the novel-ranges branch so replaced comments still
+                        // get whole-node highlights instead of none.
+                        lhs_ranges.extend(get_novel_ranges(lhs_node, lhs_bounds.as_ref()));
+                        rhs_ranges.extend(get_novel_ranges(rhs_node, rhs_bounds.as_ref()));
                     } else {
                         lhs_ranges.extend(get_novel_ranges(lhs_node, lhs_bounds.as_ref()));
                         rhs_ranges.extend(get_novel_ranges(rhs_node, rhs_bounds.as_ref()));
@@ -306,37 +302,6 @@ fn get_novel_ranges(node: &SyntaxNode, bounds: Option<&Range<usize>>) -> ArrayVe
     }
 
     ranges
-}
-
-fn get_replace_ranges(
-    lhs_node: &SyntaxNode,
-    rhs_node: &SyntaxNode,
-    lhs_bounds: Option<&Range<usize>>,
-    rhs_bounds: Option<&Range<usize>>,
-) -> Option<(Vec<Range<usize>>, Vec<Range<usize>>)> {
-    if let (Some(SyntaxHint::Comment(_lhs_comment)), Some(SyntaxHint::Comment(_rhs_comment))) =
-        (lhs_node.hint.as_ref(), rhs_node.hint.as_ref())
-    {
-        // Convert relative ranges to absolute byte positions, then adjust to bounds
-        let lhs_offset = lhs_node.byte_range.start;
-        let rhs_offset = rhs_node.byte_range.start;
-
-        let lhs_ranges = Vec::<Range<usize>>::default()
-            .into_iter()
-            .map(|r| (r.start + lhs_offset)..(r.end + lhs_offset))
-            .filter_map(|r| adjust_range_to_bounds(r, lhs_bounds))
-            .collect();
-
-        let rhs_ranges = Vec::<Range<usize>>::default()
-            .into_iter()
-            .map(|r| (r.start + rhs_offset)..(r.end + rhs_offset))
-            .filter_map(|r| adjust_range_to_bounds(r, rhs_bounds))
-            .collect();
-
-        Some((lhs_ranges, rhs_ranges))
-    } else {
-        None
-    }
 }
 
 fn merge_ranges(mut ranges: Vec<Range<usize>>) -> Vec<Range<usize>> {
