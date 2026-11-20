@@ -4,12 +4,10 @@ use oyui_tasker::{Listener, TaskerContext};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tokio::fs;
-
+use crate::worker::events::diff_update::DiffUpdate;
 use crate::cli::DiffAlgorithm;
 use crate::diff::{line_ranges, DiffLine, DiffResult, FileDiff, Hunk, InlineChange};
 use crate::diff_cache::{DiffCache, LineIndex, LineWidths};
-use crate::worker::events::diff_update::DiffUpdate;
 
 const MAX_FILE_SIZE: u64 = 1024 * 1024; // 1 MB limit
 
@@ -207,11 +205,7 @@ pub fn compute(
 ) -> Result<Vec<Hunk>, Box<dyn std::error::Error + Send + Sync>> {
     let input = InternedInput::new(left_file_content, right_file_content);
 
-    let inner_algo = match algo {
-        DiffAlgorithm::Histogram | DiffAlgorithm::SyntaxAware => Algorithm::Histogram,
-        DiffAlgorithm::Myers => Algorithm::Myers,
-        DiffAlgorithm::MyersMinimal => Algorithm::MyersMinimal,
-    };
+    let inner_algo = algo.as_imara();
 
     let diff = Diff::compute(inner_algo, &input);
 

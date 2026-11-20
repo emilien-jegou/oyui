@@ -61,6 +61,9 @@ pub struct App {
     pub config: Config,
     pub handler: BoxedHandler,
     pub color_mode: TerminalColorMode,
+    /// Set when the first tree calculation finds nothing to show.
+    #[builder(default = false)]
+    pub no_modifications: bool,
     /// Shared theme: workers read, theme actions write.
     pub theme: Arc<RwLock<ThemeState>>,
     /// UI-only state: main-task confined behind one lock.
@@ -86,6 +89,15 @@ impl App {
                     crate::app::ui_state::MessageLevel::Error,
                     failed.to_string(),
                 );
+            }
+            crate::worker::Event::CalculateFileTreeRes(res) => {
+                // An empty tree means the diff found nothing to show: surface
+                // a distinct "no modifications" outcome instead of opening an
+                // empty TUI.
+                if res.tree.nodes.is_empty() {
+                    self.no_modifications = true;
+                    self.ui.lock().should_quit = true;
+                }
             }
             crate::worker::Event::WatchConfigRes(res) => {
                 self.config.handle_reload_event(&res.path);

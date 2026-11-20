@@ -47,8 +47,10 @@ pub enum TreeNode {
 pub struct FileTree {
     pub nodes: Vec<TreeNode>,
     pub is_file_diff: bool,
-    /// Mutation counter bumped by every write method; views cache against it.
     version: u64,
+    /// Path → child-index path from the root, maintained by `insert_file` so
+    /// `file()`/`file_mut()` skip the full recursive walk.
+    index: std::collections::HashMap<PathBuf, Vec<usize>>,
 }
 
 impl FileTree {
@@ -76,21 +78,19 @@ impl FileTree {
 
     /// Returns a reference to the file node at the given path.
     pub fn file(&self, target_path: &Path) -> Option<&TreeNodeFile> {
-        fn find_file<'a>(nodes: &'a [TreeNode], target: &Path) -> Option<&'a TreeNodeFile> {
-            for node in nodes {
-                match node {
-                    TreeNode::File(f) if f.path == target => return Some(f),
-                    TreeNode::Directory(d) => {
-                        if let Some(f) = find_file(&d.children, target) {
-                            return Some(f);
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            None
+        let path = self.index.get(target_path)?;
+        self.node_at(path)?.as_file()
+    }
+
+    /// Navigates the tree along a child-index path from the root.
+    fn node_at(&self, path: &[usize]) -> Option<&TreeNode> {
+        let mut nodes = &self.nodes[..];
+        let mut node = nodes.first()?;
+        for &idx in path {
+            let d = node.as_directory()?;
+            node = d.children.get(idx)?;
         }
-        find_file(&self.nodes, target_path)
+        Some(node)
     }
 
     /// Returns a mutable reference to the file node at the given path.
@@ -393,6 +393,7 @@ impl FileTree {
         self.version += 1;
         let mut current_nodes = &mut self.nodes;
         let mut current_path = PathBuf::new();
+        let mut nav_path = Vec::new();
 
         for (i, comp) in rel_path.iter().enumerate() {
             current_path.push(comp);
@@ -406,7 +407,8 @@ impl FileTree {
                     right_path: right_path.clone(),
                     state: StagingState::Unstaged,
                 }));
-                break;
+                self.index.insert(rel_path, nav_path);
+                return;
             }
 
             // Match directories by lossless path equality, not by display
@@ -427,6 +429,7 @@ impl FileTree {
                 current_nodes.len() - 1
             };
 
+            nav_path.push(idx);
             match &mut current_nodes[idx] {
                 TreeNode::Directory(d) => current_nodes = &mut d.children,
                 _ => unreachable!(),
@@ -440,6 +443,22 @@ impl TreeNode {
         match self {
             TreeNode::File(f) => &f.path,
             TreeNode::Directory(d) => &d.path,
+        }
+    }
+
+    /// Returns the file payload if this node is a leaf.
+    pub fn as_file(&self) -> Option<&TreeNodeFile> {
+        match self {
+            TreeNode::File(f) => Some(f),
+            _ => None,
+        }
+    }
+
+    /// Returns the directory payload if this node is a branch.
+    pub fn as_directory(&self) -> Option<&TreeNodeDirectory> {
+        match self {
+            TreeNode::Directory(d) => Some(d),
+            _ => None,
         }
     }
 

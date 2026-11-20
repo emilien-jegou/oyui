@@ -24,6 +24,12 @@ pub enum Keybind {
 
 impl Keybind {
     pub fn parse(s: &str) -> Self {
+        let s = s.trim();
+        // `-` and `+` are this parser's separators, so a bare one never
+        // survives the split below; catch it as a character binding first.
+        if s == "-" || s == "+" {
+            return Keybind::Char(s.to_string());
+        }
         let parts: Vec<&str> = s.split(['-', '+']).map(|p| p.trim()).collect();
         let mut ctrl = false;
         let mut alt = false;
@@ -36,6 +42,17 @@ impl Keybind {
                 "alt" => alt = true,
                 "shift" => shift = true,
                 _ => key = part.to_string(), // Preserve the original case of the character/code key
+            }
+        }
+
+        // A chord whose key is itself a separator (`ctrl--`, `ctrl--` for
+        // minus, `ctrl-+` for plus) loses its key in the split above; the
+        // input's final character is the bound key.
+        if key.is_empty() {
+            if let Some(last) = s.chars().last() {
+                if last == '-' || last == '+' {
+                    key = last.to_string();
+                }
             }
         }
 

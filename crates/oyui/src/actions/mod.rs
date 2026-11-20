@@ -9,12 +9,14 @@ pub use keybinds::*;
 
 /// Parse a `#rrggbb` hex string into a [`Color`].
 pub fn parse_hex_color(s: &str) -> Option<Color> {
-    if s.starts_with('#') && s.len() >= 7 {
-        let r = u8::from_str_radix(&s[1..3], 16).ok()?;
-        let g = u8::from_str_radix(&s[3..5], 16).ok()?;
-        let b = u8::from_str_radix(&s[5..7], 16).ok()?;
-        Some(Color::Rgb(r, g, b))
-    } else {
-        None
+    let hex = s.strip_prefix('#')?;
+    if hex.len() < 6 {
+        return None;
     }
+    // Byte-slicing at fixed offsets is safe only if every pair is ASCII hex;
+    // `get` returns `None` instead of panicking on a multi-byte char boundary.
+    let r = u8::from_str_radix(hex.get(0..2)?, 16).ok()?;
+    let g = u8::from_str_radix(hex.get(2..4)?, 16).ok()?;
+    let b = u8::from_str_radix(hex.get(4..6)?, 16).ok()?;
+    Some(Color::Rgb(r, g, b))
 }

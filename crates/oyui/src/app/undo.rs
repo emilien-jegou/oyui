@@ -1,7 +1,6 @@
 //! Bounded undo/redo stack for staging mutations.
 
 use crate::diff::DiffResult;
-use crate::diff::FileDiff;
 use crate::diff_cache::DiffCache;
 use crate::tree::FileTree;
 use std::path::PathBuf;
@@ -9,19 +8,20 @@ use std::sync::Arc;
 
 /// A point-in-time copy of staging-relevant state.
 ///
-/// File contents are `Arc<str>` inside [`FileDiff`], so clones stay cheap; only
-/// hunk layouts and line selections are copied.
+/// Diffs are shared by `Arc`, so capturing is O(files) refcount bumps rather
+/// than a deep clone of every hunk; `CacheMap::update`'s copy-on-write keeps
+/// moved snapshots immutable while later mutations land in fresh copies.
 pub struct StagingSnapshot {
     pub tree: FileTree,
-    pub diffs: Vec<(PathBuf, FileDiff)>,
+    pub diffs: Vec<(PathBuf, Arc<DiffResult>)>,
 }
 
 /// Captures the staging state of every cached text diff.
 pub fn capture(tree: &FileTree, cache: &DiffCache) -> StagingSnapshot {
     let mut diffs = Vec::new();
     for f in tree.files() {
-        if let Some(DiffResult::Text(d)) = cache.diffs.get(&f.path).as_deref() {
-            diffs.push((f.path.clone(), d.clone()));
+        if let Some(diff) = cache.diffs.get(&f.path) {
+            diffs.push((f.path.clone(), diff));
         }
     }
     StagingSnapshot {
@@ -35,9 +35,7 @@ pub fn restore(tree: &mut FileTree, cache: &DiffCache, snap: StagingSnapshot) {
     tree.replace(snap.tree);
     let generation = cache.diffs.generation();
     for (path, diff) in snap.diffs {
-        cache
-            .diffs
-            .set(path, Arc::new(DiffResult::Text(diff)), generation);
+        cache.diffs.set(path, diff, generation);
     }
 }
 
@@ -86,7 +84,7 @@ impl UndoStack {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::diff::{DiffLine, Hunk, LineSelections};
+    use crate::diff::{DiffLine, FileDiff, Hunk, LineSelections};
     use crate::tree::StagingState;
 
     fn setup() -> (FileTree, DiffCache) {

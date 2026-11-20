@@ -197,6 +197,9 @@ impl App {
             tracing::warn!("Application aborted.");
             return Err(CommandError::Aborted);
         }
+        if self.no_modifications {
+            return Err(CommandError::NoModifications);
+        }
 
         Ok(())
     }

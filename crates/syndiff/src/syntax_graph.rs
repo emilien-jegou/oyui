@@ -88,17 +88,13 @@ impl<'a> SyntaxVertex<'a> {
     pub fn is_end(&self) -> bool {
         self.lhs.is_end() && self.rhs.is_end() && self.delimiters.is_empty()
     }
-
-    fn can_pop_either(&self) -> bool {
-        self.delimiters.can_pop_lhs() || self.delimiters.can_pop_rhs()
-    }
 }
 
 impl PartialEq for SyntaxVertex<'_> {
     fn eq(&self, other: &Self) -> bool {
         self.lhs == other.lhs
             && self.rhs == other.rhs
-            && self.can_pop_either() == other.can_pop_either()
+            && self.delimiters == other.delimiters
     }
 }
 
@@ -108,7 +104,7 @@ impl Hash for SyntaxVertex<'_> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.lhs.hash(state);
         self.rhs.hash(state);
-        self.can_pop_either().hash(state);
+        self.delimiters.hash(state);
     }
 }
 

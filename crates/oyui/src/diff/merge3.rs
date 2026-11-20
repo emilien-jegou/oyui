@@ -116,7 +116,7 @@ fn final_newline_consensus(base: &str, left: &str, right: &str) -> bool {
 /// Computes the changed base ranges when going from `base` to `side`.
 fn changes(base: &str, side: &str, algo: DiffAlgorithm) -> Vec<Change> {
     let input = InternedInput::new(base, side);
-    let diff = Diff::compute(algorithm(algo), &input);
+    let diff = Diff::compute(algo.as_imara(), &input);
     let side_lines: Vec<&str> = side.lines().collect();
 
     diff.hunks()
@@ -129,14 +129,6 @@ fn changes(base: &str, side: &str, algo: DiffAlgorithm) -> Vec<Change> {
                 .collect(),
         })
         .collect()
-}
-
-fn algorithm(algo: DiffAlgorithm) -> Algorithm {
-    match algo {
-        DiffAlgorithm::Histogram | DiffAlgorithm::SyntaxAware => Algorithm::Histogram,
-        DiffAlgorithm::Myers => Algorithm::Myers,
-        DiffAlgorithm::MyersMinimal => Algorithm::MyersMinimal,
-    }
 }
 
 /// Applies `changes` to `base[region]`, filling the gaps with base lines.

@@ -81,14 +81,7 @@ impl Listener<StatsReq> for Stats {
                             let r_str = r_text.unwrap_or_default();
 
                             let input = InternedInput::new(l_str.as_str(), r_str.as_str());
-                            let inner_algo = match ctx.algorithm {
-                                DiffAlgorithm::Histogram | DiffAlgorithm::SyntaxAware => {
-                                    Algorithm::Histogram
-                                }
-                                DiffAlgorithm::Myers => Algorithm::Myers,
-                                DiffAlgorithm::MyersMinimal => Algorithm::MyersMinimal,
-                            };
-                            let diff = Diff::compute(inner_algo, &input);
+                            let diff = Diff::compute(ctx.algorithm.as_imara(), &input);
 
                             DiffStats::Text {
                                 insertions: diff.count_additions() as usize,
