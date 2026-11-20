@@ -2,6 +2,9 @@ use std::hash::{Hash, Hasher};
 use std::num::NonZeroUsize;
 use std::ops::Range;
 
+/// Maximum recursion depth; deeper nodes are treated as opaque leaves.
+const MAX_DEPTH: usize = 256;
+
 /// A unique identifier for a node within a `SyntaxTree`.
 ///
 /// This is an index into the preorder traversal of the tree.
@@ -364,7 +367,7 @@ pub fn build_tree<'a>(mut cursor: tree_sitter::TreeCursor<'_>, source: &'a str) 
     let mut nodes = Vec::with_capacity(cursor.node().descendant_count());
 
     if cursor.node().child_count() > 0 || !cursor.node().is_extra() {
-        build_tree_recursive(&mut cursor, &mut nodes, None, source);
+        build_tree_recursive(&mut cursor, &mut nodes, None, source, 0);
     }
 
     SyntaxTree { nodes }
@@ -375,6 +378,7 @@ fn build_tree_recursive<'a>(
     nodes: &mut Vec<SyntaxNode<'a>>,
     parent: Option<SyntaxId>,
     source: &'a str,
+    depth: usize,
 ) -> SyntaxId {
     let mut ts_node = cursor.node();
     let this_id = SyntaxId::new(nodes.len());
@@ -435,17 +439,18 @@ fn build_tree_recursive<'a>(
         }
     }
 
-    if cursor.goto_first_child() {
+    let at_depth_cap = depth >= MAX_DEPTH;
+    if cursor.goto_first_child() && !at_depth_cap {
         if delimiters[0].is_some() {
             cursor.goto_next_sibling();
         }
-
         loop {
             if remaining_children == 0 {
                 break;
             }
 
-            let child_id = build_tree_recursive(cursor, nodes, Some(this_id), source);
+            let child_id =
+                build_tree_recursive(cursor, nodes, Some(this_id), source, depth + 1);
             let child_node = &nodes[child_id.index()];
 
             remaining_children -= 1;

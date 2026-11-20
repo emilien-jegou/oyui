@@ -1,4 +1,19 @@
 //! Concurrent path-keyed cache with in-flight dedup and generation invalidation.
+//!
+//! # Lock-order contract (module-wide)
+//!
+//! [`CacheMap`] methods take the scc entry lock while the closure passed to
+//! [`CacheMap::update`] runs. To keep the ordering global and deadlock-free:
+//!
+//! 1. **Never hold the tree lock while calling a `CacheMap` method** — acquire
+//!    the cache first, release it, then touch the tree, or clone out of the
+//!    entry and act on the clone.
+//! 2. **Never take another lock inside an `update` closure** beyond the entry
+//!    lock the map already holds: closures run under a write lock, so any wait
+//!    they perform is a wait-with-lock-held.
+//!
+//! The one sanctioned exception is documented at [`CacheMap::set`]: the state
+//! mutex is taken *inside* the entry lock, in that order, nowhere else.
 
 use parking_lot::Mutex;
 use scc::HashMap;
