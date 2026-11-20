@@ -78,18 +78,26 @@ impl StagingSession {
         self.operation == crate::app::Operation::Merge
     }
 
-    /// Mutates the open file's diff in place; callers persist via `CacheMap::update`.
-    pub fn mutate_diff<F>(&self, f: F)
+    /// Mutates the open file's diff in place; returns whether a text diff was
+    /// present for the closure to act on (`false` means binary, empty, or
+    /// not yet computed — the mutation did not happen).
+    pub fn mutate_diff<F>(&self, f: F) -> bool
     where
         F: FnOnce(&mut FileDiff, &RwLock<FileTree>),
     {
         // The closure may take the tree lock (staging state updates); see
         // `CacheMap::update` for the lock-ordering invariant this relies on.
-        self.cache.diffs.update(&self.path, |diff_result| {
-            if let crate::diff::DiffResult::Text(diff) = diff_result {
-                f(diff, &self.tree);
-            }
-        });
+        self.cache
+            .diffs
+            .update(&self.path, |diff_result| {
+                if let crate::diff::DiffResult::Text(diff) = diff_result {
+                    f(diff, &self.tree);
+                    true
+                } else {
+                    false
+                }
+            })
+            .unwrap_or(false)
     }
 }
 
