@@ -5,6 +5,32 @@ use crate::diff::{DiffLine, FileDiff, Hunk, HunkMarker};
 use crate::tree::{FileTree, StagingState};
 use parking_lot::RwLock;
 use std::ops::Range;
+
+/// Whether a staging operation targets the staged or the unstaged side.
+///
+/// Replaces the boolean-blind `staged: bool` parameters: call sites read
+/// [`StagingMode::Stage`] / [`StagingMode::Unstage`] instead of a bare `true`
+/// / `false` whose polarity has to be looked up.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StagingMode {
+    /// Mark the selection as staged.
+    Stage,
+    /// Mark the selection as unstaged.
+    Unstage,
+}
+
+impl StagingMode {
+    /// The selection value this mode writes into `line_selections`.
+    pub fn is_staged(self) -> bool {
+        matches!(self, StagingMode::Stage)
+    }
+}
+
+impl From<bool> for StagingMode {
+    fn from(staged: bool) -> Self {
+        if staged { StagingMode::Stage } else { StagingMode::Unstage }
+    }
+}
 use std::path::Path;
 
 impl FileDiff {
@@ -39,15 +65,16 @@ impl FileDiff {
     }
 
     /// Sets staging for a hunk (and contiguous neighbours when `expand`).
-    pub fn set_hunk(&mut self, hunk_idx: usize, expand: bool, default: bool, staged: bool) {
+    pub fn set_hunk(&mut self, hunk_idx: usize, expand: bool, default: bool, mode: StagingMode) {
         self.ensure_selection_size(default);
         let (left, right) = self.expanded_bounds(hunk_idx, expand);
-        self.apply_staging_to_range(left, right, expand, staged);
+        self.apply_staging_to_range(left, right, expand, mode.is_staged());
     }
 
     /// Sets staging for every modifiable line in the file.
-    pub fn set_all_staging(&mut self, default: bool, staged: bool) {
+    pub fn set_all_staging(&mut self, default: bool, mode: StagingMode) {
         self.ensure_selection_size(default);
+        let staged = mode.is_staged();
         let total_lines: usize = self.hunks.iter().map(|h| h.lines.len()).sum();
         for idx in 0..total_lines {
             self.line_selections.set(idx, staged);
@@ -376,22 +403,22 @@ mod tests {
     #[test]
     fn set_hunk_is_deterministic() {
         let mut diff = two_hunk_diff();
-        diff.set_hunk(0, false, false, true);
+        diff.set_hunk(0, false, false, StagingMode::Stage);
 
         assert!(diff.is_hunk_fully_staged(0, 0, false));
         assert!(!diff.is_hunk_fully_staged(1, 1, false));
 
-        diff.set_hunk(0, false, false, false);
+        diff.set_hunk(0, false, false, StagingMode::Unstage);
         assert!(!diff.is_hunk_fully_staged(0, 0, false));
     }
 
     #[test]
     fn set_all_staging_marks_every_line() {
         let mut diff = two_hunk_diff();
-        diff.set_all_staging(false, true);
+        diff.set_all_staging(false, StagingMode::Stage);
         assert_eq!(diff.staging_state(false), StagingState::Staged);
 
-        diff.set_all_staging(false, false);
+        diff.set_all_staging(false, StagingMode::Unstage);
         assert_eq!(diff.staging_state(false), StagingState::Unstaged);
     }
 }

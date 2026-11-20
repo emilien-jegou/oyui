@@ -1,5 +1,6 @@
 //! Bounded undo/redo stack for staging mutations.
 
+use crate::diff::staging::StagingMode;
 use crate::diff::DiffResult;
 use crate::diff_cache::DiffCache;
 use crate::tree::FileTree;
@@ -125,7 +126,7 @@ mod tests {
         tree.set_state_for_path(&PathBuf::from("a.txt"), StagingState::Staged);
         cache.diffs.update(&PathBuf::from("a.txt"), |d| {
             if let DiffResult::Text(fd) = d {
-                fd.set_all_staging(false, true);
+                fd.set_all_staging(false, StagingMode::Stage);
             }
         });
 

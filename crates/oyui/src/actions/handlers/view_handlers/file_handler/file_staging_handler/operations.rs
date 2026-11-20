@@ -3,6 +3,7 @@
 use super::staging_session::StagingSession;
 use super::staging_sync::{invert_text_diff_staging, toggle_stage_hunk_in_diff};
 use crate::diff::staging::is_file_staged_default;
+use crate::diff::staging::StagingMode;
 use crate::diff::{FileDiff, HunkMarker};
 use crate::tree::FileTree;
 use parking_lot::RwLock;
@@ -359,7 +360,7 @@ pub fn join_at_cursor(session: &StagingSession) {
 pub fn set_hunk_staged(session: &StagingSession, hunk_idx: usize, staged: bool) {
     session.mutate_diff(|diff, tree| {
         let default = is_file_staged_default(tree, &session.path);
-        diff.set_hunk(hunk_idx, true, default, staged);
+        diff.set_hunk(hunk_idx, true, default, StagingMode::from(staged));
         crate::diff::staging::update_tree_staging_state(tree, &session.path, diff, default);
     });
 }
@@ -368,7 +369,7 @@ pub fn set_hunk_staged(session: &StagingSession, hunk_idx: usize, staged: bool) 
 pub fn set_all(session: &StagingSession, staged: bool) {
     session.mutate_diff(|diff, tree| {
         let default = is_file_staged_default(tree, &session.path);
-        diff.set_all_staging(default, staged);
+        diff.set_all_staging(default, StagingMode::from(staged));
         crate::diff::staging::update_tree_staging_state(tree, &session.path, diff, default);
     });
 }
