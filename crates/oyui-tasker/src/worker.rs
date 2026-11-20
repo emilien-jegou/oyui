@@ -145,11 +145,6 @@ impl Replies {
     pub fn len(&self) -> usize {
         self.0.lock().unwrap().len()
     }
-
-    /// True when no request is awaiting an answer.
-    pub fn is_empty(&self) -> bool {
-        self.0.lock().unwrap().is_empty()
-    }
 }
 
 /// The caller's end of one request.
@@ -234,7 +229,7 @@ mod tests {
     fn deliver_to_an_unknown_token_is_reported() {
         let (_reply, replies, token) = parked::<Res>();
         replies.forget(token);
-        assert!(replies.is_empty());
+        assert_eq!(replies.len(), 0);
 
         let err = replies
             .deliver(token, Res(1))
@@ -250,7 +245,7 @@ mod tests {
 
         drop(reply);
 
-        assert!(replies.is_empty(), "slot must be freed on drop");
+        assert_eq!(replies.len(), 0, "slot must be freed on drop");
         let err = replies
             .deliver(token, Res(9))
             .expect_err("dropped caller leaves nothing to deliver to");

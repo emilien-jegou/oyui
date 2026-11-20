@@ -556,15 +556,17 @@ pub(crate) fn expand(input: &RegistryInput) -> TokenStream {
                     rx,
                     cells,
                     replies,
-                    next_reply,
                     handle,
+                    // Dies here on purpose: reply tokens are scoped to their
+                    // registry, and a split registry has no `ask` left to
+                    // mint more.
+                    ..
                 } = self;
                 let sender = EventSender {
                     tx,
                     token: ::std::option::Option::None,
                     replies,
                 };
-                let _ = next_reply;
                 (
                     sender,
                     EventReceiver {

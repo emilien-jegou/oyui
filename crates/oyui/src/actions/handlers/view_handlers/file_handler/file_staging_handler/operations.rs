@@ -18,73 +18,87 @@ pub fn toggle_hunk(session: &StagingSession, hunk_idx: usize) {
 pub fn toggle_conflict_at_cursor(session: &StagingSession) -> bool {
     use crate::diff::Side;
 
-    // Capture the anchor first: the cursor acts as the anchor point, so the
-    // view shifts to keep it at the same screen position across the fold.
-    let anchor = {
-        let ui = session.ui.lock();
-        let line = ui
-            .file_view
-            .line_mapping(&session.path)
-            .and_then(|m| m.get(session.current_row_idx).copied());
+    // One guard for the whole decision: capture the anchor, find the
+    // conflict, pick or reset the choice, and compute the post-mutation
+    // anchor line. Between separate locks nothing but "checked above"
+    // discipline stood between the reads (finding 6.5); the helpers that
+    // follow lock `ui` themselves, and parking_lot is not re-entrant, so
+    // the guard must be gone by then.
+    let toggled = {
+        let mut ui = session.ui.lock();
+
+        // Capture the anchor first: the cursor acts as the anchor point, so
+        // the view shifts to keep it at the same screen position across the
+        // fold.
         let (row, offset) = ui
             .file_view
             .scroll_states
             .get(&session.path)
             .map(|st| (st.selected().unwrap_or(0), st.offset()))
             .unwrap_or((0, 0));
-        line.map(|l| (l, row.saturating_sub(offset)))
-    };
-    let Some((line, screen_offset)) = anchor else {
-        return false;
-    };
+        let Some((line, screen_offset)) = ui
+            .file_view
+            .line_mapping(&session.path)
+            .and_then(|m| m.get(session.current_row_idx).copied())
+            .map(|l| (l, row.saturating_sub(offset)))
+        else {
+            return false;
+        };
 
-    let (index, folded) = {
-        let ui = session.ui.lock();
-        match ui
+        let Some((index, folded)) = ui
             .resolve
             .as_ref()
             .and_then(|s| s.conflict_at_line(line).map(|i| (i, s.is_folded(i))))
-        {
-            Some(v) => v,
-            None => return false,
-        }
-    };
+        else {
+            return false;
+        };
 
-    // Logical line to keep under the cursor (resolved after the mutation,
-    // since kept lines depend on the new choice): a kept line survives the
-    // fold, anything hidden anchors to the range start.
-    if folded {
-        // Anything folded unfolds back to the markers: the frame rows and
-        // the kept center lines alike. Conflict hunks are not stageable, so
-        // space here never toggles staging.
-        let mut ui = session.ui.lock();
-        if let Some(state) = ui.resolve.as_mut() {
-            state.reset_choice(index);
-            state.set_folded(index, false);
+        if folded {
+            // Anything folded unfolds back to the markers: the frame rows and
+            // the kept center lines alike. Conflict hunks are not stageable,
+            // so space here never toggles staging.
+            if let Some(state) = ui.resolve.as_mut() {
+                state.reset_choice(index);
+                state.set_folded(index, false);
+            }
+        } else {
+            // Unfolded: pick the side under the cursor (ours vs theirs),
+            // default ours.
+            let side = ui
+                .resolve
+                .as_ref()
+                .and_then(|state| conflict_side_at_line(state, index, line))
+                .unwrap_or(Side::Ours);
+            if let Some(state) = ui.resolve.as_mut() {
+                state.set_choice(index, side);
+                state.set_folded(index, true);
+            }
         }
         ui.file_view.mark_dirty();
-        drop(ui);
-        clear_conflict_hunk_markers(session, index);
-        reanchor_cursor(session, anchor_target(session, index, line), screen_offset);
-        return true;
-    }
 
-    // Unfolded: pick the side under the cursor (ours vs theirs), default ours.
-    let side = {
-        let ui = session.ui.lock();
-        let state = ui.resolve.as_ref().expect("checked above");
-        conflict_side_at_line(state, index, line).unwrap_or(Side::Ours)
+        // Logical line to keep under the cursor after the mutation: a kept
+        // line survives, anything hidden anchors to the range start (which
+        // both frame rows map to). Resolved after the mutation, since kept
+        // lines depend on the new choice.
+        let target = match ui.resolve.as_ref() {
+            Some(state) if state.keeps_line(index, line) => line,
+            Some(state) => state
+                .conflicts
+                .marker_ranges()
+                .get(index)
+                .map(|r| r.start)
+                .unwrap_or(line),
+            None => line,
+        };
+
+        Some((index, target, screen_offset))
     };
-    {
-        let mut ui = session.ui.lock();
-        if let Some(state) = ui.resolve.as_mut() {
-            state.set_choice(index, side);
-            state.set_folded(index, true);
-        }
-        ui.file_view.mark_dirty();
-    }
+
+    let Some((index, target, screen_offset)) = toggled else {
+        return false;
+    };
     clear_conflict_hunk_markers(session, index);
-    reanchor_cursor(session, anchor_target(session, index, line), screen_offset);
+    reanchor_cursor(session, target, screen_offset);
     true
 }
 
@@ -116,23 +130,6 @@ fn clear_conflict_hunk_markers(session: &StagingSession, index: usize) {
             }
         }
     });
-}
-
-/// Logical line to keep under the cursor after a (un)fold, given the new
-/// choice: a kept line survives, anything hidden anchors to the range start
-/// (which both frame rows map to).
-fn anchor_target(session: &StagingSession, index: usize, line: usize) -> usize {
-    let ui = session.ui.lock();
-    match ui.resolve.as_ref() {
-        Some(state) if state.keeps_line(index, line) => line,
-        Some(state) => state
-            .conflicts
-            .marker_ranges()
-            .get(index)
-            .map(|r| r.start)
-            .unwrap_or(line),
-        None => line,
-    }
 }
 
 /// Recomputes the row layout and moves the cursor to `target`, shifting the

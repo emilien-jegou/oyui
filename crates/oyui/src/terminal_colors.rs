@@ -70,18 +70,20 @@ fn parse_osc_rgb(s: &str) -> Option<(u8, u8, u8)> {
 
 /// Helper function to parse a hex string channel of arbitrary length
 /// (1 to 4 characters) and scale it correctly to a single u8 (0 to 255).
+///
+/// Longer inputs are rejected rather than downscaled with a data-dependent
+/// shift: `rgb(...)` parts can carry arbitrary text, and a long digit run
+/// used to shift a `u32` by more than 32 bits (panic in debug, garbage in
+/// release). A channel of more than 16 bits has no meaning here.
 fn parse_channel(c: &str) -> Option<u8> {
     let len = c.len();
-    if len == 0 {
-        return None;
-    }
     let val = u32::from_str_radix(c, 16).ok()?;
     match len {
-        1 => Some((val * 17) as u8),               // Scale 4-bit (0x3 -> 0x33)
-        2 => Some(val as u8),                      // 8-bit (no scale needed)
-        3 => Some((val >> 4) as u8),               // Scale 12-bit to 8-bit
-        4 => Some((val >> 8) as u8),               // Scale 16-bit to 8-bit
-        _ => Some((val >> ((len - 2) * 4)) as u8), // Generic downscale for arbitrarily long values
+        1 => Some((val * 17) as u8), // Scale 4-bit (0x3 -> 0x33)
+        2 => Some(val as u8),        // 8-bit (no scale needed)
+        3 => Some((val >> 4) as u8), // Scale 12-bit to 8-bit
+        4 => Some((val >> 8) as u8), // Scale 16-bit to 8-bit
+        _ => None,
     }
 }
 

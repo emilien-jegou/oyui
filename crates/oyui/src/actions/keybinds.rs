@@ -81,6 +81,11 @@ pub struct KeybindEntry {
 
 #[derive(Clone)]
 pub struct KeybindRegistry {
+    /// Bindings in registration order; dispatch visits **every** match in
+    /// this order — `Global` and the active view's bindings both fire, and a
+    /// key bound twice runs twice (a script binding on an already-bound key
+    /// extends it instead of shadowing it — see also finding 6.11). The
+    /// registry-level test pins the order.
     pub bindings: Vec<(KeybindMode, KeySource, Vec<ActionTarget>)>,
     /// Optional human labels for script callbacks, keyed by callback id.
     labels: std::collections::HashMap<u64, String>,
@@ -374,6 +379,48 @@ mod tests {
         Action, Actions, GlobalActions, ViewActions, ViewFileActions, ViewFileCursorActions,
     };
     use crate::commons::input::Keybind;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    /// Dispatch visits every matching binding — global and active-view alike
+    /// — in registration order. This is the documented keystroke semantics
+    /// (finding 6.12); if a later rewrite changes it, this test is the
+    /// place it gets consciously renegotiated.
+    #[test]
+    fn dispatch_visits_matches_in_registration_order() {
+        let mut reg = KeybindRegistry::default();
+        let q = || KeySource::Keybind(Keybind::parse("q"));
+        let target = |n: u64| ActionTarget::Dynamic(CallbackId(n));
+
+        // A global binding first, then a file-view binding on the same key;
+        // a tree-view binding on that key must not fire in the file view.
+        reg.bindings
+            .push((KeybindMode::Global, q(), vec![target(1)]));
+        reg.bindings
+            .push((KeybindMode::View(View::File), q(), vec![target(2)]));
+        reg.bindings
+            .push((KeybindMode::View(View::Tree), q(), vec![target(3)]));
+
+        let active = KeybindMode::View(View::File);
+        let key = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE);
+        let fired: Vec<u64> = reg
+            .bindings
+            .iter()
+            .filter(|(mode, kb, _)| {
+                (matches!(mode, KeybindMode::Global) || *mode == active) && kb.matches(&key)
+            })
+            .flat_map(|(_, _, targets)| targets.iter())
+            .filter_map(|t| match t {
+                ActionTarget::Dynamic(id) => Some(id.0),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(
+            fired,
+            vec![1, 2],
+            "global and view matches fire in registration order"
+        );
+    }
 
     #[test]
     fn actions_describe_themselves() {

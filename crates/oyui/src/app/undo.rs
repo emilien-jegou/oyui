@@ -1,5 +1,6 @@
 //! Bounded undo/redo stack for staging mutations.
 
+use crate::diff::staging::StagingMode;
 use crate::diff::DiffResult;
 use crate::diff_cache::DiffCache;
 use crate::tree::FileTree;
