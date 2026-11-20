@@ -1,9 +1,44 @@
 //! High-level staging operations that bridge FileDiff and FileTree.
+//!
+//! These are persistence operations — they take the tree lock and write
+//! back — so they live in the app layer, not next to the pure `FileDiff`
+//!(finding 3.5: diff logic kept total and lock-free).
 
-use crate::diff::staging::{is_file_staged_default, update_tree_staging_state};
 use crate::diff::FileDiff;
+use crate::tree::{FileTree, StagingState};
 use parking_lot::RwLock;
 use std::path::Path;
+
+/// Returns true if the file's default staging state is "staged".
+pub fn is_file_staged_default(tree_rw: &RwLock<FileTree>, path: &Path) -> bool {
+    tree_rw
+        .read()
+        .get_file_state(path)
+        .unwrap_or(StagingState::Unstaged)
+        == StagingState::Staged
+}
+
+/// Updates the tree's staging state for a file based on its diff selections.
+pub fn update_tree_staging_state(
+    tree_rw: &RwLock<FileTree>,
+    path: &Path,
+    diff: &FileDiff,
+    default: bool,
+) {
+    let new_state = diff.staging_state(default);
+    let mut tree = tree_rw.write();
+    if let Some(file) = tree.file_mut(path) {
+        file.state = new_state;
+    }
+}
+
+/// Toggles the staging state for a binary file.
+pub fn toggle_binary_file_staging_state(tree_rw: &RwLock<FileTree>, path: &Path) {
+    let mut tree = tree_rw.write();
+    if let Some(file) = tree.file_mut(path) {
+        file.state = file.state.toggle();
+    }
+}
 
 /// Inverts all staging selections for a text diff and updates the tree state.
 pub fn invert_text_diff_staging(

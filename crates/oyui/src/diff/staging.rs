@@ -2,8 +2,7 @@
 
 use crate::diff::line_selections::is_modifiable;
 use crate::diff::{DiffLine, FileDiff, Hunk, HunkMarker};
-use crate::tree::{FileTree, StagingState};
-use parking_lot::RwLock;
+use crate::tree::StagingState;
 use std::ops::Range;
 
 /// Whether a staging operation targets the staged or the unstaged side.
@@ -35,7 +34,6 @@ impl From<bool> for StagingMode {
         }
     }
 }
-use std::path::Path;
 
 impl FileDiff {
     /// Returns the start line index for a hunk (sum of lines in preceding hunks).
@@ -319,37 +317,6 @@ fn calculate_hunk_ranges(hunk: &Hunk) -> (usize, usize) {
         }
     }
     (old_idx, new_idx)
-}
-
-/// Returns true if the file's default staging state is "staged".
-pub fn is_file_staged_default(tree_rw: &RwLock<FileTree>, path: &Path) -> bool {
-    tree_rw
-        .read()
-        .get_file_state(path)
-        .unwrap_or(StagingState::Unstaged)
-        == StagingState::Staged
-}
-
-/// Updates the tree's staging state for a file based on its diff selections.
-pub fn update_tree_staging_state(
-    tree_rw: &RwLock<FileTree>,
-    path: &Path,
-    diff: &FileDiff,
-    default: bool,
-) {
-    let new_state = diff.staging_state(default);
-    let mut tree = tree_rw.write();
-    if let Some(file) = tree.file_mut(path) {
-        file.state = new_state;
-    }
-}
-
-/// Toggles the staging state for a binary file.
-pub fn toggle_binary_file_staging_state(tree_rw: &RwLock<FileTree>, path: &Path) {
-    let mut tree = tree_rw.write();
-    if let Some(file) = tree.file_mut(path) {
-        file.state = file.state.toggle();
-    }
 }
 
 #[cfg(test)]

@@ -1,6 +1,5 @@
 //! Bounded undo/redo stack for staging mutations.
 
-use crate::diff::staging::StagingMode;
 use crate::diff::DiffResult;
 use crate::diff_cache::DiffCache;
 use crate::tree::FileTree;
@@ -85,6 +84,7 @@ impl UndoStack {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::diff::staging::StagingMode;
     use crate::diff::{DiffLine, FileDiff, Hunk, LineSelections};
     use crate::tree::StagingState;
 

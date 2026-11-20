@@ -19,7 +19,7 @@ pub fn join_hunk_at(
     sync_staging_before_merge: bool,
 ) {
     let default = if sync_staging_before_merge {
-        crate::diff::staging::is_file_staged_default(tree_rw, path)
+        super::staging_sync::is_file_staged_default(tree_rw, path)
     } else {
         false
     };

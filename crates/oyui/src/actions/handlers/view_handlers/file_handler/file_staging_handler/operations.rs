@@ -1,8 +1,10 @@
 //! Staging action handlers that operate on the current file's diff.
 
 use super::staging_session::StagingSession;
-use super::staging_sync::{invert_text_diff_staging, toggle_stage_hunk_in_diff};
-use crate::diff::staging::is_file_staged_default;
+use super::staging_sync::{
+    invert_text_diff_staging, is_file_staged_default, toggle_binary_file_staging_state,
+    toggle_stage_hunk_in_diff, update_tree_staging_state,
+};
 use crate::diff::staging::StagingMode;
 use crate::diff::{FileDiff, HunkMarker};
 use crate::tree::FileTree;
@@ -349,7 +351,7 @@ pub fn join_at_cursor(session: &StagingSession) {
     session.mutate_diff(|diff, tree| {
         let default = is_file_staged_default(tree, &session.path);
         diff.join_hunk(hidx, true, default);
-        crate::diff::staging::update_tree_staging_state(tree, &session.path, diff, default);
+        update_tree_staging_state(tree, &session.path, diff, default);
     });
 }
 
@@ -358,7 +360,7 @@ pub fn set_hunk_staged(session: &StagingSession, hunk_idx: usize, staged: bool) 
     session.mutate_diff(|diff, tree| {
         let default = is_file_staged_default(tree, &session.path);
         diff.set_hunk(hunk_idx, true, default, StagingMode::from(staged));
-        crate::diff::staging::update_tree_staging_state(tree, &session.path, diff, default);
+        update_tree_staging_state(tree, &session.path, diff, default);
     });
 }
 
@@ -367,7 +369,7 @@ pub fn set_all(session: &StagingSession, staged: bool) {
     session.mutate_diff(|diff, tree| {
         let default = is_file_staged_default(tree, &session.path);
         diff.set_all_staging(default, StagingMode::from(staged));
-        crate::diff::staging::update_tree_staging_state(tree, &session.path, diff, default);
+        update_tree_staging_state(tree, &session.path, diff, default);
     });
 }
 
@@ -382,7 +384,7 @@ pub fn invert_staging(session: &StagingSession) {
             invert_text_diff_staging(diff, tree, &session.path);
         });
     } else {
-        crate::diff::staging::toggle_binary_file_staging_state(&session.tree, &session.path);
+        toggle_binary_file_staging_state(&session.tree, &session.path);
     }
 }
 
@@ -409,7 +411,7 @@ fn handle_untoggle_single_line(
     let parent_is_staged = diff.parent_staging_status(hidx, default_staged);
     let start_idx = diff.hunk_start_idx(hidx);
     diff.set_hunk_staging(hidx, start_idx, parent_is_staged);
-    crate::diff::staging::update_tree_staging_state(tree, path, diff, default_staged);
+    update_tree_staging_state(tree, path, diff, default_staged);
 
     let can_join_next = contiguous_next
         && hidx + 1 < diff.hunks.len()
@@ -494,7 +496,7 @@ fn resolve_split_marker_join(
     let prev_is_staged = diff.parent_staging_status(hidx, default_staged);
     diff.hunks[hidx].marker = HunkMarker::None;
     diff.sync_contiguous_to_parent(hidx, prev_is_staged);
-    crate::diff::staging::update_tree_staging_state(tree, path, diff, default_staged);
+    update_tree_staging_state(tree, path, diff, default_staged);
 }
 
 #[cfg(test)]
