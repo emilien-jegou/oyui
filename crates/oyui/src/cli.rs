@@ -26,7 +26,9 @@ impl DiffAlgorithm {
     /// histogram backend for its hunks (syntax ranges are layered on top).
     pub fn as_imara(self) -> imara_diff::Algorithm {
         match self {
-            DiffAlgorithm::Histogram | DiffAlgorithm::SyntaxAware => imara_diff::Algorithm::Histogram,
+            DiffAlgorithm::Histogram | DiffAlgorithm::SyntaxAware => {
+                imara_diff::Algorithm::Histogram
+            }
             DiffAlgorithm::Myers => imara_diff::Algorithm::Myers,
             DiffAlgorithm::MyersMinimal => imara_diff::Algorithm::MyersMinimal,
         }
