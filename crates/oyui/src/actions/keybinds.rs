@@ -6,7 +6,7 @@ use crate::actions::{
     ViewTreeCursorActions, ViewTreeDirectoryActions, ViewTreeStagingActions,
 };
 use crate::commons::ids::CallbackId;
-use crate::commons::input::{Keybind, Keybinds};
+use crate::commons::input::{Keybind, Keybinds, Modifiers};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum View {
@@ -42,6 +42,23 @@ impl KeySource {
         }
     }
 
+    /// Whether any of this source's keys matches the canonical identity —
+    /// the same equivalence `remove` and `override_binding` use (finding
+    /// 6.11: register and remove must agree on what "the same key" is).
+    fn has_canonical(&self, canonical: &[(Modifiers, String)]) -> bool {
+        canonical_keys(self).iter().any(|c| canonical.contains(c))
+    }
+}
+
+/// The canonical identities a source carries, one per key.
+fn canonical_keys(source: &KeySource) -> Vec<(Modifiers, String)> {
+    match source {
+        KeySource::Keybinds(ks) => ks.0.iter().map(|k| k.canonical()).collect(),
+        KeySource::Keybind(kb) => vec![kb.canonical()],
+    }
+}
+
+impl KeySource {
     /// True when this source binds the same canonical key as `kb`.
     pub fn binds(&self, kb: &Keybind) -> bool {
         let target = kb.canonical();
@@ -138,16 +155,49 @@ impl KeybindRegistry {
         }
     }
 
-    fn add_binding(&mut self, mode: KeybindMode, kb: KeySource, target: ActionTarget) {
+    pub fn add_binding(&mut self, mode: KeybindMode, kb: KeySource, target: ActionTarget) {
+        let canonical = canonical_keys(&kb);
+        // Identity is the canonical key (finding 6.11): `Char(" ")` and
+        // `Code("space")` are one binding, the same identity `remove` uses.
         if let Some(entry) = self
             .bindings
             .iter_mut()
-            .find(|(m, k, _)| m == &mode && k == &kb)
+            .find(|(m, source, _)| m == &mode && source.has_canonical(&canonical))
         {
             entry.2.push(target);
         } else {
             self.bindings.push((mode, kb, vec![target]));
         }
+    }
+
+    /// Rebinds `kb` in `mode`, replacing whatever the same canonical key was
+    /// bound to before — defaults included.
+    ///
+    /// A script `keybind` is a rebind (finding 6.11): appending it left the
+    /// built-in target live too, so `q` both quit *and* ran the script.
+    /// Identity is the canonical key, so a script `space` replaces a `' '`
+    /// default and vice versa.
+    pub fn override_binding(&mut self, mode: KeybindMode, kb: KeySource, target: ActionTarget) {
+        let canonical = canonical_keys(&kb);
+        // A `Global` rebind owns the key everywhere: view-mode bindings on
+        // the same key would otherwise keep firing alongside the script's.
+        // A view-scoped rebind clears its own view (a `Global` default on
+        // the same key still co-fires there — rebind both explicitly when
+        // that matters).
+        let key_wide = matches!(mode, KeybindMode::Global);
+        self.bindings.retain_mut(|(m, source, _)| {
+            if !key_wide && *m != mode {
+                return true;
+            }
+            match source {
+                KeySource::Keybind(k) => !canonical.contains(&k.canonical()),
+                KeySource::Keybinds(ks) => {
+                    ks.0.retain(|k| !canonical.contains(&k.canonical()));
+                    !ks.0.is_empty()
+                }
+            }
+        });
+        self.add_binding(mode, kb, target);
     }
 
     /// Removes every binding, including the built-in defaults.
@@ -186,19 +236,25 @@ impl KeybindRegistry {
         self
     }
 
+    /// Binds a script callback in `Global` mode.
+    ///
+    /// This is a rebind (finding 6.11): the key's previous binding — a
+    /// built-in default included — is replaced, not extended, so a script
+    /// `q` stops `quit` from also firing.
     pub fn register_fn<K>(mut self, kb: K, id: CallbackId) -> Self
     where
         K: Into<KeySource>,
     {
-        self.add_binding(KeybindMode::Global, kb.into(), ActionTarget::Dynamic(id));
+        self.override_binding(KeybindMode::Global, kb.into(), ActionTarget::Dynamic(id));
         self
     }
 
+    /// Binds a script callback in `mode`; a rebind like [`Self::register_fn`].
     pub fn register_fn_mode<K>(mut self, mode: KeybindMode, kb: K, id: CallbackId) -> Self
     where
         K: Into<KeySource>,
     {
-        self.add_binding(mode, kb.into(), ActionTarget::Dynamic(id));
+        self.override_binding(mode, kb.into(), ActionTarget::Dynamic(id));
         self
     }
 
@@ -211,10 +267,13 @@ impl KeybindRegistry {
             bindings: Vec::new(),
         });
         for (m, kb, mut targets) in builder.bindings {
+            // Same canonical-key identity as `add_binding` (finding 6.11):
+            // `space`-spelled and `' '`-spelled registrations of one mode
+            // are one binding.
             if let Some(entry) = self
                 .bindings
                 .iter_mut()
-                .find(|(em, ek, _)| em == &m && ek == &kb)
+                .find(|(em, ek, _)| em == &m && ek.has_canonical(&canonical_keys(&kb)))
             {
                 entry.2.append(&mut targets);
             } else {
@@ -232,10 +291,12 @@ pub struct ModeRegistryBuilder {
 
 impl ModeRegistryBuilder {
     fn add_binding(&mut self, kb: KeySource, target: ActionTarget) {
+        let canonical = canonical_keys(&kb);
+        // Same canonical identity as the registry-level merge (6.11).
         if let Some(entry) = self
             .bindings
             .iter_mut()
-            .find(|(m, k, _)| m == &self.mode && k == &kb)
+            .find(|(m, source, _)| m == &self.mode && source.has_canonical(&canonical))
         {
             entry.2.push(target);
         } else {
@@ -419,6 +480,83 @@ mod tests {
             fired,
             vec![1, 2],
             "global and view matches fire in registration order"
+        );
+    }
+
+    /// A script rebind replaces the built-in binding on the same key —
+    /// dispatch must not fire both (finding 6.11) — and key identity is the
+    /// canonical form, so a script `space` rebinding replaces a `' '`
+    /// default.
+    #[test]
+    fn script_rebind_replaces_the_default_binding() {
+        let registry = default_keybinds();
+        let space = KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE);
+        let targets_of = |reg: &KeybindRegistry, space: &KeyEvent| -> Vec<ActionTarget> {
+            reg.bindings
+                .iter()
+                .filter(|(_, source, _)| source.matches(space))
+                .flat_map(|(_, _, targets)| targets.iter().cloned())
+                .collect()
+        };
+
+        let before = targets_of(&registry, &space);
+        assert!(!before.is_empty(), "the defaults bind space somehow");
+
+        let registry = registry.register_fn(Keybind::parse("space"), CallbackId(7));
+        let after = targets_of(&registry, &space);
+        assert_eq!(after.len(), 1, "the rebind replaces the default target");
+        assert!(
+            matches!(after[0], ActionTarget::Dynamic(id) if id.0 == 7),
+            "the surviving target is the script's"
+        );
+
+        // register and remove agree on canonical identity: removing `' '`
+        // also removes `space`-spelled bindings in the defaults.
+        let mut fresh = default_keybinds();
+        fresh.remove(&Keybind::Char(" ".to_string()));
+        assert!(
+            targets_of(&fresh, &space).is_empty(),
+            "removing one spelling removes the whole key"
+        );
+    }
+
+    /// Registering the same key under different spellings merges into one
+    /// entry — the canonical identity `remove` already used (finding 6.11).
+    #[test]
+    fn register_and_remove_agree_on_identity() {
+        let mut registry = KeybindRegistry::default();
+        registry.add_binding(
+            KeybindMode::Global,
+            KeySource::Keybinds(Keybinds(vec![Keybind::Char(" ".to_string())])),
+            ActionTarget::Dynamic(CallbackId(1)),
+        );
+        registry.add_binding(
+            KeybindMode::Global,
+            KeySource::Keybind(Keybind::parse("space")),
+            ActionTarget::Dynamic(CallbackId(2)),
+        );
+
+        let space = KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE);
+        let fired: Vec<u64> = registry
+            .bindings
+            .iter()
+            .filter(|(_, source, _)| source.matches(&space))
+            .flat_map(|(_, _, targets)| targets.iter())
+            .filter_map(|t| match t {
+                ActionTarget::Dynamic(id) => Some(id.0),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(fired, vec![1, 2], "both targets fire; they share one entry");
+
+        // Removing by either spelling drops the whole thing.
+        registry.remove(&Keybind::parse("space"));
+        assert!(
+            !registry
+                .bindings
+                .iter()
+                .any(|(_, source, _)| source.matches(&space)),
+            "the dead remnant must be gone, not half-removed"
         );
     }
 
