@@ -7,7 +7,6 @@ use crate::worker::tasks::full_diff::load_file_content_safely;
 use imara_diff::{Diff, InternedInput};
 use oyui_tasker::{Listener, TaskerContext};
 use rayon::prelude::*;
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 pub struct Stats;
