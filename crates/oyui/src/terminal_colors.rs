@@ -222,6 +222,34 @@ fn determine_terminal_color_mode_from_env() -> TerminalColorMode {
     TerminalColorMode::Ansi
 }
 
+/// Explicit color flags found in `argv`, last one winning.
+///
+/// Previously any argument that merely *contained* the text (`color=256`,
+/// `no-color`) flipped the rendering — `oyui diff no-color-notes.txt` ran
+/// without color and a commit message mentioning `color=16m` upgraded it
+/// (finding 6.13). Matching is anchored to whole arguments now; the
+/// accepted spellings are `--no-color` and `--color=<mode>` with
+/// `never|none|basic|ansi|256|16m|full|truecolor`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ColorFlag {
+    NoColor,
+    TrueColor,
+    Ansi256,
+    Ansi,
+}
+
+fn color_flag_override(args: &[String]) -> Option<ColorFlag> {
+    args.iter()
+        .filter_map(|arg| match arg.as_str() {
+            "--no-color" | "--color=never" | "--color=none" => Some(ColorFlag::NoColor),
+            "--color=16m" | "--color=full" | "--color=truecolor" => Some(ColorFlag::TrueColor),
+            "--color=256" => Some(ColorFlag::Ansi256),
+            "--color=basic" | "--color=ansi" => Some(ColorFlag::Ansi),
+            _ => None,
+        })
+        .last()
+}
+
 /// Detects terminal color mode.
 pub fn detect_color_mode() -> eyre::Result<TerminalColorMode> {
     // Check standard NO_COLOR environment override
@@ -242,44 +270,28 @@ pub fn detect_color_mode() -> eyre::Result<TerminalColorMode> {
 
     let args = std::env::args().collect::<Vec<String>>();
 
-    // Check command line flags for explicit color overrides
-    let has_no_color_flag = args.iter().any(|arg| {
-        arg.contains("color=never") || arg.contains("no-color") || arg.contains("color=none")
-    });
-    if has_no_color_flag {
-        return Ok(TerminalColorMode::NoColor);
-    }
-
-    let has_truecolor_flag = args.iter().any(|arg| {
-        arg.contains("color=16m") || arg.contains("color=full") || arg.contains("color=truecolor")
-    });
-    let has_256_flag = args.iter().any(|arg| arg.contains("color=256"));
-    let has_ansi_flag = args
-        .iter()
-        .any(|arg| arg.contains("color=basic") || arg.contains("color=ansi"));
-
-    let base_mode = if has_truecolor_flag {
-        TerminalColorMode::TrueColor(TerminalPalette::default())
-    } else if has_256_flag {
-        TerminalColorMode::Ansi256
-    } else if has_ansi_flag {
-        TerminalColorMode::Ansi
-    } else {
-        // Handle FORCE_COLOR variable overrides
-        if let Ok(force_color) = std::env::var("FORCE_COLOR") {
-            if force_color == "0" || force_color.eq_ignore_ascii_case("false") {
-                TerminalColorMode::NoColor
-            } else if force_color == "1" || force_color.eq_ignore_ascii_case("true") {
-                TerminalColorMode::Ansi
-            } else if force_color == "2" {
-                TerminalColorMode::Ansi256
-            } else if force_color == "3" {
-                TerminalColorMode::TrueColor(TerminalPalette::default())
+    let base_mode = match color_flag_override(&args) {
+        Some(ColorFlag::NoColor) => return Ok(TerminalColorMode::NoColor),
+        Some(ColorFlag::TrueColor) => TerminalColorMode::TrueColor(TerminalPalette::default()),
+        Some(ColorFlag::Ansi256) => TerminalColorMode::Ansi256,
+        Some(ColorFlag::Ansi) => TerminalColorMode::Ansi,
+        None => {
+            // Handle FORCE_COLOR variable overrides
+            if let Ok(force_color) = std::env::var("FORCE_COLOR") {
+                if force_color == "0" || force_color.eq_ignore_ascii_case("false") {
+                    TerminalColorMode::NoColor
+                } else if force_color == "1" || force_color.eq_ignore_ascii_case("true") {
+                    TerminalColorMode::Ansi
+                } else if force_color == "2" {
+                    TerminalColorMode::Ansi256
+                } else if force_color == "3" {
+                    TerminalColorMode::TrueColor(TerminalPalette::default())
+                } else {
+                    determine_terminal_color_mode_from_env()
+                }
             } else {
                 determine_terminal_color_mode_from_env()
             }
-        } else {
-            determine_terminal_color_mode_from_env()
         }
     };
 
@@ -331,4 +343,55 @@ pub fn detect_color_mode() -> eyre::Result<TerminalColorMode> {
     }
 
     Ok(base_mode)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// Color flags match whole arguments: a file whose name mentions a flag
+    /// used to disable color (finding 6.13).
+    #[test]
+    fn color_flags_match_whole_arguments_only() {
+        assert_eq!(
+            color_flag_override(&args(&["oyui", "--no-color"])),
+            Some(ColorFlag::NoColor)
+        );
+        assert_eq!(
+            color_flag_override(&args(&["oyui", "--color=256", "x.txt"])),
+            Some(ColorFlag::Ansi256)
+        );
+        assert_eq!(
+            color_flag_override(&args(&["oyui", "--color=16m"])),
+            Some(ColorFlag::TrueColor)
+        );
+        assert_eq!(
+            color_flag_override(&args(&["oyui", "--color=ansi"])),
+            Some(ColorFlag::Ansi)
+        );
+
+        // Values that merely CONTAIN a flag's text never match.
+        assert_eq!(
+            color_flag_override(&args(&["oyui", "diff", "no-color-notes.txt"])),
+            None
+        );
+        assert_eq!(
+            color_flag_override(&args(&["oyui", "log", "mention color=256 here"])),
+            None
+        );
+        assert_eq!(
+            color_flag_override(&args(&["oyui", "diff", "x-color=16m.patch"])),
+            None
+        );
+
+        // The last explicit flag wins.
+        assert_eq!(
+            color_flag_override(&args(&["oyui", "--color=256", "--color=16m"])),
+            Some(ColorFlag::TrueColor)
+        );
+    }
 }
