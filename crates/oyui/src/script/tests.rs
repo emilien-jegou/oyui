@@ -158,8 +158,7 @@ fn a_failed_reload_keeps_the_previous_callbacks_alive() {
     let id = callback_id(&reg, KeybindMode::Global, "ctrl-h").expect("ctrl-h bound");
 
     let n = NEXT.fetch_add(1, Ordering::Relaxed);
-    let path =
-        std::env::temp_dir().join(format!("oyui_script_{}_{n}.rn", std::process::id()));
+    let path = std::env::temp_dir().join(format!("oyui_script_{}_{n}.rn", std::process::id()));
     fs::write(&path, "pub fn config() { let = }").expect("write fixture");
     let outcome = host.load(&path, BoxedHandler::empty(), None);
     let _ = fs::remove_file(&path);
@@ -466,15 +465,17 @@ fn a_script_without_an_entrypoint_is_not_an_error() {
 #[test]
 fn a_broken_script_reports_the_error_and_keeps_current_keybinds() {
     let n = NEXT.fetch_add(1, Ordering::Relaxed);
-    let path =
-        std::env::temp_dir().join(format!("oyui_script_{}_{n}.rn", std::process::id()));
+    let path = std::env::temp_dir().join(format!("oyui_script_{}_{n}.rn", std::process::id()));
     fs::write(&path, "pub fn config() { let = }").expect("write fixture");
 
     let mut host = RuneHost::new();
     let outcome = host.load(&path, BoxedHandler::empty(), None);
     let _ = fs::remove_file(&path);
 
-    assert!(outcome.error.is_some(), "expected a compile error, got success");
+    assert!(
+        outcome.error.is_some(),
+        "expected a compile error, got success"
+    );
     assert!(
         outcome.keybinds.is_none(),
         "a failed reload must leave the running keybinds in place"

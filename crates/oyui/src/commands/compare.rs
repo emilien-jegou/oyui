@@ -136,10 +136,7 @@ pub async fn run_merge(
             return Err(CommandError::Runtime(
                 io::Error::new(
                     err.kind(),
-                    format!(
-                        "failed to read merge target '{}': {err}",
-                        output.display()
-                    ),
+                    format!("failed to read merge target '{}': {err}", output.display()),
                 )
                 .into(),
             ));
@@ -284,11 +281,13 @@ pub(crate) async fn run_session(
         .build();
 
     app.start().await?;
-    Ok(if confirmed_read.load(std::sync::atomic::Ordering::SeqCst) {
-        SessionOutcome::Confirmed
-    } else {
-        SessionOutcome::Aborted
-    })
+    Ok(
+        if confirmed_read.load(std::sync::atomic::Ordering::SeqCst) {
+            SessionOutcome::Confirmed
+        } else {
+            SessionOutcome::Aborted
+        },
+    )
 }
 
 /// Loads the merge content's conflicts for inline resolution.

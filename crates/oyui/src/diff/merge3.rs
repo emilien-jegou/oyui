@@ -310,7 +310,9 @@ mod tests {
         // The line vectors of `base` and `right` are identical; only the
         // final terminators differ. The merge must notice the removal.
         let out = merged("a\nb\n", "a\nb\n", "a\nb");
-        assert!(!out.resolve_all(super::super::conflict::Side::Ours).ends_with('\n'));
+        assert!(!out
+            .resolve_all(super::super::conflict::Side::Ours)
+            .ends_with('\n'));
 
         // And the inverse: a side that adds a final newline.
         let out = merged("a\nb", "a\nb\n", "a\nb");

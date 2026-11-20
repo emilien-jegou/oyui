@@ -151,7 +151,10 @@ mod tests {
 
     #[test]
     fn levels_are_independent() {
-        let d = SyntaxDelimiters::default().push_lhs().push_both().push_rhs();
+        let d = SyntaxDelimiters::default()
+            .push_lhs()
+            .push_both()
+            .push_rhs();
         assert!(d.can_pop_rhs() && !d.can_pop_lhs());
         let d = d.pop_rhs().unwrap().pop_both().unwrap();
         assert!(d.can_pop_lhs() && !d.can_pop_rhs());

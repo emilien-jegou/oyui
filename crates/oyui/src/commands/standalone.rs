@@ -4,12 +4,11 @@
 //! VCS with oyui registered as the external tool.
 use crate::app::Operation;
 use crate::cli::{DiffCommandArgs, InterdiffArgs, ResolveArgs, SplitArgs, SquashArgs};
+use crate::commands::compare::SessionOutcome;
 use crate::commands::{compare, CommandError, RunOptions};
 use crate::vcs::tool::{ToolInvocation, ToolProgram};
 use crate::vcs::{self, RepoKind};
 use std::path::{Path, PathBuf};
-use crate::commands::compare::SessionOutcome;
-
 
 fn not_a_repo() -> CommandError {
     CommandError::Runtime("not inside a jj or git repository".into())

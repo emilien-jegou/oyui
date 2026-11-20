@@ -92,9 +92,7 @@ impl<'a> SyntaxVertex<'a> {
 
 impl PartialEq for SyntaxVertex<'_> {
     fn eq(&self, other: &Self) -> bool {
-        self.lhs == other.lhs
-            && self.rhs == other.rhs
-            && self.delimiters == other.delimiters
+        self.lhs == other.lhs && self.rhs == other.rhs && self.delimiters == other.delimiters
     }
 }
 
@@ -210,8 +208,11 @@ pub fn compute_neighbours<'a>(v: &SyntaxVertex<'a>) -> ArrayVec<(SyntaxEdge, Syn
                 .lhs
                 .node()
                 .is_some_and(|node| node.hint == Some(SyntaxHint::Punctuation));
-            let (lhs, rhs, delimiters) =
-                pop_all_delimiters(v.lhs.next_sibling(), v.rhs.next_sibling(), v.delimiters.clone());
+            let (lhs, rhs, delimiters) = pop_all_delimiters(
+                v.lhs.next_sibling(),
+                v.rhs.next_sibling(),
+                v.delimiters.clone(),
+            );
             neighbours.push((
                 SyntaxEdge::Unchanged {
                     depth_difference,
@@ -230,8 +231,11 @@ pub fn compute_neighbours<'a>(v: &SyntaxVertex<'a>) -> ArrayVec<(SyntaxEdge, Syn
         {
             let levenshtein_pct =
                 (strsim::normalized_levenshtein(lhs_comment, rhs_comment) * 100.0).round() as u8;
-            let (lhs, rhs, delimiters) =
-                pop_all_delimiters(v.lhs.next_sibling(), v.rhs.next_sibling(), v.delimiters.clone());
+            let (lhs, rhs, delimiters) = pop_all_delimiters(
+                v.lhs.next_sibling(),
+                v.rhs.next_sibling(),
+                v.delimiters.clone(),
+            );
             neighbours.push((
                 SyntaxEdge::Replaced { levenshtein_pct },
                 SyntaxVertex {

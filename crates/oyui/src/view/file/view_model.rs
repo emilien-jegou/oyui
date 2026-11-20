@@ -307,7 +307,7 @@ impl FileViewModel {
                         hunk_starts.push(visual_row_idx);
                         recorded_hunk_start = true;
                     }
-                        line_map.push(regions.views[ci].range.start);
+                    line_map.push(regions.views[ci].range.start);
                     row_to_hunk.push(Some(i));
                     visual_row_idx += 1;
                     open_frame = None;

@@ -1,13 +1,13 @@
 //! Full file diff task: async reads plus spawn_blocking hunk computation.
+use crate::cli::DiffAlgorithm;
+use crate::diff::{line_ranges, DiffLine, DiffResult, FileDiff, Hunk, InlineChange};
+use crate::diff_cache::{DiffCache, LineIndex, LineWidths};
+use crate::worker::events::diff_update::DiffUpdate;
 use imara_diff::{Diff, InternedInput};
 use oyui_tasker::{Listener, TaskerContext};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use crate::worker::events::diff_update::DiffUpdate;
-use crate::cli::DiffAlgorithm;
-use crate::diff::{line_ranges, DiffLine, DiffResult, FileDiff, Hunk, InlineChange};
-use crate::diff_cache::{DiffCache, LineIndex, LineWidths};
 
 const MAX_FILE_SIZE: u64 = 1024 * 1024; // 1 MB limit
 

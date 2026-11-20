@@ -28,7 +28,11 @@ impl StagingMode {
 
 impl From<bool> for StagingMode {
     fn from(staged: bool) -> Self {
-        if staged { StagingMode::Stage } else { StagingMode::Unstage }
+        if staged {
+            StagingMode::Stage
+        } else {
+            StagingMode::Unstage
+        }
     }
 }
 use std::path::Path;

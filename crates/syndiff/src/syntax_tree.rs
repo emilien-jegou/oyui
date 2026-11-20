@@ -449,8 +449,7 @@ fn build_tree_recursive<'a>(
                 break;
             }
 
-            let child_id =
-                build_tree_recursive(cursor, nodes, Some(this_id), source, depth + 1);
+            let child_id = build_tree_recursive(cursor, nodes, Some(this_id), source, depth + 1);
             let child_node = &nodes[child_id.index()];
 
             remaining_children -= 1;

@@ -528,9 +528,7 @@ mod tests {
         }
     }
 
-    static EMPTY_REGIONS: ConflictRegions = ConflictRegions {
-        views: Vec::new(),
-    };
+    static EMPTY_REGIONS: ConflictRegions = ConflictRegions { views: Vec::new() };
 
     fn builder<'a>(
         diff: &'a FileDiff,
