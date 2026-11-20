@@ -1,27 +1,25 @@
-use parking_lot::{Mutex, RwLock};
-use std::sync::Arc;
-
 use crate::actions::*;
-use crate::app::UiState;
+use crate::app::SessionContext;
 use crate::config::{self, LineHighlightMode};
-use crate::diff_cache::DiffCache;
-use crate::terminal_colors::TerminalColorMode;
-use crate::theme::{ansi_default_theme, ThemeState};
+use crate::theme::ansi_default_theme;
 use crate::worker::events::theme_update::ThemeUpdate;
-use crate::worker::EventRegistry;
+use std::sync::Arc;
 
 pub mod macros;
 pub mod utils;
 
 #[derive(Clone)]
 pub struct AppThemeActionsHandler {
-    pub theme: Arc<RwLock<ThemeState>>,
-    pub cache: DiffCache,
-    pub ui: Arc<Mutex<UiState>>,
-    pub color_mode: TerminalColorMode,
-    pub worker: Arc<EventRegistry>,
-    /// Shared config-error cell; action failures surface through it.
-    pub error: Arc<RwLock<Option<String>>>,
+    /// The shared session state this handler acts within.
+    pub ctx: Arc<SessionContext>,
+}
+
+impl std::ops::Deref for AppThemeActionsHandler {
+    type Target = SessionContext;
+
+    fn deref(&self) -> &SessionContext {
+        &self.ctx
+    }
 }
 
 impl AppThemeActionsHandler {

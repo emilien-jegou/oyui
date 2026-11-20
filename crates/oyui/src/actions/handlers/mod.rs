@@ -1,12 +1,5 @@
 use crate::actions::*;
-use crate::app::UiState;
-use crate::diff_cache::DiffCache;
-use crate::terminal_colors::TerminalColorMode;
-use crate::theme::ThemeState;
-use crate::tree::FileTree;
-use crate::worker::EventRegistry;
-use parking_lot::{Mutex, RwLock};
-use std::path::PathBuf;
+use crate::app::SessionContext;
 use std::sync::Arc;
 use typed_builder::TypedBuilder;
 
@@ -19,37 +12,29 @@ pub mod theme_handler;
 pub mod ui_handler;
 pub mod view_handlers;
 
-#[derive(TypedBuilder, Clone)]
+/// Staging-action handle over the shared session state.
+///
+/// Finding 6.4: this used to duplicate every shared `Arc` (`ui`, `tree`,
+/// `theme`, …) and `generate()` cloned those sixteen fields into seven
+/// handler variants — many owners, no single owner. Now the struct carries
+/// one `Arc` and derefs to the session context, so every handler method
+/// keeps its `self.ui`-style access while the ownership stays in one place.
+#[derive(Clone, TypedBuilder)]
 pub struct AppActionsHandler {
-    pub ui: Arc<Mutex<UiState>>,
-    pub theme: Arc<RwLock<ThemeState>>,
-    pub tree: Arc<RwLock<FileTree>>,
-    pub cache: DiffCache,
-    pub operation: crate::app::Operation,
-    pub left_path: PathBuf,
-    pub right_path: PathBuf,
-    pub base_path: Option<PathBuf>,
-    /// Destination for the confirmed result; `None` means read-only.
-    pub write_target: Option<PathBuf>,
-    /// Whether confirming is allowed with unresolved conflicts.
-    pub allow_unresolved: bool,
-    pub algorithm: crate::cli::DiffAlgorithm,
-    pub worker: Arc<EventRegistry>,
-    pub color_mode: TerminalColorMode,
-    /// Shared config-error cell; action failures surface through it.
-    pub error: Arc<RwLock<Option<String>>>,
-    /// Set once the user confirmed; lets callers distinguish confirm from quit.
-    pub confirmed: Arc<std::sync::atomic::AtomicBool>,
+    pub ctx: Arc<SessionContext>,
+}
+
+impl std::ops::Deref for AppActionsHandler {
+    type Target = SessionContext;
+
+    fn deref(&self) -> &SessionContext {
+        &self.ctx
+    }
 }
 
 pub fn generate(actions_handler: AppActionsHandler) -> BoxedHandler {
     let theme_handler = theme_handler::AppThemeActionsHandler {
-        theme: actions_handler.theme.clone(),
-        ui: actions_handler.ui.clone(),
-        cache: actions_handler.cache.clone(),
-        color_mode: actions_handler.color_mode.clone(),
-        worker: actions_handler.worker.clone(),
-        error: actions_handler.error.clone(),
+        ctx: actions_handler.ctx.clone(),
     };
 
     build_handler! {

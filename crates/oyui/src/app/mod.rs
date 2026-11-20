@@ -1,5 +1,6 @@
 //! Application state and lifecycle.
 pub mod commands;
+pub mod context;
 pub mod draw;
 pub mod events;
 pub mod input;
@@ -9,6 +10,7 @@ pub mod run;
 pub mod ui_state;
 pub mod undo;
 
+pub use context::SessionContext;
 pub use events::{CommandMode, ExitAction};
 use typed_builder::TypedBuilder;
 pub use ui_state::UiState;
@@ -34,40 +36,26 @@ impl Operation {
 use crate::actions::BoxedHandler;
 use crate::commands::CommandError;
 use crate::config::Config;
-use crate::diff_cache::DiffCache;
-use crate::terminal_colors::TerminalColorMode;
-use crate::theme::ThemeState;
-use crate::tree::FileTree;
-use crate::worker::{tasks, EventRegistry};
-use parking_lot::{Mutex, RwLock};
-use std::path::PathBuf;
+use crate::worker::tasks;
 use std::sync::Arc;
 
 #[derive(TypedBuilder)]
 pub struct App {
-    pub tree: Arc<RwLock<FileTree>>,
-    pub cache: DiffCache,
-    pub worker: Arc<EventRegistry>,
-    pub operation: Operation,
-    pub left_path: PathBuf,
-    pub right_path: PathBuf,
-    pub base_path: Option<PathBuf>,
-    /// Destination for the confirmed result; `None` means read-only.
-    pub write_target: Option<PathBuf>,
-    /// Whether confirming is allowed with unresolved conflicts.
-    pub allow_unresolved: bool,
-    /// Start every discovered change staged (used by `oyui squash`).
-    pub default_staged: bool,
+    /// The shared session state; the single owner of every shared handle.
+    pub ctx: Arc<SessionContext>,
     pub config: Config,
     pub handler: BoxedHandler,
-    pub color_mode: TerminalColorMode,
     /// Set when the first tree calculation finds nothing to show.
     #[builder(default = false)]
     pub no_modifications: bool,
-    /// Shared theme: workers read, theme actions write.
-    pub theme: Arc<RwLock<ThemeState>>,
-    /// UI-only state: main-task confined behind one lock.
-    pub ui: Arc<Mutex<UiState>>,
+}
+
+impl std::ops::Deref for App {
+    type Target = SessionContext;
+
+    fn deref(&self) -> &SessionContext {
+        &self.ctx
+    }
 }
 
 impl App {

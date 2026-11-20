@@ -1,7 +1,7 @@
 //! Shared bootstrap for the `diff` and `merge` operations.
 
 use crate::actions::handlers::{self, AppActionsHandler};
-use crate::app::{App, Operation, UiState};
+use crate::app::{App, Operation, SessionContext, UiState};
 use crate::cli::{DiffArgs, MergeArgs, ViewArgs};
 use crate::commands::{CommandError, RunOptions};
 use crate::config::Config;
@@ -13,7 +13,6 @@ use crate::worker::EventRegistry;
 use parking_lot::{Mutex, RwLock};
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 /// Everything a session needs, independent of how it was requested.
@@ -216,8 +215,6 @@ pub(crate) async fn run_session(
     ui_state.writable = session.write_target.is_some();
     let ui = Arc::new(Mutex::new(ui_state));
 
-    detect_conflicts(&session, &ui, merge_text);
-
     let worker_context = AppWorkerContext::builder()
         .syntax_engine(SyntaxEngine::new())
         .algorithm(session.view.diff_algorithm)
@@ -230,78 +227,67 @@ pub(crate) async fn run_session(
 
     let worker = Arc::new(EventRegistry::spawn(worker_context));
 
-    // The handler flips this when the user confirms; run_session reads it
-    // after the TUI exits.
-    let confirmed = Arc::new(AtomicBool::new(false));
-    let confirmed_read = confirmed.clone();
+    // The single owner of every shared handle and session static; the App,
+    // the action handlers, and the config all reach them through one `Arc`.
+    let ctx = Arc::new(
+        SessionContext::builder()
+            .ui(ui)
+            .theme(theme)
+            .tree(tree)
+            .cache(cache)
+            .worker(worker.clone())
+            .error(config_error.clone())
+            .confirmed(Arc::new(std::sync::atomic::AtomicBool::new(false)))
+            .operation(session.operation)
+            .left_path(session.left_path.clone())
+            .right_path(session.right_path.clone())
+            .base_path(session.base_path.clone())
+            .write_target(session.write_target.clone())
+            .allow_unresolved(session.allow_unresolved)
+            .algorithm(session.view.diff_algorithm)
+            .color_mode(options.color_mode.clone())
+            .default_staged(session.default_staged)
+            .build(),
+    );
 
-    let handler = handlers::generate(AppActionsHandler {
-        ui: ui.clone(),
-        theme: theme.clone(),
-        tree: tree.clone(),
-        cache: cache.clone(),
-        worker: worker.clone(),
-        operation: session.operation,
-        left_path: session.left_path.clone(),
-        right_path: session.right_path.clone(),
-        base_path: session.base_path.clone(),
-        write_target: session.write_target.clone(),
-        allow_unresolved: session.allow_unresolved,
-        algorithm: session.view.diff_algorithm,
-        color_mode: options.color_mode.clone(),
-        error: config_error.clone(),
-        confirmed,
-    });
+    detect_conflicts(&ctx, merge_text);
+
+    let handler = handlers::generate(AppActionsHandler::builder().ctx(ctx.clone()).build());
 
     let config = Config {
         path: config_path,
-        error: config_error.clone(),
-        handler: handler.clone(),
-        keybinds: crate::actions::keybinds::default_keybinds(),
         host: crate::script::RuneHost::new(),
-        worker: worker.clone(),
+        keybinds: crate::actions::keybinds::default_keybinds(),
+        handler: handler.clone(),
+        ctx: ctx.clone(),
     };
 
     let mut app = App::builder()
-        .worker(worker)
+        .ctx(ctx.clone())
         .config(config)
-        .operation(session.operation)
-        .base_path(session.base_path.clone())
-        .left_path(session.left_path.clone())
-        .right_path(session.right_path.clone())
-        .write_target(session.write_target.clone())
-        .allow_unresolved(session.allow_unresolved)
-        .default_staged(session.default_staged)
-        .tree(tree)
-        .theme(theme)
-        .ui(ui)
-        .cache(cache)
         .handler(handler)
-        .color_mode(options.color_mode.clone())
         .build();
 
     app.start().await?;
-    Ok(
-        if confirmed_read.load(std::sync::atomic::Ordering::SeqCst) {
-            SessionOutcome::Confirmed
-        } else {
-            SessionOutcome::Aborted
-        },
-    )
+    Ok(if ctx.confirmed.load(std::sync::atomic::Ordering::SeqCst) {
+        SessionOutcome::Confirmed
+    } else {
+        SessionOutcome::Aborted
+    })
 }
 
 /// Loads the merge content's conflicts for inline resolution.
 ///
 /// The bytes passed to [`run_session`] are the exact synthesized merge, so
 /// parsing them avoids a second disk read of the staged copy.
-fn detect_conflicts(session: &Session, ui: &Arc<Mutex<UiState>>, content: Option<&str>) {
-    if session.operation != Operation::Merge {
+fn detect_conflicts(ctx: &SessionContext, content: Option<&str>) {
+    if ctx.operation != Operation::Merge {
         return;
     }
     let Some(content) = content else {
         return;
     };
     if let Some(conflicts) = crate::diff::ConflictedFile::parse(content) {
-        ui.lock().resolve = Some(crate::app::ui_state::ResolveState::new(conflicts));
+        ctx.ui.lock().resolve = Some(crate::app::ui_state::ResolveState::new(conflicts));
     }
 }

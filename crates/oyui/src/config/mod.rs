@@ -1,4 +1,3 @@
-use parking_lot::RwLock;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing::info;
@@ -13,6 +12,7 @@ pub use theme::{LineHighlightMode, UiTheme};
 
 use crate::actions::keybinds::KeybindRegistry;
 use crate::actions::BoxedHandler;
+use crate::app::SessionContext;
 use crate::script::{RuneHost, ScriptHost};
 use crate::worker::tasks::watch_config;
 use crate::worker::EventRegistry;
@@ -48,16 +48,28 @@ impl From<theme::Color> for ratatui::style::Color {
 
 /// Script-backed app configuration: the config file, its script host, and the
 /// keybinds the script produced.
+///
+/// Shared state (error cell, worker handle) comes from the session context
+/// through `Deref` — this struct owns only what is genuinely per-config.
 pub struct Config {
+    /// The config file's path on disk.
     pub path: PathBuf,
-    pub error: Arc<RwLock<Option<String>>>,
-    pub handler: BoxedHandler,
-    /// Keybinds installed by the script host; read on every key press.
-    pub keybinds: KeybindRegistry,
     /// Owns the engine and every script-defined callback.
     pub host: RuneHost,
-    /// Worker handle used by async script natives.
-    pub worker: Arc<EventRegistry>,
+    /// Keybinds installed by the script host; read on every key press.
+    pub keybinds: KeybindRegistry,
+    /// The dispatch table built from the session's action handlers.
+    pub handler: BoxedHandler,
+    /// The shared session state; the single owner of the shared handles.
+    pub ctx: Arc<SessionContext>,
+}
+
+impl std::ops::Deref for Config {
+    type Target = SessionContext;
+
+    fn deref(&self) -> &SessionContext {
+        &self.ctx
+    }
 }
 
 impl Config {
