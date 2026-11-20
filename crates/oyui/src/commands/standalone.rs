@@ -8,8 +8,8 @@ use crate::commands::{compare, CommandError, RunOptions};
 use crate::vcs::tool::{ToolInvocation, ToolProgram};
 use crate::vcs::{self, RepoKind};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use crate::commands::compare::SessionOutcome;
+
 
 fn not_a_repo() -> CommandError {
     CommandError::Runtime("not inside a jj or git repository".into())
@@ -152,9 +152,8 @@ async fn run_git_squash(
         default_staged: true,
         view: args.view.clone(),
     };
-    let confirmed = Arc::new(AtomicBool::new(false));
-    compare::run_session(opts, config_path, session, confirmed.clone(), None).await?;
-    if !confirmed.load(Ordering::SeqCst) {
+    let outcome = compare::run_session(opts, config_path, session, None).await?;
+    if outcome == SessionOutcome::Aborted {
         eprintln!("squash cancelled; HEAD unchanged");
         return Ok(());
     }
@@ -201,9 +200,8 @@ async fn run_git_split(
         default_staged: false,
         view: args.view.clone(),
     };
-    let confirmed = Arc::new(AtomicBool::new(false));
-    compare::run_session(opts, config_path, session, confirmed.clone(), None).await?;
-    if !confirmed.load(Ordering::SeqCst) {
+    let outcome = compare::run_session(opts, config_path, session, None).await?;
+    if outcome == SessionOutcome::Aborted {
         eprintln!("split cancelled; no commits created");
         return Ok(());
     }

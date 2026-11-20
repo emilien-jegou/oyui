@@ -51,8 +51,13 @@ pub async fn run_diff(
         default_staged: args.start_staged,
         view: args.view.clone(),
     };
-    let confirmed = Arc::new(AtomicBool::new(false));
-    run_session(options, config_path, session, confirmed, None).await
+    match run_session(options, config_path, session, None).await? {
+        SessionOutcome::Confirmed => Ok(()),
+        SessionOutcome::Aborted => {
+            eprintln!("merge cancelled; output left untouched");
+            Err(CommandError::Aborted)
+        }
+    }
 }
 
 /// Reads one side of a merge, reporting which side failed.
@@ -176,23 +181,25 @@ pub async fn run_merge(
         default_staged: false,
         view: args.view.clone(),
     };
-    let confirmed = Arc::new(AtomicBool::new(false));
-    run_session(
-        options,
-        config_path,
-        session,
-        confirmed.clone(),
-        Some(&content),
-    )
-    .await?;
-    if !confirmed.load(std::sync::atomic::Ordering::SeqCst) {
-        eprintln!("merge cancelled; output left untouched");
-        return Err(CommandError::Aborted);
+    match run_session(options, config_path, session, Some(&content)).await? {
+        SessionOutcome::Confirmed => Ok(()),
+        SessionOutcome::Aborted => {
+            eprintln!("merge cancelled; output left untouched");
+            Err(CommandError::Aborted)
+        }
     }
-    Ok(())
 }
 
-/// Runs a prepared session; `confirmed` is set when the user confirms.
+/// How a session ended: the user either confirmed the result or backed out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionOutcome {
+    /// The user confirmed the pending result.
+    Confirmed,
+    /// The user quit without confirming.
+    Aborted,
+}
+
+/// Runs a prepared session; returns how the session ended.
 ///
 /// `merge_text` is the synthesized merge content, when the session is a merge;
 /// it lets [`detect_conflicts`] parse the exact bytes being displayed instead
@@ -201,9 +208,8 @@ pub(crate) async fn run_session(
     options: &RunOptions,
     config_path: PathBuf,
     session: Session,
-    confirmed: Arc<AtomicBool>,
     merge_text: Option<&str>,
-) -> Result<(), CommandError> {
+) -> Result<SessionOutcome, CommandError> {
     let tree = Arc::new(RwLock::new(crate::tree::FileTree::default()));
     let cache = DiffCache::default();
     let config_error = Arc::new(RwLock::new(None));
@@ -226,6 +232,11 @@ pub(crate) async fn run_session(
         .build();
 
     let worker = Arc::new(EventRegistry::spawn(worker_context));
+
+    // The handler flips this when the user confirms; run_session reads it
+    // after the TUI exits.
+    let confirmed = Arc::new(AtomicBool::new(false));
+    let confirmed_read = confirmed.clone();
 
     let handler = handlers::generate(AppActionsHandler {
         ui: ui.clone(),
@@ -273,7 +284,11 @@ pub(crate) async fn run_session(
         .build();
 
     app.start().await?;
-    Ok(())
+    Ok(if confirmed_read.load(std::sync::atomic::Ordering::SeqCst) {
+        SessionOutcome::Confirmed
+    } else {
+        SessionOutcome::Aborted
+    })
 }
 
 /// Loads the merge content's conflicts for inline resolution.
