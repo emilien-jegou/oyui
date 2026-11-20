@@ -99,6 +99,15 @@ pub async fn run_split(
     let repo = vcs::detect_cwd().ok_or_else(not_a_repo)?;
     match repo.kind {
         RepoKind::Jujutsu => {
+            // jj's split has no second-message slot, so the flag would be
+            // silently dropped — and a typo'd or mistaken flag must not
+            // succeed with lost input (finding 4.9).
+            if args.message_second.is_some() {
+                return Err(eyre::eyre!(
+                    "--message-second is not supported with jj: jj split has no second message"
+                )
+                .into());
+            }
             let program = program(&config_path)?;
             run(vcs::jujutsu::split(&program, args))
         }

@@ -97,8 +97,9 @@ pub fn diff(program: &ToolProgram, args: &DiffCommandArgs) -> ToolInvocation {
 }
 
 /// Splits the current change (`oyui split`); delegates to `jj split` with oyui
-/// as the interactive diff editor. Rejects `--message-second` up front: jj's
-/// split has no second-message slot, so silently dropping it would lose input.
+/// as the interactive diff editor. The caller rejects `--message-second` up
+/// front: jj's split has no second-message slot, so silently dropping it
+/// would lose input.
 pub fn split(program: &ToolProgram, args: &SplitArgs) -> ToolInvocation {
     let mut inv = base(
         program,
