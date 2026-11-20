@@ -318,11 +318,8 @@ fn selection_preview(
     selected_row_idx: usize,
 ) -> Option<(usize, Side)> {
     let line = line_mapping?.get(selected_row_idx).copied()?;
-    regions.ranges.iter().enumerate().find_map(|(i, range)| {
-        if regions.folded.get(i).copied().unwrap_or(false) {
-            return None;
-        }
-        if !range.contains(&line) {
+    regions.views.iter().enumerate().find_map(|(i, v)| {
+        if !(v.folded && v.range.contains(&line)) {
             return None;
         }
         regions.side_at_line(i, line).map(|side| (i, side))

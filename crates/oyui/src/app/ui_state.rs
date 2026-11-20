@@ -6,6 +6,7 @@
 //! workers never see this type.
 
 use crate::app::CommandMode;
+use crate::view::file::view_model::ConflictView;
 use crate::view::file::FileViewData;
 use crate::view::tree::TreeViewData;
 use crate::view::ViewKind;
@@ -153,17 +154,17 @@ impl ResolveState {
             }
         }
         crate::view::file::view_model::ConflictRegions {
-            ranges,
-            folded: self.folded.clone(),
-            headers: (0..self.count())
-                .map(|i| crate::diff::conflict::header_line(self.choice(i)))
+            views: (0..self.count())
+                .map(|i| ConflictView {
+                    range: ranges.get(i).cloned().unwrap_or(0..0),
+                    folded: self.folded.get(i).copied().unwrap_or(false),
+                    header: crate::diff::conflict::header_line(self.choice(i)),
+                    footer: crate::diff::conflict::footer_line(),
+                    choice: self.choices.get(i).copied().flatten(),
+                    kept: kept.get(i).cloned().unwrap_or_default(),
+                    sides: sides.get(i).cloned().unwrap_or_default(),
+                })
                 .collect(),
-            footers: (0..self.count())
-                .map(|_| crate::diff::conflict::footer_line())
-                .collect(),
-            choices: self.choices.clone(),
-            kept,
-            sides,
         }
     }
 

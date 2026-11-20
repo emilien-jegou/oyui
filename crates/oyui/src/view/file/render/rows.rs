@@ -60,7 +60,7 @@ impl<'a> RowBuilder<'a> {
         let Some((ci, side)) = self.preview else {
             return false;
         };
-        let Some(range) = self.regions.ranges.get(ci) else {
+        let Some(range) = self.regions.get(ci).map(|v| &v.range) else {
             return false;
         };
         if !range.contains(&line) {
@@ -199,10 +199,10 @@ impl<'a> RowBuilder<'a> {
                     let past_end = match diff_line {
                         crate::diff::DiffLine::Context { new_line_idx, .. }
                         | crate::diff::DiffLine::Addition { new_line_idx, .. } => {
-                            *new_line_idx >= self.regions.ranges[ci].end
+                            *new_line_idx >= self.regions.get(ci).map(|v| v.range.end).unwrap_or(0)
                         }
                         crate::diff::DiffLine::Deletion { .. } => {
-                            current_new >= self.regions.ranges[ci].end
+                            current_new >= self.regions.get(ci).map(|v| v.range.end).unwrap_or(0)
                         }
                     };
                     if past_end {
@@ -298,7 +298,7 @@ impl<'a> RowBuilder<'a> {
 
             // End of hunk: close the frame when its range was fully scanned.
             if let Some(ci) = open_frame {
-                if current_new >= self.regions.ranges[ci].end {
+                if current_new >= self.regions.get(ci).map(|v| v.range.end).unwrap_or(0) {
                     push_footer!(ci);
                     open_frame = None;
                 }
@@ -529,13 +529,7 @@ mod tests {
     }
 
     static EMPTY_REGIONS: ConflictRegions = ConflictRegions {
-        ranges: Vec::new(),
-        folded: Vec::new(),
-        headers: Vec::new(),
-        footers: Vec::new(),
-        choices: Vec::new(),
-        kept: Vec::new(),
-        sides: Vec::new(),
+        views: Vec::new(),
     };
 
     fn builder<'a>(

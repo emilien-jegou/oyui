@@ -1,5 +1,7 @@
 //! Pre-computed view model for file rendering.
 
+use crate::diff::Side;
+
 /// New-side line layout of one conflict: where each side lives.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ConflictSides {
@@ -26,26 +28,38 @@ use std::path::{Path, PathBuf};
 /// untouched.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ConflictRegions {
-    /// New-content line spans of each conflict.
-    pub ranges: Vec<std::ops::Range<usize>>,
-    /// Whether each conflict is collapsed.
-    pub folded: Vec<bool>,
-    /// Header text per conflict (shown when folded).
-    pub headers: Vec<String>,
-    /// Footer text per conflict (shown when folded).
-    pub footers: Vec<String>,
-    /// Chosen side per conflict; drives which lines stay visible when folded.
-    pub choices: Vec<Option<crate::diff::Side>>,
-    /// Visible line ranges per conflict when folded (the kept side's lines).
-    pub kept: Vec<Vec<std::ops::Range<usize>>>,
-    /// Per-conflict side layout (ours/theirs ranges + separator index).
-    pub sides: Vec<ConflictSides>,
+    /// Everything the row model needs per conflict, in one place.
+    pub views: Vec<ConflictView>,
+}
+
+/// Everything the row model needs for one conflict, in one place.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConflictView {
+    /// New-content line span of the conflict.
+    pub range: std::ops::Range<usize>,
+    /// Whether the conflict is collapsed.
+    pub folded: bool,
+    /// Header text (shown when folded).
+    pub header: String,
+    /// Footer text (shown when folded).
+    pub footer: String,
+    /// Chosen side; drives what stays visible when folded.
+    pub choice: Option<crate::diff::Side>,
+    /// New-side line indices of the kept (chosen) rows.
+    pub kept: Vec<std::ops::Range<usize>>,
+    /// Side layout inside the conflict.
+    pub sides: ConflictSides,
 }
 
 impl ConflictRegions {
+    /// Everything the row model needs for conflict `i`.
+    pub fn get(&self, i: usize) -> Option<&ConflictView> {
+        self.views.get(i)
+    }
+
     /// True when there is nothing to fold.
     pub fn is_empty(&self) -> bool {
-        self.ranges.is_empty()
+        self.views.is_empty()
     }
 
     /// For a new-content line in a folded conflict: `(index, is_first_line)`.
@@ -64,18 +78,14 @@ impl ConflictRegions {
 
     /// Fold status of a conflict line: `(index, is_header, visible_as_normal_row)`.
     pub fn fold_action(&self, line: usize) -> Option<(usize, bool, bool)> {
-        self.ranges.iter().enumerate().find_map(|(i, r)| {
-            if !(self.folded.get(i).copied().unwrap_or(false) && r.contains(&line)) {
+        self.views.iter().enumerate().find_map(|(i, v)| {
+            if !(v.folded && v.range.contains(&line)) {
                 return None;
             }
-            if line == r.start {
+            if line == v.range.start {
                 return Some((i, true, false));
             }
-            let visible = self
-                .kept
-                .get(i)
-                .map(|ranges| ranges.iter().any(|k| k.contains(&line)))
-                .unwrap_or(false);
+            let visible = v.kept.iter().any(|k| k.contains(&line));
             Some((i, false, visible))
         })
     }
@@ -86,15 +96,13 @@ impl ConflictRegions {
     /// the separator itself and everything below map to theirs, the base
     /// block maps to ours.
     pub fn side_at_line(&self, index: usize, line: usize) -> Option<crate::diff::Side> {
-        use crate::diff::Side;
-        let range = self.ranges.get(index)?;
-        if !range.contains(&line) {
+        let v = self.views.get(index)?;
+        if !v.range.contains(&line) {
             return None;
         }
-        let sides = self.sides.get(index)?;
-        if line < sides.ours.end {
+        if line < v.sides.ours.end {
             Some(Side::Ours)
-        } else if line >= sides.sep {
+        } else if line >= v.sides.sep {
             Some(Side::Theirs)
         } else {
             Some(Side::Ours)
@@ -106,17 +114,17 @@ impl ConflictRegions {
     /// Staging display is neutralized there: conflict hunks are not
     /// stageable, so their colors must never reflect staging state.
     pub fn covers(&self, line: usize) -> bool {
-        self.ranges.iter().any(|r| r.contains(&line))
+        self.views.iter().any(|v| v.range.contains(&line))
     }
 
     /// Header text for conflict `i`.
     pub fn header(&self, i: usize) -> &str {
-        self.headers.get(i).map(String::as_str).unwrap_or("")
+        self.views.get(i).map(|v| v.header.as_str()).unwrap_or("")
     }
 
     /// Footer text for conflict `i`.
     pub fn footer(&self, i: usize) -> &str {
-        self.footers.get(i).map(String::as_str).unwrap_or("")
+        self.views.get(i).map(|v| v.footer.as_str()).unwrap_or("")
     }
 }
 
@@ -153,8 +161,8 @@ impl LayoutKey {
             hunks: diff.hunks.len(),
             is_folded,
             context_lines,
-            conflict_folded: regions.folded.clone(),
-            conflict_choices: regions.choices.clone(),
+            conflict_folded: regions.views.iter().map(|v| v.folded).collect(),
+            conflict_choices: regions.views.iter().map(|v| v.choice).collect(),
         }
     }
 }
@@ -228,7 +236,7 @@ impl FileViewModel {
                         }
                         // A frame never reopens inside itself.
                         if open_frame != Some(ci) {
-                            line_map.push(regions.ranges[ci].start);
+                            line_map.push(regions.views[ci].range.start);
                             row_to_hunk.push(Some(i));
                             visual_row_idx += 1;
                             open_frame = Some(ci);
@@ -248,10 +256,10 @@ impl FileViewModel {
                     let past_end = match diff_line {
                         crate::diff::DiffLine::Context { new_line_idx, .. }
                         | crate::diff::DiffLine::Addition { new_line_idx, .. } => {
-                            *new_line_idx >= regions.ranges[ci].end
+                            *new_line_idx >= regions.views[ci].range.end
                         }
                         crate::diff::DiffLine::Deletion { .. } => {
-                            current_new >= regions.ranges[ci].end
+                            current_new >= regions.views[ci].range.end
                         }
                     };
                     if past_end {
@@ -259,7 +267,7 @@ impl FileViewModel {
                             hunk_starts.push(visual_row_idx);
                             recorded_hunk_start = true;
                         }
-                        line_map.push(regions.ranges[ci].start);
+                        line_map.push(regions.views[ci].range.start);
                         row_to_hunk.push(Some(i));
                         visual_row_idx += 1;
                         open_frame = None;
@@ -294,12 +302,12 @@ impl FileViewModel {
 
             // End of hunk: close the frame when its range was fully scanned.
             if let Some(ci) = open_frame {
-                if current_new >= regions.ranges[ci].end {
+                if current_new >= regions.views[ci].range.end {
                     if !recorded_hunk_start {
                         hunk_starts.push(visual_row_idx);
                         recorded_hunk_start = true;
                     }
-                    line_map.push(regions.ranges[ci].start);
+                        line_map.push(regions.views[ci].range.start);
                     row_to_hunk.push(Some(i));
                     visual_row_idx += 1;
                     open_frame = None;
@@ -349,10 +357,9 @@ impl FileViewModel {
 
         // Trailing flush: a frame ending at the very end of the file.
         if let Some(ci) = open_frame.take() {
-            line_map.push(regions.ranges[ci].start);
+            line_map.push(regions.views[ci].range.start);
             row_to_hunk.push(diff.hunks.len().checked_sub(1));
         }
-
         let total_rows = line_map.len();
         self.row_counts.insert(path.to_path_buf(), total_rows);
         self.line_mapping.insert(path.to_path_buf(), line_map);
@@ -584,16 +591,18 @@ mod tests {
         };
 
         let regions = ConflictRegions {
-            ranges: vec![1..6],
-            folded: vec![true],
-            headers: vec!["ours".to_string()],
-            footers: vec!["".to_string()],
-            choices: vec![None],
-            kept: vec![Vec::new()],
-            sides: vec![ConflictSides {
-                ours: 2..3,
-                theirs: 4..5,
-                sep: 3,
+            views: vec![ConflictView {
+                range: 1..6,
+                folded: true,
+                header: String::new(),
+                footer: String::new(),
+                choice: None,
+                kept: Vec::new(),
+                sides: ConflictSides {
+                    ours: 2..3,
+                    theirs: 4..5,
+                    sep: 3,
+                },
             }],
         };
 
@@ -691,16 +700,18 @@ mod tests {
         // Conflict spans new lines 1..8; line 4 (`base`) is inter-hunk
         // context, not part of either hunk.
         let regions = ConflictRegions {
-            ranges: vec![1..8],
-            folded: vec![true],
-            headers: vec!["theirs".to_string()],
-            footers: vec!["".to_string()],
-            choices: vec![Some(crate::diff::Side::Theirs)],
-            kept: vec![vec![6..7]],
-            sides: vec![ConflictSides {
-                ours: 2..3,
-                theirs: 6..7,
-                sep: 5,
+            views: vec![ConflictView {
+                range: 1..8,
+                folded: true,
+                header: "theirs".to_string(),
+                footer: String::new(),
+                choice: Some(crate::diff::Side::Theirs),
+                kept: vec![6..7],
+                sides: ConflictSides {
+                    ours: 2..3,
+                    theirs: 6..7,
+                    sep: 5,
+                },
             }],
         };
 
