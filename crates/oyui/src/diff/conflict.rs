@@ -488,11 +488,19 @@ impl ConflictedFile {
 
     /// New-content line ranges of each conflict, fully expanded.
     pub fn marker_ranges(&self) -> Vec<std::ops::Range<usize>> {
-        self.display_ranges(&vec![false; self.conflict_count()])
+        self.display_ranges(&vec![false; self.conflict_count()], &[])
     }
 
     /// Line ranges of each conflict in [`display`](Self::display) output.
-    pub fn display_ranges(&self, folded: &[bool]) -> Vec<std::ops::Range<usize>> {
+    ///
+    /// Takes the same `choices` slice as `display` so a folded conflict's
+    /// length matches what `display` actually renders (header + resolved
+    /// content + footer) instead of assuming one line.
+    pub fn display_ranges(
+        &self,
+        folded: &[bool],
+        choices: &[Option<Side>],
+    ) -> Vec<std::ops::Range<usize>> {
         let mut ranges = Vec::new();
         let mut line = 0usize;
         let mut idx = 0usize;
@@ -501,7 +509,11 @@ impl ConflictedFile {
                 Segment::Common(text) => line += text.len(),
                 Segment::Conflict(c) => {
                     let len = if folded.get(idx).copied().unwrap_or(false) {
-                        1
+                        // Folded: header + resolved side + footer.
+                        match choices.get(idx).copied().flatten() {
+                            Some(side) => 2 + c.resolve(side).len(),
+                            None => 2,
+                        }
                     } else {
                         c.marker_lines()
                     };
