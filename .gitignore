@@ -8,7 +8,7 @@
 !Cargo.lock
 !Cargo.toml
 !README.md
-!bug-report.md
+!AGENTS.md
 !passover.md
 !devenv.nix
 !make.nix

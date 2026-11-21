@@ -334,7 +334,7 @@ impl TreeViewData {
         // Window-relative state: the stored anchor stays absolute while
         // ratatui only ever sees rows inside the slice.
         let mut rel_state = ListState::default();
-        if end > start {
+        if end > start && area.width > 0 {
             rel_state.select(Some(selected.clamp(start, end - 1) - start));
         }
 
@@ -343,6 +343,37 @@ impl TreeViewData {
             .highlight_style(Style::default().bg(theme.cursor_bg.into()));
 
         frame.render_stateful_widget(list, area, &mut rel_state);
+        if end > start && area.width > 0 {
+            let selected_screen_row = selected.clamp(start, end - 1) - start;
+            let selected_y = area.y.saturating_add(selected_screen_row as u16);
+            let row_styles: Vec<String> = (area.x..area.x.saturating_add(area.width))
+                .map(|x| {
+                    let cell = &frame.buffer_mut()[(x, selected_y)];
+                    format!(
+                        "x={x} sym={:?} fg={:?} bg={:?} mod={:?}",
+                        cell.symbol(),
+                        cell.fg,
+                        cell.bg,
+                        cell.modifier
+                    )
+                })
+                .collect();
+            tracing::debug!(
+                selected_index = selected,
+                start,
+                end,
+                selected_screen_row,
+                row_styles = ?row_styles,
+                "rendered tree cursor row styles"
+            );
+        } else {
+            tracing::debug!(
+                selected_index = selected,
+                start,
+                end,
+                "tree cursor has no visible row"
+            );
+        }
     }
 }
 

@@ -1,9 +1,15 @@
 //! Main event loop: terminal setup, the input thread, dispatch, and teardown.
+//!
+//! Two architectural rules live here (root `AGENTS.md`, "Terminal rendering"):
+//! the backend is the only tty writer, and presentation reconciles instead of
+//! assuming a diff landed (`PaintKey` + `force_full_repaint` below).
 
 use super::{draw, App};
 use crate::commands::CommandError;
 use crate::commons::frame_log;
 use crate::commons::frame_log::epoch_millis;
+use crate::config::UiTheme;
+use crate::view::ViewKind;
 use crossterm::{
     event::{Event, EventStream},
     execute,
@@ -11,10 +17,121 @@ use crossterm::{
 };
 use futures_lite::StreamExt;
 use ratatui::{backend::CrosstermBackend, Terminal};
-use std::io::{self, Write};
 use std::time::Duration;
+use std::{
+    io::{self, Write},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    thread,
+    time::Instant,
+};
 
 type Tui = Terminal<CrosstermBackend<crate::commons::frame_log::CountingStdout>>;
+
+/// Longest a frame may go without being written in full.
+///
+/// Ratatui keeps no record of what the terminal actually shows, only of what it
+/// last sent, so a delta that is lost anywhere — a direct backend write, a
+/// partially applied frame, a terminal that coalesces output — is never
+/// retried. The interval bounds how long such a desync can survive; the
+/// per-frame check below catches the case that actually bit us.
+const FULL_REPAINT_INTERVAL: Duration = Duration::from_secs(2);
+
+/// State whose change only restyles cells and never changes a glyph.
+///
+/// Ratatui diffs the frame it is about to draw against the frame it last
+/// *sent*, not against the screen. A dropped delta is therefore permanent: the
+/// cells already compare equal, so the stale style is never re-emitted, and
+/// only a resize — the one thing that resets both buffers — repairs it. Moving
+/// the cursor, switching panes, folding and changing the theme are exactly the
+/// style-only transitions, so the frame that follows one is written in full.
+#[derive(Clone, PartialEq)]
+struct PaintKey {
+    view: ViewKind,
+    theme: UiTheme,
+    tree_selected: usize,
+    tree_offset: usize,
+    path: Option<std::path::PathBuf>,
+    file_selected: usize,
+    file_offset: usize,
+    hscroll: usize,
+    folded: bool,
+}
+
+/// Snapshots the style-only part of the UI.
+fn paint_key(app: &App) -> PaintKey {
+    // Theme first: never hold the UI lock while taking another lock.
+    let theme = app.theme.read().ui.clone();
+    let ui = app.ui.lock();
+    let file = &ui.file_view;
+    let state = file
+        .current_path
+        .as_ref()
+        .and_then(|path| file.scroll_states.get(path));
+    PaintKey {
+        view: ui.current,
+        theme,
+        tree_selected: ui.tree_view.selected_index,
+        tree_offset: ui.tree_view.list_state.offset(),
+        path: file.current_path.clone(),
+        file_selected: state.and_then(|s| s.selected()).unwrap_or(0),
+        file_offset: state.map(|s| s.offset()).unwrap_or(0),
+        hscroll: file
+            .current_path
+            .as_ref()
+            .and_then(|path| file.hscroll_states.get(path).copied())
+            .unwrap_or(0),
+        folded: file.is_folded,
+    }
+}
+
+/// Discards both buffers so the next frame is written in full.
+///
+/// `Terminal` only knows what it last *sent*, never what the screen shows, so a
+/// delta that is lost — a direct backend write, a partially applied frame, a
+/// terminal that coalesces output — is never retried: the cells already compare
+/// equal, so the stale style is never re-emitted, and only a resize (which
+/// resets both buffers) repairs it.
+///
+/// Swapping twice empties the inactive buffer *and* the one about to be drawn
+/// into, so the next `draw` diffs against nothing and re-emits every cell. It
+/// uses only public API and is the same reset a resize performs, without the
+/// cursor query of `Terminal::clear` (which writes `\x1b[6n` and reads stdin,
+/// able to swallow a keypress) or the screen clear of `Terminal::resize`.
+fn force_full_repaint(terminal: &mut Tui) {
+    terminal.swap_buffers();
+    terminal.swap_buffers();
+}
+
+/// Emits the out-of-band terminal sequences queued by handlers (OSC 52).
+///
+/// Handlers never touch the tty; they push to
+/// `SessionContext::terminal_writes` and this is the sole drain, written
+/// through the backend after a frame's flush. That keeps two properties:
+///
+/// - **One writer** — nothing interleaves with the bytes ratatui emits for a
+///   frame, so a frame can never be cut mid-stream (the stale-highlight
+///   bug's confirmed trigger; root `AGENTS.md`).
+/// - **The reconcile pass stays sufficient** — out-of-band bytes land
+///   between frames, so the paint-key full repaints only ever have to cover
+///   bookkeeping done inside ratatui itself.
+fn emit_terminal_writes(app: &App, terminal: &mut Tui) {
+    let mut outbox = app.terminal_writes.lock();
+    if outbox.is_empty() {
+        return;
+    }
+    let backend = terminal.backend_mut();
+    for sequence in outbox.drain(..) {
+        if let Err(e) = backend.write_all(sequence.as_bytes()) {
+            tracing::error!("failed to write out-of-band terminal sequence: {e}");
+        }
+    }
+    if let Err(e) = backend.flush() {
+        tracing::error!("failed to flush out-of-band terminal sequence: {e}");
+    }
+}
 
 /// Restores the terminal when dropped, including during panic unwinding.
 ///
@@ -43,7 +160,7 @@ impl TerminalRestore<'_> {
         if let Err(e) = self.terminal.show_cursor() {
             tracing::error!("failed to show cursor during restore: {e}");
         }
-        let _ = io::stdout().flush();
+        let _ = self.terminal.backend_mut().flush();
     }
 }
 
@@ -55,14 +172,123 @@ impl Drop for TerminalRestore<'_> {
     }
 }
 
+struct ProbedEvent {
+    seq: u64,
+    event: Event,
+    read_at: Instant,
+    read_epoch_ns: u128,
+}
+
+enum InputMessage {
+    Event(Event, Option<ProbedEvent>),
+}
+
+enum InputEvents {
+    Stream(EventStream),
+    Probe {
+        receiver: tokio::sync::mpsc::UnboundedReceiver<io::Result<ProbedEvent>>,
+        shutdown: Arc<AtomicBool>,
+        reader: Option<thread::JoinHandle<()>>,
+    },
+}
+
+impl InputEvents {
+    fn new(probe: bool) -> Self {
+        if !probe {
+            return Self::Stream(EventStream::new());
+        }
+
+        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let thread_shutdown = shutdown.clone();
+        let reader = thread::spawn(move || {
+            let mut seq = 0_u64;
+            while !thread_shutdown.load(Ordering::Acquire) {
+                match crossterm::event::poll(Duration::from_millis(10)) {
+                    Ok(false) => continue,
+                    Ok(true) => match crossterm::event::read() {
+                        Ok(event) => {
+                            seq += 1;
+                            let read_at = Instant::now();
+                            let read_epoch_ns = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_nanos();
+                            crate::commons::frame_log::frame(&[
+                                ("src", "input_read".to_string()),
+                                ("seq", seq.to_string()),
+                                ("epoch_ns", read_epoch_ns.to_string()),
+                                ("event", format!("{event:?}")),
+                            ]);
+                            if sender
+                                .send(Ok(ProbedEvent {
+                                    seq,
+                                    event,
+                                    read_at,
+                                    read_epoch_ns,
+                                }))
+                                .is_err()
+                            {
+                                break;
+                            }
+                        }
+                        Err(error) => {
+                            let _ = sender.send(Err(error));
+                            break;
+                        }
+                    },
+                    Err(error) => {
+                        let _ = sender.send(Err(error));
+                        break;
+                    }
+                }
+            }
+        });
+
+        Self::Probe {
+            receiver,
+            shutdown,
+            reader: Some(reader),
+        }
+    }
+
+    async fn next(&mut self) -> Option<io::Result<InputMessage>> {
+        match self {
+            Self::Stream(events) => events
+                .next()
+                .await
+                .map(|result| result.map(|event| InputMessage::Event(event, None))),
+            Self::Probe { receiver, .. } => receiver.recv().await.map(|result| {
+                result.map(|probed| InputMessage::Event(probed.event.clone(), Some(probed)))
+            }),
+        }
+    }
+}
+
+impl Drop for InputEvents {
+    fn drop(&mut self) {
+        if let Self::Probe {
+            shutdown, reader, ..
+        } = self
+        {
+            shutdown.store(true, Ordering::Release);
+            if let Some(reader) = reader.take() {
+                let _ = reader.join();
+            }
+        }
+    }
+}
+
 impl App {
     pub async fn run(&mut self) -> Result<(), CommandError> {
         tracing::debug!("Initializing terminal");
         enable_raw_mode()?;
-        let mut stdout = io::stdout();
-        execute!(stdout, EnterAlternateScreen)?;
+        // The backend owns the tty from here on. Setup sequences are also
+        // written through it — entering the alternate screen on a separate
+        // handle is what allowed two writers to interleave on one terminal.
         let backend = CrosstermBackend::new(crate::commons::frame_log::CountingStdout::new());
         let mut terminal = Terminal::new(backend)?;
+        execute!(terminal.backend_mut(), EnterAlternateScreen)?;
         // Armed from here on: both `?` returns and panics unwinding out of
         // the loop pass through the guard's restore.
         let mut restore = TerminalRestore {
@@ -80,10 +306,14 @@ impl App {
         // longer starve. Crossterm's `EventStream::drop` signals its worker
         // (`stream_wake_task_should_shutdown` + waker), which is the
         // bounded-teardown property the stopped reader provided (6.19).
-        let mut events = EventStream::new();
+        let input_probe = std::env::var_os("OYUI_INPUT_PROBE").is_some();
+        let mut events = InputEvents::new(input_probe);
 
         let worker = self.worker.clone();
+        let mut draw_id = 0_u64;
+        let mut last_full_repaint = Instant::now();
         restore.terminal.draw(|f| draw::draw(f, self))?;
+        let mut last_paint_key = Some(paint_key(self));
 
         loop {
             let branch;
@@ -114,14 +344,36 @@ impl App {
                     // optimization is not worth a parked-forever mode.
                     match maybe_event {
                         // Resize/mouse/focus go straight to the redraw.
-                        Some(Ok(Event::Key(key))) => {
-                            frame_log::frame(&[
+                        Some(Ok(InputMessage::Event(Event::Key(key), probed))) => {
+                            let dispatch_ns = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_nanos();
+                            let read_to_dispatch_us =
+                                probed.as_ref().map(|event| event.read_at.elapsed().as_micros());
+                            tracing::debug!(
+                                ?key,
+                                probe_seq = probed.as_ref().map(|event| event.seq),
+                                read_to_dispatch_us = ?read_to_dispatch_us,
+                                "received key event"
+                            );
+                            let mut fields = vec![
                                 ("src", "key".to_string()),
                                 ("ms", epoch_millis().to_string()),
-                            ]);
+                                ("dispatch_epoch_ns", dispatch_ns.to_string()),
+                            ];
+                            if let Some(event) = &probed {
+                                fields.push(("seq", event.seq.to_string()));
+                                fields.push(("read_epoch_ns", event.read_epoch_ns.to_string()));
+                                fields.push((
+                                    "read_to_dispatch_us",
+                                    event.read_at.elapsed().as_micros().to_string(),
+                                ));
+                            }
+                            frame_log::frame(&fields);
                             aborted = self.handle_key(key);
                         }
-                        Some(Ok(_)) => {}
+                        Some(Ok(InputMessage::Event(_, _))) => {}
                         Some(Err(e)) => {
                             tracing::error!(?e, "terminal input stream failed");
                             return Err(CommandError::Runtime(
@@ -164,7 +416,33 @@ impl App {
             self.drain_pending_scripts();
 
             let draw_started = std::time::Instant::now();
+            draw_id += 1;
+            frame_log::frame(&[
+                ("src", "draw_begin".to_string()),
+                ("draw_id", draw_id.to_string()),
+                ("branch", branch.to_string()),
+                ("ms", epoch_millis().to_string()),
+            ]);
+            // A frame that only restyles cells is the one a lost delta hides,
+            // so it is written in full; the interval bounds any other desync.
+            let key = paint_key(self);
+            let full_repaint = last_paint_key.as_ref() != Some(&key)
+                || last_full_repaint.elapsed() >= FULL_REPAINT_INTERVAL;
+            if full_repaint {
+                last_full_repaint = Instant::now();
+                frame_log::frame(&[("src", "full_repaint".to_string())]);
+                force_full_repaint(restore.terminal);
+            }
             restore.terminal.draw(|f| draw::draw(f, self))?;
+            last_paint_key = Some(paint_key(self));
+            // Out-of-band sequences go after the frame: below the frame's
+            // flush, through the same backend, never inside it.
+            emit_terminal_writes(self, restore.terminal);
+            frame_log::frame(&[
+                ("src", "draw_end".to_string()),
+                ("draw_id", draw_id.to_string()),
+                ("ms", epoch_millis().to_string()),
+            ]);
             // pending stays near zero: coalescing is what keeps a burst of
             // per-file results from queueing a frame each.
             tracing::debug!(
@@ -177,13 +455,7 @@ impl App {
             // read, linearized so the log needs no serde. One line per entry.
             let current_path = self.ui.lock().file_view.current_path.clone();
             if let Some(path) = current_path {
-                if let Some(st) = self
-                    .ui
-                    .lock()
-                    .file_view
-                    .scroll_states
-                    .get(&path)
-                {
+                if let Some(st) = self.ui.lock().file_view.scroll_states.get(&path) {
                     frame_log::frame(&[
                         ("src", "scroll".to_string()),
                         ("ms", epoch_millis().to_string()),

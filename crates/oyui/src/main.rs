@@ -37,8 +37,7 @@ async fn main() -> Result<ExitCode, Box<dyn Error>> {
         // OYUI_LOG_ENABLE/OYUI_LOG_PATH: the same shell command then traces
         // the real TUI process, not the delegator.
         .log_enable(
-            args.common.log_enable
-                || std::env::var_os("OYUI_LOG_ENABLE").is_some_and(|v| v == "1"),
+            args.common.log_enable || std::env::var_os("OYUI_LOG_ENABLE").is_some_and(|v| v == "1"),
         )
         .log_save_path(
             args.common

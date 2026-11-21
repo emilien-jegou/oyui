@@ -86,6 +86,23 @@ impl App {
                 .flat_map(|(_, _, targets)| targets.iter().cloned())
                 .collect();
 
+            let target_names: Vec<String> = matched_targets
+                .iter()
+                .map(|target| match target {
+                    crate::actions::keybinds::ActionTarget::Static(action) => action.describe(),
+                    crate::actions::keybinds::ActionTarget::Dynamic(id) => {
+                        format!("script:{id:?}")
+                    }
+                })
+                .collect();
+            tracing::debug!(
+                key = ?key.code,
+                kind = ?key.kind,
+                view = ?active_mode,
+                targets = ?target_names,
+                "dispatching keybind targets"
+            );
+
             for target in matched_targets {
                 match target {
                     // `q` quits gracefully: the VCS reads a zero exit as

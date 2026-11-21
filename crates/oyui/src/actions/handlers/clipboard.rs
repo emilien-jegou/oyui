@@ -1,16 +1,19 @@
 //! System clipboard access via the OSC 52 terminal escape.
 
-/// Copies `text` to the clipboard by writing an OSC 52 sequence to stdout.
+/// Builds the OSC 52 sequence that copies `text` to the clipboard.
 ///
 /// Works over SSH and needs no external program. Terminals may impose a size
 /// limit and silently truncate large payloads.
-pub(crate) fn osc52_copy(text: &str) -> std::io::Result<()> {
-    use std::io::Write;
+///
+/// The sequence is *returned*, never written from here: the event loop owns
+/// the only tty writer (the Ratatui backend), and out-of-band bytes pushed to
+/// `SessionContext::terminal_writes` are emitted through it between frames.
+/// A direct write on `io::stdout()` would interleave with a frame's diff
+/// bytes — the confirmed trigger of the stale-highlight bug (root
+/// `AGENTS.md`, "Terminal rendering").
+pub(crate) fn osc52_sequence(text: &str) -> String {
     let encoded = base64_encode(text.as_bytes());
-    let sequence = format!("\x1b]52;c;{encoded}\x1b\\");
-    let mut stdout = std::io::stdout();
-    stdout.write_all(sequence.as_bytes())?;
-    stdout.flush()
+    format!("\x1b]52;c;{encoded}\x1b\\")
 }
 
 /// Minimal standard-alphabet base64 encoder for OSC 52 payloads.

@@ -225,13 +225,15 @@ impl GlobalActionsHandler for AppActionsHandler {
     }
 
     fn copy(&self, text: String) {
-        match super::clipboard::osc52_copy(&text) {
-            Ok(()) => self.set_message(
-                MessageLevel::Info,
-                format!("copied {} bytes to clipboard", text.len()),
-            ),
-            Err(e) => self.set_message(MessageLevel::Error, format!("clipboard failed: {e}")),
-        }
+        // Push onto the outbox; the event loop emits the sequence through the
+        // one backend writer between frames (AGENTS.md: single writer rule).
+        self.terminal_writes
+            .lock()
+            .push(super::clipboard::osc52_sequence(&text));
+        self.set_message(
+            MessageLevel::Info,
+            format!("copied {} bytes to clipboard", text.len()),
+        );
     }
 
     fn help(&self) {

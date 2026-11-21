@@ -94,6 +94,9 @@ impl<'a> RowBuilder<'a> {
             ($row:expr) => {{
                 total += 1;
                 if window.as_ref().is_some_and(|w| w.contains(&visual_row_idx)) {
+                    if visual_row_idx == self.selected_row_idx {
+                        tracing::debug!(visual_row_idx, "building selected diff row");
+                    }
                     rows.push($row);
                 }
             }};

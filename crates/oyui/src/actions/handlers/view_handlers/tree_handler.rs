@@ -87,7 +87,13 @@ impl AppActionsHandler {
 impl ViewTreeCursorActionsHandler for AppActionsHandler {
     fn up(&self, val: u32) {
         let view = &mut self.ui.lock().tree_view;
+        let previous_index = view.selected_index;
         view.selected_index = view.selected_index.saturating_sub(val as usize);
+        tracing::debug!(
+            previous_index,
+            selected_index = view.selected_index,
+            "updated tree cursor state"
+        );
     }
 
     fn down(&self, val: u32) {
@@ -96,7 +102,14 @@ impl ViewTreeCursorActionsHandler for AppActionsHandler {
 
         let len = view.flat_rows(&tree, &self.cache).len();
         let max_idx = len.saturating_sub(1);
+        let previous_index = view.selected_index;
         view.selected_index = (view.selected_index + val as usize).min(max_idx);
+        tracing::debug!(
+            previous_index,
+            selected_index = view.selected_index,
+            row_count = len,
+            "updated tree cursor state"
+        );
     }
 
     fn half_page_up(&self) {
@@ -124,7 +137,13 @@ impl ViewTreeCursorActionsHandler for AppActionsHandler {
 
     fn top(&self) {
         let view = &mut self.ui.lock().tree_view;
+        let previous_index = view.selected_index;
         view.selected_index = 0;
+        tracing::debug!(
+            previous_index,
+            selected_index = view.selected_index,
+            "updated tree cursor state"
+        );
     }
 
     fn bottom(&self) {
@@ -133,7 +152,14 @@ impl ViewTreeCursorActionsHandler for AppActionsHandler {
 
         let len = view.flat_rows(&tree, &self.cache).len();
         let max_idx = len.saturating_sub(1);
+        let previous_index = view.selected_index;
         view.selected_index = max_idx;
+        tracing::debug!(
+            previous_index,
+            selected_index = view.selected_index,
+            row_count = len,
+            "updated tree cursor state"
+        );
     }
 }
 

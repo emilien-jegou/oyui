@@ -60,14 +60,10 @@ pub fn flush(written: &[u8]) {
         return;
     };
     let (guard, _) = &mut *guard;
-    let snippet: String = written
-        .iter()
-        .take(160)
-        .map(|b| if b.is_ascii_graphic() || *b == b' ' { *b as char } else { '.' })
-        .collect();
+    let escaped = written.escape_ascii().to_string();
     let _ = writeln!(
         guard,
-        "flush\t{}\t{snippet}\t{}B",
+        "flush\t{}\t{escaped}\t{}B",
         epoch_millis(),
         written.len()
     );
@@ -80,22 +76,30 @@ pub fn flush(written: &[u8]) {
 /// if a frame's bytes are empty, nothing was flushed at all.
 pub struct CountingStdout {
     inner: io::Stdout,
+    pending: Vec<u8>,
 }
 
 impl CountingStdout {
     pub fn new() -> Self {
-        Self { inner: io::stdout() }
+        Self {
+            inner: io::stdout(),
+            pending: Vec::new(),
+        }
     }
 }
 
 impl Write for CountingStdout {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        flush(buf);
-        self.inner.write(buf)
+        let written = self.inner.write(buf)?;
+        self.pending.extend_from_slice(&buf[..written]);
+        Ok(written)
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        self.inner.flush()
+        self.inner.flush()?;
+        flush(&self.pending);
+        self.pending.clear();
+        Ok(())
     }
 }
 

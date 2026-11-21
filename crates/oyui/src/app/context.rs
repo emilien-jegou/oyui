@@ -34,6 +34,16 @@ pub struct SessionContext {
     pub error: Arc<RwLock<Option<String>>>,
     /// Set once the user confirmed; lets callers distinguish confirm from quit.
     pub confirmed: Arc<std::sync::atomic::AtomicBool>,
+    /// Out-of-band escape sequences (e.g. OSC 52 clipboard) waiting for the
+    /// event loop. Handlers never write the tty themselves: the Ratatui
+    /// backend owns it, and anything that is not a frame is enqueued here
+    /// and emitted through the backend between frames, so it can never
+    /// interleave with a frame's diff bytes and make the terminal lose a
+    /// delta Ratatui believes it sent.
+    ///
+    /// This is a leaf lock: never hold it while taking another lock.
+    #[builder(default_code = "Arc::new(Mutex::new(Vec::new()))")]
+    pub terminal_writes: Arc<Mutex<Vec<String>>>,
 
     // --- session shape: fixed for the lifetime of the session ---
     pub operation: crate::app::Operation,

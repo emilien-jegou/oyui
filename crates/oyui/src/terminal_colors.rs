@@ -297,6 +297,13 @@ pub fn detect_color_mode() -> eyre::Result<TerminalColorMode> {
 
     // If TrueColor capabilities are detected, attempt to retrieve the exact palette values
     if let TerminalColorMode::TrueColor(_) = base_mode {
+        // This runs before the TUI owns the tty (no raw-mode session, no
+        // Ratatui backend yet), so the single-writer rule in AGENTS.md does
+        // not apply: there is no Ratatui bookkeeping to desync, and the
+        // response is awaited before anything else begins. Do not copy this
+        // pattern into the session itself — once the backend owns the tty,
+        // every write goes through `terminal.backend_mut()`.
+        //
         // Enable raw mode. The returned guard automatically disables it when dropped.
         let _guard = match RawModeGuard::new() {
             Ok(g) => g,

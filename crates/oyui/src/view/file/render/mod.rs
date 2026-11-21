@@ -294,7 +294,7 @@ impl FileViewData {
         let start = offset.min(total_rows);
         let end = (start + height).min(total_rows);
         let mut rows = Vec::new();
-        builder.build(Some(start..end), &mut rows);
+        let builder_total = builder.build(Some(start..end), &mut rows);
 
         let table = line::build_line_table(rows, theme);
 
@@ -304,7 +304,54 @@ impl FileViewData {
         if end > start {
             rel_state.select(Some(selected_row_idx.clamp(start, end - 1) - start));
         }
+        tracing::debug!(
+            path = %path.display(),
+            selected_row_idx,
+            builder_selected_row_idx = builder.selected_row_idx,
+            total_rows,
+            builder_total,
+            offset,
+            start,
+            end,
+            height,
+            rendered_rows = end.saturating_sub(start),
+            relative_selection = ?rel_state.selected(),
+            "rendering diff cursor window"
+        );
         frame.render_stateful_widget(table, list_area, &mut rel_state);
+        if selected_row_idx >= start && selected_row_idx < end && list_area.width > 1 {
+            let selected_y = list_area
+                .y
+                .saturating_add((selected_row_idx - start) as u16);
+            let row_styles: Vec<String> = (list_area.x
+                ..list_area.x.saturating_add(list_area.width))
+                .map(|x| {
+                    let cell = &frame.buffer_mut()[(x, selected_y)];
+                    format!(
+                        "x={x} sym={:?} fg={:?} bg={:?} mod={:?}",
+                        cell.symbol(),
+                        cell.fg,
+                        cell.bg,
+                        cell.modifier
+                    )
+                })
+                .collect();
+            tracing::debug!(
+                path = %path.display(),
+                selected_row_idx,
+                selected_screen_y = selected_y,
+                row_styles = ?row_styles,
+                "rendered diff cursor row styles"
+            );
+        } else {
+            tracing::debug!(
+                path = %path.display(),
+                selected_row_idx,
+                start,
+                end,
+                "diff cursor has no visible row"
+            );
+        }
     }
 }
 

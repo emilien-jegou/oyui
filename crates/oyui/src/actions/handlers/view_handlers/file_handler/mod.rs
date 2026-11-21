@@ -151,10 +151,21 @@ fn update_scroll_state(
     target_offset: Option<usize>,
 ) {
     let state = view.scroll_states.entry(path.to_path_buf()).or_default();
+    let previous_row = state.selected().unwrap_or(0);
+    let previous_offset = state.offset();
     state.select(Some(target_row));
     if let Some(off) = target_offset {
         *state.offset_mut() = off;
     }
+    tracing::debug!(
+        path = %path.display(),
+        previous_row,
+        target_row,
+        previous_offset,
+        requested_offset = ?target_offset,
+        resulting_offset = state.offset(),
+        "updated file cursor state"
+    );
 }
 
 fn handle_hscroll(
