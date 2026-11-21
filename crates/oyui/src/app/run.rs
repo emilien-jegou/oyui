@@ -2,17 +2,19 @@
 
 use super::{draw, App};
 use crate::commands::CommandError;
+use crate::commons::frame_log;
+use crate::commons::frame_log::epoch_millis;
 use crossterm::{
-    event::{self, Event},
+    event::{Event, EventStream},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
+use futures_lite::StreamExt;
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io::{self, Write};
-use std::sync::Arc;
 use std::time::Duration;
 
-type Tui = Terminal<CrosstermBackend<io::Stdout>>;
+type Tui = Terminal<CrosstermBackend<crate::commons::frame_log::CountingStdout>>;
 
 /// Restores the terminal when dropped, including during panic unwinding.
 ///
@@ -59,7 +61,7 @@ impl App {
         enable_raw_mode()?;
         let mut stdout = io::stdout();
         execute!(stdout, EnterAlternateScreen)?;
-        let backend = CrosstermBackend::new(stdout);
+        let backend = CrosstermBackend::new(crate::commons::frame_log::CountingStdout::new());
         let mut terminal = Terminal::new(backend)?;
         // Armed from here on: both `?` returns and panics unwinding out of
         // the loop pass through the guard's restore.
@@ -71,52 +73,20 @@ impl App {
         tracing::info!("Entering main event loop");
         let mut aborted = false;
 
-        // crossterm's blocking read runs on its own thread so the runtime
-        // worker is never parked between frames. Each event carries the
-        // instant it was read so logs can show key-to-paint latency.
-        //
-        // The reader polls on a tick instead of blocking forever so teardown
-        // can stop and join it before the terminal state is torn down
-        // (finding 6.19): `poll` wakes the instant an event arrives, so the
-        // tick only bounds how long a stop request can go unnoticed — never
-        // key latency.
-        let (input_tx, mut input_rx) =
-            tokio::sync::mpsc::unbounded_channel::<(std::time::Instant, Event)>();
-        let reader_stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let reader = {
-            let stop = reader_stop.clone();
-            std::thread::spawn(move || loop {
-                match event::poll(Duration::from_millis(250)) {
-                    Ok(true) => match event::read() {
-                        Ok(ev) => {
-                            if input_tx.send((std::time::Instant::now(), ev)).is_err() {
-                                break;
-                            }
-                        }
-                        Err(e) => {
-                            tracing::error!(?e, "terminal input reader failed");
-                            break;
-                        }
-                    },
-                    Ok(false) => {}
-                    Err(e) => {
-                        // Poll fails once stdin is gone; stop reading.
-                        tracing::error!(?e, "terminal input poll failed");
-                        break;
-                    }
-                }
-                if stop.load(std::sync::atomic::Ordering::Relaxed) {
-                    return;
-                }
-            })
-        };
+        // The input is a direct branch of this loop's `select!` — no
+        // relaying task and no mpsc hop. The instrumented run showed keys
+        // already queued in the channel while the loop stayed parked up to
+        // ~1s: every intermediate hop removed there is a wakeup that can no
+        // longer starve. Crossterm's `EventStream::drop` signals its worker
+        // (`stream_wake_task_should_shutdown` + waker), which is the
+        // bounded-teardown property the stopped reader provided (6.19).
+        let mut events = EventStream::new();
 
         let worker = self.worker.clone();
         restore.terminal.draw(|f| draw::draw(f, self))?;
 
         loop {
-            let mut branch = "idle";
-            let mut key_read_at: Option<std::time::Instant> = None;
+            let branch;
 
             // A frame used to be repainted 20x/second so results produced by
             // listeners that announced nothing could still be picked up. The
@@ -131,36 +101,39 @@ impl App {
             let message_timer = tokio::time::sleep_until(message_deadline.into());
 
             tokio::select! {
-                maybe_input = input_rx.recv() => {
+                maybe_event = events.next() => {
                     branch = "input";
-                    // Drain every key queued during the previous frame: one
-                    // redraw must cover the burst or latency compounds.
-                    let mut next = maybe_input;
-                    let mut first_read: Option<std::time::Instant> = None;
-                    loop {
-                        match next.take() {
-                            Some((read_at, Event::Key(key))) => {
-                                first_read.get_or_insert(read_at);
-                                aborted = self.handle_key(key);
-                                if aborted {
-                                    break;
-                                }
-                            }
-                            // Resize/mouse/focus events only need a redraw.
-                            Some(_) => {}
-                            None => {
-                                return Err(CommandError::Runtime(
-                                    "terminal input reader stopped".into(),
-                                ));
-                            }
+                    // One event per iteration, then one draw: noop-waker
+                    // draining is what broke the session — EventStream's
+                    // pending-poll sends its worker a Task carrying the
+                    // caller's waker, so a drain polled with Waker::noop()
+                    // registered an unreachable wakeup and starved the loop
+                    // (the real poll's compare_exchange then saw
+                    // `executed == true` and never re-registered the loop's
+                    // real waker). Per-event frames cost 9–13 ms; the batch
+                    // optimization is not worth a parked-forever mode.
+                    match maybe_event {
+                        // Resize/mouse/focus go straight to the redraw.
+                        Some(Ok(Event::Key(key))) => {
+                            frame_log::frame(&[
+                                ("src", "key".to_string()),
+                                ("ms", epoch_millis().to_string()),
+                            ]);
+                            aborted = self.handle_key(key);
                         }
-                        match input_rx.try_recv() {
-                            Ok(item) => next = Some(item),
-                            // Empty: batch done. Closed: next recv() exits.
-                            Err(_) => break,
+                        Some(Ok(_)) => {}
+                        Some(Err(e)) => {
+                            tracing::error!(?e, "terminal input stream failed");
+                            return Err(CommandError::Runtime(
+                                format!("terminal input stream failed: {e}").into(),
+                            ));
+                        }
+                        None => {
+                            return Err(CommandError::Runtime(
+                                "terminal input stream ended".into(),
+                            ));
                         }
                     }
-                    key_read_at = first_read;
                 }
                 maybe_event = worker.recv() => {
                     branch = "worker";
@@ -192,26 +165,42 @@ impl App {
 
             let draw_started = std::time::Instant::now();
             restore.terminal.draw(|f| draw::draw(f, self))?;
-            // key_ms: key read -> painted (handle + draw). -1 when no key.
             // pending stays near zero: coalescing is what keeps a burst of
             // per-file results from queueing a frame each.
             tracing::debug!(
                 branch,
-                key_ms = key_read_at.map_or(-1.0, |t| t.elapsed().as_secs_f64() * 1000.0),
                 draw_ms = draw_started.elapsed().as_secs_f64() * 1000.0,
                 pending = worker.pending(),
                 "event loop iteration"
             );
+            // Per-iteration frame line: the scroll states the next frame will
+            // read, linearized so the log needs no serde. One line per entry.
+            let current_path = self.ui.lock().file_view.current_path.clone();
+            if let Some(path) = current_path {
+                if let Some(st) = self
+                    .ui
+                    .lock()
+                    .file_view
+                    .scroll_states
+                    .get(&path)
+                {
+                    frame_log::frame(&[
+                        ("src", "scroll".to_string()),
+                        ("ms", epoch_millis().to_string()),
+                        ("selected", st.selected().unwrap_or(0).to_string()),
+                        ("offset", st.offset().to_string()),
+                    ]);
+                }
+            }
         }
 
         tracing::debug!("Restoring terminal state");
-        // Stop and join the input reader before tearing the terminal down,
-        // so no blocked read(2) can outlive raw mode (finding 6.19): the
-        // poll tick bounds the joint wait to one interval.
-        reader_stop.store(true, std::sync::atomic::Ordering::Relaxed);
-        let _ = reader.join();
+        // The `EventStream` drops with this scope: its `Drop` signals the
+        // worker thread and wakes its blocking poll, so no fd read can
+        // outlive raw mode (finding 6.19's bounded teardown, no join).
         // Disarm so the explicit restore reports errors, instead of the Drop
         // already having consumed the terminal state.
+        drop(events);
         restore.disarm();
         disable_raw_mode()?;
         execute!(restore.terminal.backend_mut(), LeaveAlternateScreen)?;

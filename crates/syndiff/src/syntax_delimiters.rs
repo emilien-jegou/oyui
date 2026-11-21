@@ -26,7 +26,8 @@ impl SyntaxDelimiters {
         self.levels.is_empty() && self.base_lhs == 0 && self.base_rhs == 0
     }
 
-    /// Number of shared delimiters entered together.
+    /// Number of shared delimiters entered together. Test-only accessor.
+    #[cfg(test)]
     pub fn depth(&self) -> usize {
         self.levels.len()
     }

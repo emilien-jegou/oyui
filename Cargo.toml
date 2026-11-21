@@ -4,60 +4,67 @@ members = ["crates/oyui-tasker", "crates/oyui-rune-actions", "crates/syndiff", "
 
 [workspace.dependencies]
 oyui-tasker = { path = "crates/oyui-tasker", version = "0.1.0" }
+oyui-tasker-derive = { path = "crates/oyui-tasker/derive", version = "0.1.0" }
 oyui-rune-actions = { path = "crates/oyui-rune-actions", version = "0.1.0" }
+oyui-rune-actions-derive = { path = "crates/oyui-rune-actions/derive", version = "0.1.0" }
 oyui-syndiff = { path = "crates/syndiff", version = "0.0.7" }
 
+# Proc-macro stack (derived crates)
+syn = { version = "3.0", features = ["full"] }
+quote = "1.0"
+proc-macro2 = "1.0.107"
+
 paste = "1.0.15"
-ratatui = { version = "0.30", default-features = false, features = ["crossterm"] }
-crossterm = "0.29"
+ratatui = { version = "0.30.2", default-features = false, features = ["crossterm"] }
+crossterm = { version = "0.29", features = ["event-stream"] }
 imara-diff = "0.2"
-syntect = { version = "5.2" }
-two-face = "0.4"
-walkdir = "2.4"
-tokio = { version = "1.37", features = ["full"] }
+syntect = { version = "5.3" }
+two-face = "0.5.2"
+walkdir = "2.5"
+tokio = { version = "1.54", features = ["full"] }
 once_cell = "1.21.4"
-tracing = "0.1.40"
-tracing-error = "0.2.0"
-tracing-subscriber = { version = "0.3.18", features = ["env-filter", "fmt", "registry"] }
-clap = { version = "4.0", features = ["derive"] }
+tracing = "0.1.44"
+tracing-error = "0.2.1"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt", "registry"] }
+clap = { version = "4.6", features = ["derive"] }
 typed-builder = { version = "0.23.2" }
 tracing-flame = "0.2.0"
 tracing-appender = "0.2.5"
 rayon = "1.12.0"
-infer = "0.19.0"
-arrayvec = "0.7.6"
-rustc-hash = "2.1.1"
-smallvec = "1.15.1"
+infer = "0.22.0"
+arrayvec = "0.7.8"
+rustc-hash = "2.1.3"
+smallvec = "1.16.6"
 strsim = "0.11.1"
-indoc = "2.0.7"
-rstest = "0.26.1"
-serde = { version = "1.0", features = ["derive"] }
-dirs = "5.0"
-serde_json = "1.0.150"
-toml = "1.1.2"
+indoc = "2.0.8"
+rstest = "0.28.0"
+serde = { version = "1.0.229", features = ["derive"] }
+dirs = "7.0"
+serde_json = "1.0.154"
 rune = { version = "0.14.2", features = ["emit", "std", "cli"] }
-parking_lot = "0.12.5"
+parking_lot = "0.13.0"
 heck = "0.5.0"
-eyre = "0.6.12"
+eyre = "0.6.14"
 async-channel = "2.5.0"
-scc = "3.6.12"
-libc = "0.2.186"
-regex = "1.12"
+scc = "3.9.1"
+libc = "0.2.191"
+regex = "1.13"
 tempfile = "3.27.0"
+futures-lite = "2.6.1"
 
 # Tree-sitter parsers
-tree-sitter = "0.26.3"
-tree-sitter-rust = "0.24.0"
+tree-sitter = "0.27.2"
+tree-sitter-rust = "0.24.2"
 tree-sitter-python = "0.25.0"
 tree-sitter-go = "0.25.0"
 tree-sitter-javascript = "0.25.0"
 tree-sitter-typescript = "0.23.2"
 tree-sitter-c = "0.24.2"
 tree-sitter-cpp = "0.23.4"
-tree-sitter-c-sharp = "0.23.5"
+tree-sitter-c-sharp = "0.24.0"
 tree-sitter-java = "0.23.5"
 tree-sitter-ruby = "0.23.1"
-tree-sitter-php = "0.24.2"
+tree-sitter-php = "0.25.2"
 tree-sitter-json = "0.24.8"
 tree-sitter-yaml = "0.7.2"
 tree-sitter-toml-ng = "0.7.0"

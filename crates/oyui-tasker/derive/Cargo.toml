@@ -5,7 +5,6 @@ license = "MIT OR Apache-2.0"
 version = "0.1.0"
 edition = "2021"
 readme = "readme.md"
-homepage = "https://github.com/emilien-jegou/oyui"
 repository = "https://github.com/emilien-jegou/oyui"
 
 [lib]
@@ -13,5 +12,5 @@ proc-macro = true
 path = "./lib.rs"
 
 [dependencies]
-syn = { version = "2.0", features = ["full"] }
-quote = "1.0"
+syn = { workspace = true }
+quote = { workspace = true }

@@ -7,7 +7,6 @@ description = "A modern TUI merge tool and staging interface for jujutsu and git
 license = "GPL-3.0"
 keywords = ["diff", "merge-editor", "git", "jujutsu"]
 categories = ["development-tools"]
-homepage = "https://github.com/emilien-jegou/oyui"
 repository = "https://github.com/emilien-jegou/oyui"
 readme = "readme.md"
 
@@ -18,6 +17,7 @@ oyui-syndiff = { workspace = true }
 rayon = { workspace = true }
 tokio = { workspace = true }
 ratatui = { workspace = true }
+futures-lite = { workspace = true }
 crossterm = { workspace = true }
 syntect = { workspace = true }
 walkdir = { workspace = true }
@@ -33,7 +33,6 @@ eyre = { workspace = true }
 tracing-flame = { workspace = true }
 infer = { workspace = true }
 serde = { workspace = true }
-toml = { workspace = true }
 dirs = { workspace = true }
 rune = { workspace = true }
 serde_json = { workspace = true }
@@ -51,6 +50,5 @@ paste = { workspace = true }
 [build-dependencies]
 syntect = { workspace = true }
 serde = { workspace = true }
-toml = { workspace = true }
 typed-builder = { workspace = true }
 eyre = { workspace = true }

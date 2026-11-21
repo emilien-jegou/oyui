@@ -84,7 +84,7 @@ impl FileTree {
 
     /// Navigates the tree along a child-index path from the root.
     fn node_at(&self, path: &[usize]) -> Option<&TreeNode> {
-        let mut nodes = &self.nodes[..];
+        let nodes = &self.nodes[..];
         let mut node = nodes.first()?;
         for &idx in path {
             let d = node.as_directory()?;

@@ -7,9 +7,8 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/emilien-jegou/oyui"
 keywords = ["rune", "scripting", "actions", "macros", "dispatch"]
 categories = ["development-tools", "rust-patterns"]
-homepage = "https://github.com/emilien-jegou/oyui"
 readme = "readme.md"
 
 [dependencies]
-oyui-rune-actions-derive = { path = "./derive", version = "0.1.0" }
+oyui-rune-actions-derive = { workspace = true }
 rune = { workspace = true }

@@ -1,6 +1,5 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tracing::info;
 
 pub mod builtin;
 pub mod define_default_theme;

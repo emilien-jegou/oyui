@@ -32,11 +32,40 @@ async fn main() -> Result<ExitCode, Box<dyn Error>> {
     let _trace_guard = commons::tracing::Tracer::builder()
         .flamegraph_enable(args.common.flamegraph_enable)
         .flamegraph_save_file(args.common.flamegraph_save_file.clone())
-        .log_enable(args.common.log_enable)
-        .log_save_path(args.common.log_save_path.clone())
+        // Nested invocations (jj spawning oyui as its diff tool) inherit the
+        // environment but not our CLI flags, so the file log also honors
+        // OYUI_LOG_ENABLE/OYUI_LOG_PATH: the same shell command then traces
+        // the real TUI process, not the delegator.
+        .log_enable(
+            args.common.log_enable
+                || std::env::var_os("OYUI_LOG_ENABLE").is_some_and(|v| v == "1"),
+        )
+        .log_save_path(
+            args.common
+                .log_save_path
+                .clone()
+                .or_else(|| std::env::var_os("OYUI_LOG_PATH").map(std::path::PathBuf::from)),
+        )
         .log_console(args.common.log_console)
         .build()
         .setup()?;
+
+    // The frame log: per-iteration and per-flush telemetry, armed here where
+    // the log path is already resolved (env fallback so nested children
+    // inherit it — the jj-spawned TUI otherwise has no logger of its own).
+    if let Some(path) = args
+        .common
+        .log_save_path
+        .clone()
+        .or_else(|| std::env::var_os("OYUI_LOG_PATH").map(std::path::PathBuf::from))
+    {
+        if args.common.log_enable
+            || std::env::var_os("OYUI_LOG_ENABLE").is_some_and(|v| v == "1")
+            || std::env::var_os("OYUI_LOG_PATH").is_some()
+        {
+            crate::commons::frame_log::arm(path);
+        }
+    }
 
     tracing::info!("Starting oyui...");
 

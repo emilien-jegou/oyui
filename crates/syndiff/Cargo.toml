@@ -6,7 +6,6 @@ publish = true
 license = "MIT"
 description = "A re-export of the syndiff crate for oyui"
 readme = "readme.md"
-homepage = "https://github.com/emilien-jegou/oyui"
 repository = "https://github.com/emilien-jegou/oyui"
 
 [features]
@@ -37,7 +36,6 @@ all-languages = [
 
 [dependencies]
 arrayvec = { workspace = true }
-imara-diff = { workspace = true }
 rustc-hash = { workspace = true }
 smallvec = { workspace = true }
 strsim = { workspace = true }

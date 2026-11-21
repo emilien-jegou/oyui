@@ -75,6 +75,12 @@ impl<'a> RowBuilder<'a> {
     ///
     /// `window: None` renders nothing and only counts: the cheap first pass
     /// that lets the caller clamp its scroll offset before the real build.
+    ///
+    /// `push_footer!`'s trailing `visual_row_idx += 1` is required for rows
+    /// that follow the footer; on the *last* call it is dead by
+    /// construction, which rustc flags — the function opts out rather than
+    /// distorting the macro.
+    #[allow(unused_assignments)]
     pub(crate) fn build(&self, window: Option<Range<usize>>, rows: &mut Vec<Row<'a>>) -> usize {
         let diff = self.diff;
         let theme = self.theme;

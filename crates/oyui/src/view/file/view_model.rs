@@ -198,6 +198,12 @@ pub struct FileViewModel {
 
 impl FileViewModel {
     /// Recomputes the view model for a path.
+    ///
+    /// The walker's loop-tail counters (`visual_row_idx += 1` after the last
+    /// row, the final `recorded_hunk_start = true`) are dead by construction
+    /// — their values only feed rows that follow — which rustc flags;
+    /// the function opts out rather than contorting the scan.
+    #[allow(unused_assignments)]
     pub fn recompute(
         &mut self,
         path: &Path,
