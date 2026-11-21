@@ -187,7 +187,7 @@ pub use inline::{diff_inline, InlineDiff};
 
 pub use line_ops::{diff_line_ops, LineDiff, LineOp};
 
-pub use syntax_tree::{build_tree, SyntaxTree};
+pub use syntax_tree::{build_tree, SyntaxId, SyntaxTree};
 
 /// Configuration for the diff algorithm.
 ///

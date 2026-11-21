@@ -12,7 +12,7 @@ const MAX_DEPTH: usize = 256;
 pub struct SyntaxId(NonZeroUsize);
 
 impl SyntaxId {
-    fn new(index: usize) -> Self {
+    pub(crate) fn new(index: usize) -> Self {
         Self(NonZeroUsize::new(index + 1).expect("index overflow"))
     }
 

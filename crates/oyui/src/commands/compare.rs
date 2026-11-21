@@ -79,8 +79,9 @@ fn synthesize_merge(
     right: &str,
     allow_unresolved: bool,
     algorithm: crate::cli::DiffAlgorithm,
+    path: &Path,
 ) -> String {
-    let merged = crate::diff::merge3::merge3(base, left, right, algorithm);
+    let merged = crate::diff::merge3::merge3(base, left, right, algorithm, path);
     if allow_unresolved {
         merged.to_jj_snapshot()
     } else {
@@ -123,6 +124,7 @@ pub async fn run_merge(
             &right,
             allow_unresolved,
             args.view.diff_algorithm,
+            &output,
         ),
         Err(err) if err.kind() == io::ErrorKind::NotFound => synthesize_merge(
             &base,
@@ -130,6 +132,7 @@ pub async fn run_merge(
             &right,
             allow_unresolved,
             args.view.diff_algorithm,
+            &output,
         ),
         Err(err) => {
             return Err(CommandError::Runtime(

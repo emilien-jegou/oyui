@@ -10,7 +10,7 @@ use arrayvec::ArrayVec;
 use rustc_hash::FxHashMap;
 
 use crate::syntax_delimiters::SyntaxDelimiters;
-use crate::syntax_tree::{SyntaxHint, SyntaxTree, SyntaxTreeCursor};
+use crate::syntax_tree::{SyntaxHint, SyntaxId, SyntaxTree, SyntaxTreeCursor};
 
 /// Vertex-count slack added to the `2 * n * m` estimate before clamping to
 /// the user's `graph_limit`. Without it, files whose trees are tiny (a few
@@ -90,10 +90,6 @@ impl<'a> SyntaxVertex<'a> {
             rhs,
             delimiters,
         }
-    }
-
-    pub fn is_end(&self) -> bool {
-        self.lhs.is_end() && self.rhs.is_end() && self.delimiters.is_empty()
     }
 }
 
@@ -358,17 +354,81 @@ pub fn shortest_path<'a>(
     rhs_tree: &'a SyntaxTree,
     graph_limit: usize,
 ) -> Option<SyntaxRoute<'a>> {
-    let lhs_cursor = lhs_tree.cursor();
-    let rhs_cursor = rhs_tree.cursor();
+    let lhs_root = lhs_tree.root()?;
+    let rhs_root = rhs_tree.root()?;
+    let lhs_end = lhs_tree.get(lhs_root).byte_range.end;
+    let rhs_end = rhs_tree.get(rhs_root).byte_range.end;
 
-    let graph_limit = std::cmp::min(
-        2 * lhs_tree.len() * rhs_tree.len() + GRAPH_SLACK,
+    section_route(
+        lhs_tree,
+        rhs_tree,
+        lhs_root,
+        lhs_end,
+        rhs_root,
+        rhs_end,
         graph_limit,
-    );
+    )
+}
+
+/// Walks the end-bound byte of the sibling run starting at `start` and ending
+/// at `end_exclusive` (a preorder node index bound, or the tree length).
+fn section_end_byte(tree: &SyntaxTree, end_exclusive: usize) -> usize {
+    let root = tree.root().expect("section tree has a root");
+    if end_exclusive >= tree.len() {
+        // The run reaches the end of the tree: the walk stops at the root's
+        // last byte.
+        return tree.get(root).byte_range.end;
+    }
+    tree.get(SyntaxId::new(end_exclusive)).byte_range.start
+}
+
+/// Whether `v` is at (or past) a section's end. `None` cursors (the walk ran
+/// out of nodes) count as past-end.
+fn is_section_end(v: &SyntaxVertex<'_>, lhs_end_byte: usize, rhs_end_byte: usize) -> bool {
+    let lhs_done = match v.lhs.node() {
+        Some(node) => node.byte_range.start >= lhs_end_byte,
+        None => true,
+    };
+    let rhs_done = match v.rhs.node() {
+        Some(node) => node.byte_range.start >= rhs_end_byte,
+        None => true,
+    };
+
+    lhs_done && rhs_done && v.delimiters.is_empty()
+}
+
+/// Find the shortest diff route for a small conflict section: sibling runs
+/// `[start..end)` in both trees (preorder index bounds), starting at the
+/// given nodes and ending at the run's end bytes.
+///
+/// Sections are produced by the preprocessing in [`crate::line_ops`]; they
+/// are small (a handful of siblings), so this walk stays cheap even when the
+/// file as a whole is huge.
+pub(crate) fn section_route<'a>(
+    lhs_tree: &'a SyntaxTree,
+    rhs_tree: &'a SyntaxTree,
+    lhs_start: SyntaxId,
+    lhs_end: usize,
+    rhs_start: SyntaxId,
+    rhs_end: usize,
+    graph_limit: usize,
+) -> Option<SyntaxRoute<'a>> {
+    let lhs_cursor = lhs_tree.cursor_at(lhs_start);
+    let rhs_cursor = rhs_tree.cursor_at(rhs_start);
+
+    let lhs_end_byte = section_end_byte(lhs_tree, lhs_end);
+    let rhs_end_byte = section_end_byte(rhs_tree, rhs_end);
+
+    // The limit scales with the section's area, not the whole trees': a
+    // section is a handful of siblings, so this only ever binds on
+    // whole-file conflicts (wildly different files).
+    let lhs_span = lhs_end - lhs_start.index();
+    let rhs_span = rhs_end - rhs_start.index();
+    let graph_limit = std::cmp::min(2 * lhs_span * rhs_span + GRAPH_SLACK, graph_limit);
 
     let mut heap: BinaryHeap<Reverse<SyntaxPath<'a>>> = BinaryHeap::default();
     let mut visited: FxHashMap<SyntaxVertex<'a>, SyntaxPath<'a>> =
-        FxHashMap::with_capacity_and_hasher(graph_limit, Default::default());
+        FxHashMap::with_capacity_and_hasher(graph_limit.min(1024), Default::default());
 
     let start = SyntaxVertex::new(lhs_cursor, rhs_cursor, SyntaxDelimiters::default());
 
@@ -393,7 +453,7 @@ pub fn shortest_path<'a>(
             }
         };
 
-        if current_vertex.is_end() {
+        if is_section_end(&current_vertex, lhs_end_byte, rhs_end_byte) {
             break current_vertex;
         }
 

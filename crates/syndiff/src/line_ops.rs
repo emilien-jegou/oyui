@@ -69,7 +69,7 @@
 use std::cmp::Ordering;
 use std::ops::Range;
 
-use crate::syntax_graph::shortest_path;
+use crate::syntax_graph::section_route;
 use crate::syntax_tree::{SyntaxId, SyntaxNode, SyntaxTree};
 use crate::SyntaxDiffOptions;
 
@@ -147,14 +147,12 @@ pub fn diff_line_ops(
 ) -> Option<LineDiff> {
     let options = options.unwrap_or_default();
 
-    let route = shortest_path(lhs_tree, rhs_tree, options.graph_limit)?;
-
     let lhs = Side::new(lhs_source);
     let rhs = Side::new(rhs_source);
 
-    // 1) Novel token bytes and line anchors, straight from the route.
-    let mut marks = Marks::default();
-    collect_marks(lhs_tree, rhs_tree, &lhs, &rhs, &route, &mut marks);
+    // 1) Novel token bytes and line anchors, from the sectioned
+    //    preprocessing + per-section diff walks.
+    let mut marks = collect_marks(lhs_tree, rhs_tree, &lhs, &rhs, &options)?;
     marks.lhs_novel = crate::merge_ranges(std::mem::take(&mut marks.lhs_novel));
     marks.rhs_novel = crate::merge_ranges(std::mem::take(&mut marks.rhs_novel));
 
@@ -301,12 +299,399 @@ struct Marks {
     anchors: Vec<(usize, usize)>,
 }
 
+// ---------------------------------------------------------------------------
+// Sectioned preprocessing (port of difftastic's `mark_unchanged`): shrink
+// obviously-equal subtrees, slice sibling lists by structural hash and only
+// walk the small conflict regions that remain. This is what keeps the graph
+// search linear-ish on files whose changes are local.
+// ---------------------------------------------------------------------------
+
+/// A section of siblings carved out of the tree pair.
+#[derive(Debug)]
+enum Section {
+    /// Hash-equal subtree pairs: anchored, never walked.
+    Equal { lhs: SyntaxId, rhs: SyntaxId },
+    /// Lists whose delimiters match but whose children differ: the
+    /// delimiters anchor; the children are sectioned recursively.
+    EqualDelimiters { lhs: SyntaxId, rhs: SyntaxId },
+    /// Sibling runs (contiguous preorder id windows) needing the diff walk.
+    Conflict {
+        lhs: Range<usize>,
+        rhs: Range<usize>,
+    },
+    /// A run of siblings on only one side: everything in it is novel.
+    OneSided { lhs: bool, siblings: Vec<SyntaxId> },
+}
+
+/// Unchanged sibling runs below this many nodes merge into the following
+/// conflict region instead of splitting it (difftastic:
+/// `TINY_TREE_THRESHOLD`).
+const UNCHANGED_SPLIT_THRESHOLD: usize = 10;
+
+fn split_pair(
+    lhs_tree: &SyntaxTree,
+    rhs_tree: &SyntaxTree,
+    lhs_id: SyntaxId,
+    rhs_id: SyntaxId,
+    out: &mut Vec<Section>,
+) {
+    let (lhs_node, rhs_node) = (lhs_tree.get(lhs_id), rhs_tree.get(rhs_id));
+
+    if lhs_node.structural_hash == rhs_node.structural_hash {
+        out.push(Section::Equal {
+            lhs: lhs_id,
+            rhs: rhs_id,
+        });
+        return;
+    }
+
+    // Same delimiters (including both absent, e.g. two `source_file`s):
+    // recurse into the children, anchoring the delimiters when they exist.
+    if lhs_node.is_list()
+        && rhs_node.is_list()
+        && (lhs_node.open_delimiter(), lhs_node.close_delimiter())
+            == (rhs_node.open_delimiter(), rhs_node.close_delimiter())
+    {
+        if lhs_node.has_delimiters() {
+            out.push(Section::EqualDelimiters {
+                lhs: lhs_id,
+                rhs: rhs_id,
+            });
+        }
+        split_slices(
+            lhs_tree,
+            rhs_tree,
+            &sibling_ids(lhs_tree, lhs_id),
+            &sibling_ids(rhs_tree, rhs_id),
+            out,
+        );
+        return;
+    }
+
+    // A compact pair of subtrees to diff wholesale.
+    out.push(Section::Conflict {
+        lhs: lhs_id.index()..lhs_id.index() + 1 + lhs_node.descendant_count,
+        rhs: rhs_id.index()..rhs_id.index() + 1 + rhs_node.descendant_count,
+    });
+}
+
+/// A conflict region accumulated from consecutive Left/Right runs and small
+/// Both runs.
+struct Region {
+    lhs: Vec<SyntaxId>,
+    rhs: Vec<SyntaxId>,
+}
+
+/// The direct children of `id`, in preorder order (each a complete subtree).
+fn sibling_ids(tree: &SyntaxTree, id: SyntaxId) -> Vec<SyntaxId> {
+    let mut out = Vec::new();
+    let mut cur = tree.first_child(id);
+    while let Some(child) = cur {
+        out.push(child);
+        cur = tree.next_sibling(child);
+    }
+    out
+}
+
+/// A run of the sibling-hash slice (indexes into the sibling lists).
+enum Run {
+    Both {
+        lhs: Range<usize>,
+        rhs: Range<usize>,
+    },
+    Left(Range<usize>),
+    Right(Range<usize>),
+}
+
+/// Splits two sibling lists by structural-hash content, using imara's
+/// histogram diff (difftastic: `lcs_diff::slice` + `split_unchanged`).
+fn split_slices(
+    lhs_tree: &SyntaxTree,
+    rhs_tree: &SyntaxTree,
+    lhs: &[SyntaxId],
+    rhs: &[SyntaxId],
+    out: &mut Vec<Section>,
+) {
+    //    `shrink_at_ends`).
+    let mut lhs_i = 0usize;
+    let mut rhs_i = 0usize;
+
+    while lhs_i < lhs.len()
+        && rhs_i < rhs.len()
+        && lhs_tree.get(lhs[lhs_i]).structural_hash == rhs_tree.get(rhs[rhs_i]).structural_hash
+    {
+        out.push(Section::Equal {
+            lhs: lhs[lhs_i],
+            rhs: rhs[rhs_i],
+        });
+        lhs_i += 1;
+        rhs_i += 1;
+    }
+
+    let mut lhs_end = lhs.len();
+    let mut rhs_end = rhs.len();
+
+    while lhs_i < lhs_end
+        && rhs_i < rhs_end
+        && lhs_tree.get(lhs[lhs_end - 1]).structural_hash
+            == rhs_tree.get(rhs[rhs_end - 1]).structural_hash
+    {
+        out.push(Section::Equal {
+            lhs: lhs[lhs_end - 1],
+            rhs: rhs[rhs_end - 1],
+        });
+        lhs_end -= 1;
+        rhs_end -= 1;
+    }
+
+    // 2) One (or both) sides exhausted by the shrinking.
+    if lhs_i >= lhs_end || rhs_i >= rhs_end {
+        if lhs_i < lhs_end {
+            out.push(Section::OneSided {
+                lhs: true,
+                siblings: lhs[lhs_i..lhs_end].to_vec(),
+            });
+        }
+        if rhs_i < rhs_end {
+            out.push(Section::OneSided {
+                lhs: false,
+                siblings: rhs[rhs_i..rhs_end].to_vec(),
+            });
+        }
+        return;
+    }
+
+    // 3) Slice the remaining middles by structural hash.
+    let lhs_hashes: Vec<u64> = (lhs_i..lhs_end)
+        .map(|k| lhs_tree.get(lhs[k]).structural_hash)
+        .collect();
+    let rhs_hashes: Vec<u64> = (rhs_i..rhs_end)
+        .map(|k| rhs_tree.get(rhs[k]).structural_hash)
+        .collect();
+
+    let mut region: Option<Region> = None;
+
+    for run in slice_runs(&lhs_hashes, &rhs_hashes) {
+        match run {
+            Run::Both {
+                lhs: run_lhs,
+                rhs: run_rhs,
+            } => {
+                // Size the unchanged run by total subtree nodes
+                // (difftastic: `is_big_enough`).
+                let nodes: usize = run_lhs
+                    .clone()
+                    .map(|k| 1 + lhs_tree.get(lhs[lhs_i + k]).descendant_count)
+                    .sum();
+
+                if nodes >= UNCHANGED_SPLIT_THRESHOLD {
+                    flush_region(&mut region, lhs_tree, rhs_tree, out);
+                    for k in 0..run_lhs.len() {
+                        out.push(Section::Equal {
+                            lhs: lhs[lhs_i + run_lhs.start + k],
+                            rhs: rhs[rhs_i + run_rhs.start + k],
+                        });
+                    }
+                } else {
+                    merge_into_region(
+                        &mut region,
+                        &lhs[lhs_i + run_lhs.start..lhs_i + run_lhs.end],
+                        &rhs[rhs_i + run_rhs.start..rhs_i + run_rhs.end],
+                    );
+                }
+            }
+            Run::Left(range) => {
+                merge_into_region(
+                    &mut region,
+                    &lhs[lhs_i + range.start..lhs_i + range.end],
+                    &[],
+                );
+            }
+            Run::Right(range) => {
+                merge_into_region(
+                    &mut region,
+                    &[],
+                    &rhs[rhs_i + range.start..rhs_i + range.end],
+                );
+            }
+        }
+    }
+
+    flush_region(&mut region, lhs_tree, rhs_tree, out);
+}
+
+/// Accumulates consecutive siblings into the current conflict region; empty
+/// slices leave the corresponding side untouched.
+fn merge_into_region(region: &mut Option<Region>, lhs: &[SyntaxId], rhs: &[SyntaxId]) {
+    let region = region.get_or_insert_with(|| Region {
+        lhs: Vec::new(),
+        rhs: Vec::new(),
+    });
+
+    if !lhs.is_empty() {
+        region.lhs.extend_from_slice(lhs);
+    }
+    if !rhs.is_empty() {
+        region.rhs.extend_from_slice(rhs);
+    }
+}
+
+/// The contiguous preorder window covering sibling `run` (one or more
+/// siblings, all descendants included): from the first sibling's index to
+/// the last sibling's own id plus its descendants.
+fn id_window(tree: &SyntaxTree, run: &[SyntaxId]) -> Range<usize> {
+    let first = run.first().expect("non-empty sibling run").index();
+    let last = run.last().expect("non-empty sibling run");
+    first..last.index() + 1 + tree.get(*last).descendant_count
+}
+
+/// Flushes the accumulated region into a section; a single-pair region of
+/// same-delimiter lists recurses into the children instead of being walked.
+fn flush_region(
+    region: &mut Option<Region>,
+    lhs_tree: &SyntaxTree,
+    rhs_tree: &SyntaxTree,
+    out: &mut Vec<Section>,
+) {
+    let Some(region) = region.take() else { return };
+
+    match (region.lhs.is_empty(), region.rhs.is_empty()) {
+        (false, false) if region.lhs.len() == 1 && region.rhs.len() == 1 => {
+            split_pair(lhs_tree, rhs_tree, region.lhs[0], region.rhs[0], out);
+        }
+        (false, false) => {
+            out.push(Section::Conflict {
+                lhs: id_window(lhs_tree, &region.lhs),
+                rhs: id_window(rhs_tree, &region.rhs),
+            });
+        }
+        (false, true) => out.push(Section::OneSided {
+            lhs: true,
+            siblings: region.lhs,
+        }),
+        (true, false) => out.push(Section::OneSided {
+            lhs: false,
+            siblings: region.rhs,
+        }),
+        (true, true) => {}
+    }
+}
+
+/// The histogram slice over sibling hashes.
+fn slice_runs(lhs: &[u64], rhs: &[u64]) -> Vec<Run> {
+    let mut input = imara_diff::InternedInput {
+        before: Vec::with_capacity(lhs.len()),
+        after: Vec::with_capacity(rhs.len()),
+        interner: imara_diff::Interner::new(lhs.len() + rhs.len()),
+    };
+    input.update_before(lhs.iter());
+    input.update_after(rhs.iter());
+
+    let mut diff = imara_diff::Diff::compute(imara_diff::Algorithm::Histogram, &input);
+    diff.postprocess_no_heuristic(&input);
+
+    let mut runs = Vec::new();
+
+    let mut lhs_i = 0usize;
+    let mut rhs_i = 0usize;
+
+    for hunk in diff.hunks() {
+        let hb = hunk.before.start as usize;
+        let ha = hunk.after.start as usize;
+
+        if lhs_i < hb {
+            runs.push(Run::Both {
+                lhs: lhs_i..hb,
+                rhs: rhs_i..ha,
+            });
+        }
+
+        if hunk.before.end > hunk.before.start {
+            runs.push(Run::Left(
+                (hunk.before.start as usize)..(hunk.before.end as usize),
+            ));
+        }
+        if hunk.after.end > hunk.after.start {
+            runs.push(Run::Right(
+                (hunk.after.start as usize)..(hunk.after.end as usize),
+            ));
+        }
+
+        lhs_i = hunk.before.end as usize;
+        rhs_i = hunk.after.end as usize;
+    }
+
+    if lhs_i < lhs.len() {
+        runs.push(Run::Both {
+            lhs: lhs_i..lhs.len(),
+            rhs: rhs_i..rhs.len(),
+        });
+    }
+
+    runs
+}
+
+/// Collects novel token bytes and line anchors for the whole tree pair via
+/// the sectioned preprocessing.
 fn collect_marks(
     lhs_tree: &SyntaxTree,
     rhs_tree: &SyntaxTree,
     lhs: &Side,
     rhs: &Side,
+    options: &SyntaxDiffOptions,
+) -> Option<Marks> {
+    let mut marks = Marks::default();
+    let mut sections = Vec::new();
+
+    let (lhs_root, rhs_root) = (lhs_tree.root()?, rhs_tree.root()?);
+    split_pair(lhs_tree, rhs_tree, lhs_root, rhs_root, &mut sections);
+
+    for section in &sections {
+        match section {
+            Section::Equal { lhs: l, rhs: r } => {
+                deep_anchor_walk(lhs_tree, rhs_tree, *l, *r, lhs, rhs, &mut marks);
+            }
+            Section::EqualDelimiters { lhs: l, rhs: r } => {
+                anchor_delimiter_pair(lhs_tree.get(*l), rhs_tree.get(*r), lhs, rhs, &mut marks);
+            }
+            Section::Conflict { lhs: l, rhs: r } => {
+                let route = section_route(
+                    lhs_tree,
+                    rhs_tree,
+                    SyntaxId::new(l.start),
+                    l.end,
+                    SyntaxId::new(r.start),
+                    r.end,
+                    options.graph_limit,
+                )?;
+                marks_from_route(lhs_tree, rhs_tree, &route, lhs, rhs, &mut marks);
+            }
+            Section::OneSided {
+                lhs: is_lhs,
+                siblings,
+            } => {
+                let tree = if *is_lhs { lhs_tree } else { rhs_tree };
+                let out = if *is_lhs {
+                    &mut marks.lhs_novel
+                } else {
+                    &mut marks.rhs_novel
+                };
+                for idx in id_window(tree, siblings) {
+                    push_novel_ranges(tree.get(SyntaxId::new(idx)), out);
+                }
+            }
+        }
+    }
+
+    Some(marks)
+}
+
+fn marks_from_route(
+    lhs_tree: &SyntaxTree,
+    rhs_tree: &SyntaxTree,
     route: &crate::syntax_graph::SyntaxRoute,
+    lhs: &Side,
+    rhs: &Side,
     marks: &mut Marks,
 ) {
     for path in &route.0 {

@@ -2,10 +2,17 @@
 //!
 //! Non-overlapping edits from both sides are combined; overlapping edits that
 //! differ become conflicts with `ours`/`base`/`theirs` sections.
+//!
+//! With [`DiffAlgorithm::SyntaxAware`] the base→side change detection runs on
+//! the structural line diff (difftastic-style): rows that are tree-equal
+//! count as unchanged, so formatting-only edits and moved code no longer
+//! manufacture conflicts. Any structural failure (unsupported language,
+//! unparseable content, graph limit) falls back to the plain line diff.
 
 use super::conflict::{Conflict, ConflictedFile, Segment, TextFormat};
 use crate::cli::DiffAlgorithm;
 use imara_diff::{Diff, InternedInput};
+use std::path::Path;
 
 /// A replacement of `base[start..end]` with `lines`.
 #[derive(Debug, Clone)]
@@ -16,10 +23,16 @@ struct Change {
 }
 
 /// Merges `left` and `right` relative to `base`.
-pub fn merge3(base: &str, left: &str, right: &str, algo: DiffAlgorithm) -> ConflictedFile {
+pub fn merge3(
+    base: &str,
+    left: &str,
+    right: &str,
+    algo: DiffAlgorithm,
+    path: &Path,
+) -> ConflictedFile {
     let base_lines: Vec<&str> = base.lines().collect();
-    let changes_left = changes(base, left, algo);
-    let changes_right = changes(base, right, algo);
+    let changes_left = changes(base, left, algo, path);
+    let changes_right = changes(base, right, algo, path);
 
     let groups = group_changes(&changes_left, &changes_right);
 
@@ -114,7 +127,105 @@ fn final_newline_consensus(base: &str, left: &str, right: &str) -> bool {
 }
 
 /// Computes the changed base ranges when going from `base` to `side`.
-fn changes(base: &str, side: &str, algo: DiffAlgorithm) -> Vec<Change> {
+fn changes(base: &str, side: &str, algo: DiffAlgorithm, path: &Path) -> Vec<Change> {
+    if algo == DiffAlgorithm::SyntaxAware {
+        match structural_changes(base, side, path) {
+            Ok(changes) => return changes,
+            Err(err) => {
+                tracing::debug!(
+                    "structural merge for {} unavailable ({}); falling back to line diff",
+                    path.display(),
+                    err
+                );
+            }
+        }
+    }
+
+    line_changes(base, side, algo)
+}
+
+/// The structural variant of [`changes`]: base→side changes from the
+/// sectioned line diff, where tree-equal rows (including whitespace-only
+/// differences) are no change at all.
+///
+/// Consecutive non-Equal ops coalesce into one [`Change`], mirroring the
+/// hunk shape of the line diff; side indexes are monotone across the ops.
+fn structural_changes(
+    base: &str,
+    side: &str,
+    path: &Path,
+) -> Result<Vec<Change>, oyui_syndiff::FailedDiff> {
+    let (base_tree, side_tree) = oyui_syndiff::parse_into_trees(base, side, path, None)?;
+    let line_diff = oyui_syndiff::diff_line_ops(&base_tree, base, &side_tree, side, None)
+        .ok_or(oyui_syndiff::FailedDiff::GraphLimitExceeded)?;
+
+    let side_lines: Vec<&str> = side.lines().collect();
+    let mut changes = Vec::new();
+
+    // The current change run and the base lines it consumes (`None` for
+    // inserted side lines).
+    let mut run_base: Vec<Option<usize>> = Vec::new();
+    let mut run_lines: Vec<String> = Vec::new();
+
+    // Base lines consumed so far; the insertion point for runs that start
+    // without a base line.
+    let mut base_cursor = 0usize;
+
+    fn flush_run(
+        run_base: &mut Vec<Option<usize>>,
+        run_lines: &mut Vec<String>,
+        base_cursor: usize,
+        changes: &mut Vec<Change>,
+    ) {
+        if run_base.is_empty() {
+            return;
+        }
+
+        let bases: Vec<usize> = run_base.iter().filter_map(|b| *b).collect();
+        let (start, end) = match bases.split_first() {
+            None => (base_cursor, base_cursor),
+            Some((first, rest)) => match rest.last() {
+                None => (*first, first + 1),
+                Some(last) => (*first, *last + 1),
+            },
+        };
+
+        changes.push(Change {
+            start,
+            end,
+            lines: std::mem::take(run_lines),
+        });
+        run_base.clear();
+    }
+
+    for op in line_diff.ops {
+        match op {
+            oyui_syndiff::LineOp::Equal { .. } => {
+                flush_run(&mut run_base, &mut run_lines, base_cursor, &mut changes);
+            }
+            oyui_syndiff::LineOp::Replaced { lhs, rhs, .. } => {
+                run_base.push(Some(lhs));
+                run_lines.push(side_lines[rhs].to_string());
+                base_cursor = lhs + 1;
+            }
+            oyui_syndiff::LineOp::Deleted { lhs } => {
+                run_base.push(Some(lhs));
+                base_cursor = lhs + 1;
+            }
+            oyui_syndiff::LineOp::Added { rhs } => {
+                run_base.push(None);
+                run_lines.push(side_lines[rhs].to_string());
+            }
+        }
+    }
+
+    flush_run(&mut run_base, &mut run_lines, base_cursor, &mut changes);
+
+    Ok(changes)
+}
+
+/// The plain line-diff variant of [`changes`], relative to base.
+fn line_changes(base: &str, side: &str, algo: DiffAlgorithm) -> Vec<Change> {
     let input = InternedInput::new(base, side);
     let diff = Diff::compute(algo.as_imara(), &input);
     let side_lines: Vec<&str> = side.lines().collect();
@@ -237,9 +348,16 @@ fn overlaps_region(s1: usize, e1: usize, s2: usize, e2: usize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     fn merged(base: &str, left: &str, right: &str) -> ConflictedFile {
-        merge3(base, left, right, DiffAlgorithm::Histogram)
+        merge3(
+            base,
+            left,
+            right,
+            DiffAlgorithm::Histogram,
+            Path::new("x.rs"),
+        )
     }
 
     #[test]
@@ -339,5 +457,119 @@ mod tests {
         // A chosen side keeps the same terminators.
         let resolved = out.resolve_all(super::super::conflict::Side::Ours);
         assert_eq!(resolved, "a\r\nL\r\nc");
+    }
+}
+
+#[cfg(test)]
+mod structural_tests {
+    use crate::cli::DiffAlgorithm;
+    use crate::diff::conflict::{ConflictedFile, Segment, Side};
+    use crate::diff::merge3::merge3;
+    use std::path::Path;
+
+    fn merged_structural(base: &str, left: &str, right: &str) -> ConflictedFile {
+        merge3(
+            base,
+            left,
+            right,
+            DiffAlgorithm::SyntaxAware,
+            Path::new("x.rs"),
+        )
+    }
+
+    const TWO_FNS: &str = "fn a() {\n    work();\n}\n\nfn b() {\n    work();\n}\n";
+
+    #[test]
+    fn reindent_side_never_conflicts_structurally() {
+        // One side only reindents the file: structurally no change, so a
+        // change on the other side inside the same functions merges cleanly.
+        let left = "fn a() {\n        work();\n}\n\nfn b() {\n        work();\n}\n";
+        let right = "fn a() {\n    jack();\n}\n\nfn b() {\n    jack();\n}\n";
+
+        let out = merged_structural(TWO_FNS, left, right);
+        assert_eq!(
+            out.conflict_count(),
+            0,
+            "reindent must not conflict: {out:#?}"
+        );
+
+        let resolved = out.resolve_all(Side::Theirs);
+        assert!(
+            resolved.contains("jack"),
+            "their change must win: {resolved}"
+        );
+    }
+
+    #[test]
+    fn structural_mode_still_conflicts_on_real_overlap() {
+        let left = "fn a() {\n    ours();\n}\n\nfn b() {\n    work();\n}\n";
+        let right = "fn a() {\n    theirs();\n}\n\nfn b() {\n    work();\n}\n";
+
+        let out = merged_structural(TWO_FNS, left, right);
+        assert_eq!(out.conflict_count(), 1);
+
+        // The structural diff narrows the conflict to the changed line
+        // itself; the `fn a() {` and `}` lines are tree-equal context and
+        // never enter the conflict.
+        let conflict = out
+            .segments
+            .iter()
+            .find_map(|s| match s {
+                Segment::Conflict(c) => Some(c),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(conflict.ours, vec!["    ours();"]);
+        assert_eq!(
+            conflict.base.as_deref(),
+            Some(&["    work();".to_string()][..])
+        );
+        assert_eq!(conflict.theirs, vec!["    theirs();"]);
+
+        // Choosing either side still produces the whole function correctly.
+        assert_eq!(
+            out.resolve_all(Side::Ours),
+            "fn a() {\n    ours();\n}\n\nfn b() {\n    work();\n}\n"
+        );
+        assert_eq!(
+            out.resolve_all(Side::Theirs),
+            "fn a() {\n    theirs();\n}\n\nfn b() {\n    work();\n}\n"
+        );
+    }
+
+    #[test]
+    fn structural_merge_keeps_line_mode_semantics() {
+        // Both sides change different functions: combination is unchanged.
+        let left = "fn a() {\n    left();\n}\n\nfn b() {\n    work();\n}\n";
+        let right = "fn a() {\n    work();\n}\n\nfn b() {\n    right();\n}\n";
+
+        let out = merged_structural(TWO_FNS, left, right);
+        assert_eq!(out.conflict_count(), 0);
+        let resolved = out.resolve_all(Side::Ours);
+        assert!(resolved.contains("left") && resolved.contains("right"));
+    }
+
+    #[test]
+    fn structural_merge_falls_back_on_unsupported_language() {
+        let out = merge3(
+            "k: v\n",
+            "k: v2\n",
+            "k: v3\n",
+            DiffAlgorithm::SyntaxAware,
+            Path::new("x.bogus"),
+        );
+        // No parser: plain line semantics still merge (and conflict).
+        assert_eq!(out.conflict_count(), 1);
+    }
+
+    #[test]
+    fn structural_merge_falls_back_on_broken_syntax() {
+        let base = "fn [[[ = = {{{{\n((((\n";
+        let left = "fn [[[ = = {{{{\nL\n";
+        let right = "fn [[[ = = {{{{\nR\n";
+
+        let out = merged_structural(base, left, right);
+        // The line diff still finds the changed lines and conflicts them.
+        assert_eq!(out.conflict_count(), 1);
     }
 }
