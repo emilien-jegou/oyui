@@ -12,6 +12,13 @@ use rustc_hash::FxHashMap;
 use crate::syntax_delimiters::SyntaxDelimiters;
 use crate::syntax_tree::{SyntaxHint, SyntaxTree, SyntaxTreeCursor};
 
+/// Vertex-count slack added to the `2 * n * m` estimate before clamping to
+/// the user's `graph_limit`. Without it, files whose trees are tiny (a few
+/// nodes) but structurally different cannot allocate enough vertices for the
+/// delimiter-stack states and always "fail", which would force pointless
+/// fallbacks on small snippets and empty files.
+const GRAPH_SLACK: usize = 2_048;
+
 /// A path segment in the diff graph.
 ///
 /// Represents a transition from one vertex to another via an edge.
@@ -354,7 +361,10 @@ pub fn shortest_path<'a>(
     let lhs_cursor = lhs_tree.cursor();
     let rhs_cursor = rhs_tree.cursor();
 
-    let graph_limit = std::cmp::min(2 * lhs_tree.len() * rhs_tree.len(), graph_limit);
+    let graph_limit = std::cmp::min(
+        2 * lhs_tree.len() * rhs_tree.len() + GRAPH_SLACK,
+        graph_limit,
+    );
 
     let mut heap: BinaryHeap<Reverse<SyntaxPath<'a>>> = BinaryHeap::default();
     let mut visited: FxHashMap<SyntaxVertex<'a>, SyntaxPath<'a>> =

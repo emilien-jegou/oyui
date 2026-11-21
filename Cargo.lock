@@ -1602,6 +1602,7 @@ name = "oyui-syndiff"
 version = "0.0.7"
 dependencies = [
  "arrayvec",
+ "imara-diff",
  "indoc",
  "rstest",
  "rustc-hash",

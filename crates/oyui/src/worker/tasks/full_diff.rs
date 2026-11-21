@@ -4,6 +4,7 @@ use crate::diff::{line_ranges, DiffLine, DiffResult, FileDiff, Hunk, InlineChang
 use crate::diff_cache::{DiffCache, LineIndex, LineWidths};
 use crate::worker::events::diff_update::DiffUpdate;
 use imara_diff::{Diff, InternedInput};
+use oyui_syndiff::LineOp;
 use oyui_tasker::{Listener, TaskerContext};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
@@ -187,17 +188,6 @@ pub(crate) fn load_file_content_safely(path: &Path) -> Result<String, DiffResult
     }
 }
 
-/// Byte range of line `line_idx`, with the terminator stripped.
-///
-/// Mirrors the ranges published for the renderer, so the inline-highlight
-/// offsets the diff computes and the ones the view slices with agree.
-fn printable_byte_range(text: &str, ranges: &[Range<usize>], line_idx: usize) -> Range<usize> {
-    ranges
-        .get(line_idx)
-        .cloned()
-        .unwrap_or_else(|| text.len()..text.len())
-}
-
 pub fn compute(
     algo: &DiffAlgorithm,
     left_file_content: &str,
@@ -206,124 +196,416 @@ pub fn compute(
 ) -> Result<Vec<Hunk>, Box<dyn std::error::Error + Send + Sync>> {
     let input = InternedInput::new(left_file_content, right_file_content);
 
-    let inner_algo = algo.as_imara();
-
-    let diff = Diff::compute(inner_algo, &input);
+    let diff = Diff::compute(algo.as_imara(), &input);
 
     let old_ranges = line_ranges(left_file_content);
     let new_ranges = line_ranges(right_file_content);
 
-    let syntax_res = if *algo == DiffAlgorithm::SyntaxAware {
-        match oyui_syndiff::diff_source(left_file_content, right_file_content, path, None) {
-            Ok(res) => Some(res),
+    // Structural mode: the tree diff drives the line alignment.
+    if *algo == DiffAlgorithm::SyntaxAware {
+        match structural_hunks(left_file_content, right_file_content, path) {
+            Ok(hunks) => return Ok(hunks),
             Err(e) => {
                 tracing::debug!(
-                    "Syntax diff unavailable/failed ({}). Falling back to text.",
+                    "Structural line diff unavailable ({}); falling back to plain line diff",
                     e
                 );
-                None
             }
         }
-    } else {
-        None
-    };
+    }
+
+    // Line modes: parse once for token-level inline highlights; an
+    // unsupported/broken file simply yields plain deletion/addition rows.
+    let trees =
+        match oyui_syndiff::parse_into_trees(left_file_content, right_file_content, path, None) {
+            Ok(trees) => Some(trees),
+            Err(e) => {
+                tracing::debug!("Inline highlights unavailable ({}); plain line diff", e);
+                None
+            }
+        };
 
     let mut hunks = Vec::new();
 
     for hunk in diff.hunks() {
-        let mut lines = Vec::new();
+        let before = (hunk.before.start as usize)..(hunk.before.end as usize);
+        let after = (hunk.after.start as usize)..(hunk.after.end as usize);
 
-        let get_highlights = |line_range: Range<usize>,
-                              struct_ranges: &[Range<usize>],
-                              text: &str|
-         -> Vec<InlineChange> {
-            let line_text = &text[line_range.start..line_range.end];
-            let trimmed_len = line_text.trim().len();
+        let (del_highlights, add_highlights) = token_highlights(
+            trees.as_ref(),
+            left_file_content,
+            right_file_content,
+            &before,
+            &after,
+            &old_ranges,
+            &new_ranges,
+        );
 
-            if trimmed_len == 0 {
-                return Vec::new();
-            }
+        let mut lines = Vec::with_capacity(before.len() + after.len());
 
-            if let Some(_syntax) = &syntax_res {
-                let mut raw_ranges = Vec::new();
-
-                for r in struct_ranges {
-                    if r.start < line_range.end && r.end > line_range.start {
-                        let clamp_start = r.start.max(line_range.start) - line_range.start;
-                        let clamp_end = r.end.min(line_range.end) - line_range.start;
-                        raw_ranges.push(clamp_start..clamp_end);
-                    }
-                }
-
-                if raw_ranges.is_empty() {
-                    return Vec::new();
-                }
-
-                raw_ranges.sort_by_key(|r| r.start);
-                let mut merged = vec![raw_ranges[0].clone()];
-                for r in raw_ranges.into_iter().skip(1) {
-                    let last = merged.last_mut().unwrap();
-                    if r.start <= last.end {
-                        last.end = last.end.max(r.end);
-                    } else {
-                        merged.push(r);
-                    }
-                }
-
-                let total_highlighted: usize = merged.iter().map(|r| r.end - r.start).sum();
-
-                if total_highlighted >= trimmed_len {
-                    return Vec::new();
-                }
-
-                return merged
-                    .into_iter()
-                    .map(|byte_range| InlineChange { byte_range })
-                    .collect();
-            }
-
-            Vec::new()
-        };
-
-        for i in (hunk.before.start as usize)..(hunk.before.end as usize) {
-            let line_range = printable_byte_range(left_file_content, &old_ranges, i);
-            let inline_highlights = get_highlights(
-                line_range,
-                syntax_res
-                    .as_ref()
-                    .map(|s| s.old_ranges.as_slice())
-                    .unwrap_or(&[]),
-                left_file_content,
-            );
+        for (k, i) in before.clone().enumerate() {
             lines.push(DiffLine::Deletion {
                 old_line_idx: i,
-                inline_highlights,
+                inline_highlights: del_highlights[k].clone(),
             });
         }
 
-        for i in (hunk.after.start as usize)..(hunk.after.end as usize) {
-            let line_range = printable_byte_range(right_file_content, &new_ranges, i);
-            let inline_highlights = get_highlights(
-                line_range,
-                syntax_res
-                    .as_ref()
-                    .map(|s| s.new_ranges.as_slice())
-                    .unwrap_or(&[]),
-                right_file_content,
-            );
+        for (k, i) in after.clone().enumerate() {
             lines.push(DiffLine::Addition {
                 new_line_idx: i,
-                inline_highlights,
+                inline_highlights: add_highlights[k].clone(),
             });
         }
 
         hunks.push(Hunk {
-            before_lines: (hunk.before.start as usize)..(hunk.before.end as usize),
-            after_lines: (hunk.after.start as usize)..(hunk.after.end as usize),
+            before_lines: before,
+            after_lines: after,
             lines,
             marker: Default::default(),
         });
     }
 
     Ok(hunks)
+}
+
+/// Byte span of a contiguous line window, or `None` when the window is empty.
+fn line_block_span(ranges: &[Range<usize>], lines: &Range<usize>) -> Option<Range<usize>> {
+    if lines.is_empty() {
+        return None;
+    }
+    let start = ranges.get(lines.start)?.start;
+    let end = ranges.get(lines.end - 1)?.end;
+    (start < end).then_some(start..end)
+}
+
+/// Token-level inline highlights for one imara hunk: diffs the changed byte
+/// blocks on both sides and buckets the novel token ranges per line.
+fn token_highlights(
+    trees: Option<&(oyui_syndiff::SyntaxTree, oyui_syndiff::SyntaxTree)>,
+    left: &str,
+    right: &str,
+    before: &Range<usize>,
+    after: &Range<usize>,
+    old_ranges: &[Range<usize>],
+    new_ranges: &[Range<usize>],
+) -> (Vec<Vec<InlineChange>>, Vec<Vec<InlineChange>>) {
+    let mut del = vec![Vec::new(); before.len()];
+    let mut add = vec![Vec::new(); after.len()];
+
+    let Some((lhs_tree, rhs_tree)) = trees else {
+        return (del, add);
+    };
+
+    let (Some(lhs_span), Some(rhs_span)) = (
+        line_block_span(old_ranges, before),
+        line_block_span(new_ranges, after),
+    ) else {
+        return (del, add);
+    };
+
+    let res = oyui_syndiff::diff_inline(lhs_tree, left, lhs_span, rhs_tree, right, rhs_span);
+
+    bucket_to_lines(&res.lhs_ranges, old_ranges, before, &mut del);
+    bucket_to_lines(&res.rhs_ranges, new_ranges, after, &mut add);
+
+    (del, add)
+}
+
+/// Assigns absolute byte ranges to the lines of a window, producing
+/// line-relative [`InlineChange`]s; adjacent ranges merge.
+fn bucket_to_lines(
+    ranges: &[Range<usize>],
+    line_ranges: &[Range<usize>],
+    lines: &Range<usize>,
+    out: &mut [Vec<InlineChange>],
+) {
+    for range in ranges {
+        for (k, line_idx) in lines.clone().enumerate() {
+            let Some(line) = line_ranges.get(line_idx) else {
+                break;
+            };
+            let start = range.start.max(line.start);
+            let end = range.end.min(line.end);
+            if start < end {
+                out[k].push(InlineChange {
+                    byte_range: (start - line.start)..(end - line.start),
+                });
+            }
+        }
+    }
+
+    for line_highlights in out.iter_mut() {
+        line_highlights.sort_by_key(|c| c.byte_range.start);
+        let mut merged: Vec<InlineChange> = Vec::new();
+        for change in line_highlights.drain(..) {
+            match merged.last_mut() {
+                Some(last) if change.byte_range.start <= last.byte_range.end => {
+                    last.byte_range.end = last.byte_range.end.max(change.byte_range.end);
+                }
+                _ => merged.push(change),
+            }
+        }
+        *line_highlights = merged;
+    }
+}
+
+/// Structural mode (difftastic-style): groups the structural line ops into
+/// hunks. `Equal` rows are context and are not part of any hunk; `Replaced`
+/// rows become a matched deletion/addition pair, `Deleted`/`Added` rows
+/// plain deletions/additions.
+fn structural_hunks(
+    left: &str,
+    right: &str,
+    path: &Path,
+) -> Result<Vec<Hunk>, oyui_syndiff::FailedDiff> {
+    let (lhs_tree, rhs_tree) = oyui_syndiff::parse_into_trees(left, right, path, None)?;
+    let line_diff = oyui_syndiff::diff_line_ops(&lhs_tree, left, &rhs_tree, right, None)
+        .ok_or(oyui_syndiff::FailedDiff::GraphLimitExceeded)?;
+
+    let mut hunks: Vec<Hunk> = Vec::new();
+
+    let flush_run = |run: &mut Vec<&LineOp>, hunks: &mut Vec<Hunk>| {
+        if run.is_empty() {
+            return;
+        }
+
+        let before_min = run
+            .iter()
+            .filter_map(|op| match op {
+                LineOp::Deleted { lhs } | LineOp::Replaced { lhs, .. } => Some(*lhs),
+                _ => None,
+            })
+            .min();
+        let before_max = run
+            .iter()
+            .filter_map(|op| match op {
+                LineOp::Deleted { lhs } | LineOp::Replaced { lhs, .. } => Some(*lhs),
+                _ => None,
+            })
+            .max();
+
+        let after_min = run
+            .iter()
+            .filter_map(|op| match op {
+                LineOp::Added { rhs } | LineOp::Replaced { rhs, .. } => Some(*rhs),
+                _ => None,
+            })
+            .min();
+        let after_max = run
+            .iter()
+            .filter_map(|op| match op {
+                LineOp::Added { rhs } | LineOp::Replaced { rhs, .. } => Some(*rhs),
+                _ => None,
+            })
+            .max();
+
+        let mut lines = Vec::new();
+
+        let mut deletions: Vec<(usize, Vec<Range<usize>>)> = run
+            .iter()
+            .filter_map(|op| match op {
+                LineOp::Deleted { lhs } => Some((*lhs, Vec::new())),
+                LineOp::Replaced {
+                    lhs, lhs_inline, ..
+                } => Some((*lhs, lhs_inline.clone())),
+                _ => None,
+            })
+            .collect();
+        deletions.sort_by_key(|(idx, _)| *idx);
+
+        let mut additions: Vec<(usize, Vec<Range<usize>>)> = run
+            .iter()
+            .filter_map(|op| match op {
+                LineOp::Added { rhs } => Some((*rhs, Vec::new())),
+                LineOp::Replaced {
+                    rhs, rhs_inline, ..
+                } => Some((*rhs, rhs_inline.clone())),
+                _ => None,
+            })
+            .collect();
+        additions.sort_by_key(|(idx, _)| *idx);
+
+        for (idx, inline) in deletions {
+            lines.push(DiffLine::Deletion {
+                old_line_idx: idx,
+                inline_highlights: inline
+                    .into_iter()
+                    .map(|byte_range| InlineChange { byte_range })
+                    .collect(),
+            });
+        }
+
+        for (idx, inline) in additions {
+            lines.push(DiffLine::Addition {
+                new_line_idx: idx,
+                inline_highlights: inline
+                    .into_iter()
+                    .map(|byte_range| InlineChange { byte_range })
+                    .collect(),
+            });
+        }
+
+        hunks.push(Hunk {
+            before_lines: before_min.unwrap()..before_max.unwrap() + 1,
+            after_lines: after_min.unwrap()..after_max.unwrap() + 1,
+            lines,
+            marker: Default::default(),
+        });
+
+        run.clear();
+    };
+
+    let mut run: Vec<&LineOp> = Vec::new();
+
+    for op in &line_diff.ops {
+        if matches!(op, LineOp::Equal { .. }) {
+            flush_run(&mut run, &mut hunks);
+        } else {
+            run.push(op);
+        }
+    }
+    flush_run(&mut run, &mut hunks);
+
+    Ok(hunks)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Collects the highlighted slices of every hunk row of one side.
+    fn row_texts(
+        hunks: &[Hunk],
+        content: &str,
+        ranges: &[Range<usize>],
+        want_del: bool,
+    ) -> Vec<String> {
+        let mut out = Vec::new();
+
+        for hunk in hunks {
+            for line in &hunk.lines {
+                let (idx, highlights) = match line {
+                    DiffLine::Deletion {
+                        old_line_idx,
+                        inline_highlights,
+                    } if want_del => (*old_line_idx, inline_highlights),
+                    DiffLine::Addition {
+                        new_line_idx,
+                        inline_highlights,
+                    } if !want_del => (*new_line_idx, inline_highlights),
+                    _ => continue,
+                };
+                let line_span = ranges[idx].clone();
+                for change in highlights {
+                    out.push(
+                        content[line_span.start + change.byte_range.start
+                            ..line_span.start + change.byte_range.end]
+                            .to_string(),
+                    );
+                }
+            }
+        }
+
+        out
+    }
+
+    #[test]
+    fn mode_a_highlights_novel_tokens() {
+        let left = "fn a() {\n    work(foo);\n}\n";
+        let right = "fn a() {\n    work(bar);\n}\n";
+
+        let hunks =
+            compute(&DiffAlgorithm::Myers, left, right, Path::new("x.rs")).expect("line diff");
+
+        // line ranges of both sides
+        let old = line_ranges(left);
+        let new = line_ranges(right);
+
+        let del = row_texts(&hunks, left, &old, true);
+        let add = row_texts(&hunks, right, &new, false);
+
+        assert_eq!(del, vec!["foo"]);
+        assert_eq!(add, vec!["bar"]);
+    }
+
+    #[test]
+    fn mode_a_pure_additions_highlight_nothing() {
+        let left = "fn a() {}\n";
+        let right = "fn a() {}\nfn extra() {}\n";
+
+        let hunks =
+            compute(&DiffAlgorithm::Myers, left, right, Path::new("x.rs")).expect("line diff");
+
+        assert!(!hunks.is_empty());
+        // Whole-line novel rows carry no inline ranges.
+        for hunk in &hunks {
+            for line in &hunk.lines {
+                match line {
+                    DiffLine::Addition {
+                        inline_highlights, ..
+                    }
+                    | DiffLine::Deletion {
+                        inline_highlights, ..
+                    } => {
+                        assert!(inline_highlights.is_empty());
+                    }
+                    DiffLine::Context { .. } => {}
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn mode_b_structural_hunks() {
+        let left = "fn a() {\n    work(foo);\n}\n";
+        let right = "fn a() {\n    work(bar);\n}\n";
+
+        let hunks = compute(&DiffAlgorithm::SyntaxAware, left, right, Path::new("x.rs"))
+            .expect("structural diff");
+
+        assert_eq!(hunks.len(), 1);
+        assert_eq!(hunks[0].before_lines, 1..2);
+        assert_eq!(hunks[0].after_lines, 1..2);
+
+        let old = line_ranges(left);
+        let new = line_ranges(right);
+        assert_eq!(row_texts(&hunks, left, &old, true), vec!["foo"]);
+        assert_eq!(row_texts(&hunks, right, &new, false), vec!["bar"]);
+    }
+
+    #[test]
+    fn mode_b_reindent_yields_no_hunks() {
+        // A pure reindentation is structurally unchanged: difftastic-style
+        // empty diff.
+        let left = "fn a() {\n    work();\n}\n";
+        let right = "    fn a() {\n        work();\n    }\n";
+
+        let hunks = compute(&DiffAlgorithm::SyntaxAware, left, right, Path::new("x.rs"))
+            .expect("structural diff");
+
+        assert!(hunks.is_empty(), "reindent should be equal: {hunks:#?}");
+    }
+
+    #[test]
+    fn mode_b_falls_back_to_plain_lines_on_broken_syntax() {
+        let left = "fn [[[ = = {{{{\n((((\n";
+        let right = "fn [[[ = = {{{{\n(((( x\n";
+
+        let hunks = compute(&DiffAlgorithm::SyntaxAware, left, right, Path::new("x.rs"))
+            .expect("fallback still yields hunks");
+
+        // Fallback produced imara hunks (no crash, just plain rows).
+        assert!(!hunks.is_empty());
+    }
+
+    #[test]
+    fn unsupported_extension_diffs_without_highlights() {
+        let left = "hello world\nsecond line\n";
+        let right = "hello there\nsecond line\n";
+
+        let hunks =
+            compute(&DiffAlgorithm::Myers, left, right, Path::new("x.bogus")).expect("plain diff");
+
+        assert!(!hunks.is_empty());
+    }
 }

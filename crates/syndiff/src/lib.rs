@@ -9,12 +9,28 @@
 //!
 //! The primary types in this crate are:
 //!
-//! * [`diff_trees`]: Computes a diff between two syntax trees, returning byte
-//!   ranges of changed regions.
+//! * [`diff_trees`]/[`diff_source`]: Computes a diff between two syntax
+//!   trees, returning byte ranges of changed regions.
+//! * [`diff_line_ops`]/[`diff_source_lines`]: Projects the structural diff
+//!   onto aligned line rows ([`LineOp`], [`LineDiff`]) — the difftastic-style
+//!   output model, covering every line of both sides exactly once.
+//! * [`diff_inline`]/[`InlineDiff`]: Token-level refinement of changed
+//!   regions: diffs the tree's leaf tokens over a byte span and returns the
+//!   novel token ranges (the "inline diff" building block).
 //! * [`build_tree`]: Converts a tree-sitter parse tree into a [`SyntaxTree`].
 //! * [`SyntaxTree`]: A syntax tree optimized for diffing, stored in preorder
 //!   traversal.
 //! * [`SyntaxDiffOptions`]: Configuration for the diff algorithm.
+//!
+//! Two consumption modes follow:
+//!
+//! * **Line diff + inline highlights**: keep a classic line alignment
+//!   (e.g. imara Myers/histogram) and use [`diff_inline`] to refine changed
+//!   regions at token level.
+//! * **Structural line diff**: use [`diff_source_lines`] so the tree diff
+//!   drives the line alignment itself; fall back to the line mode on
+//!   [`FailedDiff::TooManyErrors`] / [`FailedDiff::GraphLimitExceeded`] /
+//!   unsupported languages.
 //!
 //! # Example: basic diffing
 //!
@@ -74,6 +90,7 @@
 //!
 //! let options = SyntaxDiffOptions {
 //!     graph_limit: 100_000, // Lower limit for faster failure
+//!     ..Default::default()
 //! };
 //!
 //! match diff_trees(&old_tree, &new_tree, None, None, Some(options)) {
@@ -158,11 +175,17 @@ use crate::syntax_graph::{SyntaxEdge, SyntaxRoute};
 use crate::syntax_tree::SyntaxNode;
 
 mod diff_source;
+mod inline;
+mod line_ops;
 mod syntax_delimiters;
 mod syntax_graph;
 mod syntax_tree;
 
 pub use diff_source::*;
+
+pub use inline::{diff_inline, InlineDiff};
+
+pub use line_ops::{diff_line_ops, LineDiff, LineOp};
 
 pub use syntax_tree::{build_tree, SyntaxTree};
 
@@ -175,6 +198,7 @@ pub use syntax_tree::{build_tree, SyntaxTree};
 ///
 /// let options = SyntaxDiffOptions {
 ///     graph_limit: 500_000,
+///     ..Default::default()
 /// };
 /// ```
 #[derive(Debug, Clone, Copy)]
@@ -187,15 +211,28 @@ pub struct SyntaxDiffOptions {
     ///
     /// Default: `1_000_000`
     pub graph_limit: usize,
+
+    /// Fraction of bytes (0.0–1.0) that may sit under tree-sitter `ERROR` or
+    /// missing-token nodes before a source is considered too broken to diff
+    /// structurally. Only consulted by the parsing entry points
+    /// ([`diff_source`] and [`diff_source_lines`]); broken files usually
+    /// produce better results from a plain line diff.
+    ///
+    /// Default: `0.1`
+    pub max_error_coverage: f32,
 }
 
 impl Default for SyntaxDiffOptions {
     fn default() -> Self {
         Self {
             graph_limit: 1_000_000,
+            max_error_coverage: 0.1,
         }
     }
 }
+
+/// Byte ranges of changed regions for both sides of a diff.
+pub type DiffedRanges = (Vec<Range<usize>>, Vec<Range<usize>>);
 
 /// Computes a syntax-aware diff between two syntax trees.
 ///
@@ -210,7 +247,7 @@ pub fn diff_trees(
     lhs_range: Option<Range<usize>>,
     rhs_range: Option<Range<usize>>,
     options: Option<SyntaxDiffOptions>,
-) -> Option<(Vec<Range<usize>>, Vec<Range<usize>>)> {
+) -> Option<DiffedRanges> {
     let options = options.unwrap_or_default();
     let route = syntax_graph::shortest_path(lhs_tree, rhs_tree, options.graph_limit)?;
 
@@ -236,21 +273,17 @@ fn collect_ranges(
         };
 
         match edge {
-            SyntaxEdge::Replaced { levenshtein_pct } => {
+            SyntaxEdge::Replaced { levenshtein_pct: _ } => {
                 if let (Some(lhs_node), Some(rhs_node)) = (
                     vertex.lhs.id().map(|id| lhs_tree.get(id)),
                     vertex.rhs.id().map(|id| rhs_tree.get(id)),
                 ) {
-                    if levenshtein_pct > 20 {
-                        // No character-level comment diff yet: fall through to
-                        // the novel-ranges branch so replaced comments still
-                        // get whole-node highlights instead of none.
-                        lhs_ranges.extend(get_novel_ranges(lhs_node, lhs_bounds.as_ref()));
-                        rhs_ranges.extend(get_novel_ranges(rhs_node, rhs_bounds.as_ref()));
-                    } else {
-                        lhs_ranges.extend(get_novel_ranges(lhs_node, lhs_bounds.as_ref()));
-                        rhs_ranges.extend(get_novel_ranges(rhs_node, rhs_bounds.as_ref()));
-                    }
+                    // Replaced comments pair whole nodes today; finer
+                    // word-level comment highlights happen at the line-diff
+                    // layer (`line_ops`/`inline`), which splits comment
+                    // leaves into words.
+                    lhs_ranges.extend(get_novel_ranges(lhs_node, lhs_bounds.as_ref()));
+                    rhs_ranges.extend(get_novel_ranges(rhs_node, rhs_bounds.as_ref()));
                 }
             }
             SyntaxEdge::NovelAtomLHS | SyntaxEdge::EnterNovelDelimiterLHS => {
@@ -304,7 +337,7 @@ fn get_novel_ranges(node: &SyntaxNode, bounds: Option<&Range<usize>>) -> ArrayVe
     ranges
 }
 
-fn merge_ranges(mut ranges: Vec<Range<usize>>) -> Vec<Range<usize>> {
+pub(crate) fn merge_ranges(mut ranges: Vec<Range<usize>>) -> Vec<Range<usize>> {
     if ranges.is_empty() {
         return ranges;
     }

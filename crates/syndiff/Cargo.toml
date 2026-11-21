@@ -36,6 +36,7 @@ all-languages = [
 
 [dependencies]
 arrayvec = { workspace = true }
+imara-diff = { workspace = true }
 rustc-hash = { workspace = true }
 smallvec = { workspace = true }
 strsim = { workspace = true }

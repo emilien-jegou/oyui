@@ -383,6 +383,46 @@ fn build_tree_recursive<'a>(
     let mut ts_node = cursor.node();
     let this_id = SyntaxId::new(nodes.len());
 
+    // Extras (comments) may carry their text in grammar productions whose
+    // bytes belong to no child node - e.g. in tree-sitter-rust اب, `// foo`
+    // is a `line_comment` list whose only child is the anonymous `//` token;
+    // the comment text itself exists only in the parent's span. Treating
+    // extras as opaque atoms puts their text into the structural hash (so
+    // edited comments no longer hash equal) and lets the diff machinery
+    // match them via the `Comment` hint.
+    if ts_node.is_extra() && ts_node.child_count() > 0 {
+        let this_id = SyntaxId::new(nodes.len());
+        let byte_range = ts_node.byte_range();
+        nodes.push(SyntaxNode {
+            id: this_id,
+            structural_hash: 0,
+            byte_range: byte_range.clone(),
+            delimiters: [None, None],
+            hint: None,
+            descendant_count: 0,
+            depth: parent
+                .map(|parent| nodes[parent.index()].depth + 1)
+                .unwrap_or(0),
+            parent,
+        });
+
+        let mut hasher = std::hash::DefaultHasher::new();
+        ts_node.kind_id().hash(&mut hasher);
+        if let Some(text) = source.get(byte_range.clone()) {
+            text.hash(&mut hasher);
+        }
+
+        let node = &mut nodes[this_id.index()];
+        node.structural_hash = hasher.finish();
+        node.hint = Some(SyntaxHint::Comment(
+            source.get(byte_range.clone()).unwrap_or(""),
+        ));
+
+        // Position the cursor back at this node's level for the caller.
+        // (The cursor is already here; nothing to do.)
+        return this_id;
+    }
+
     // If this node is just a wrapper with same byte range as its only child,
     // flatten by using the child instead
     let flattened = ts_node.child_count() == 1
@@ -419,10 +459,9 @@ fn build_tree_recursive<'a>(
 
     // Detection and extraction of delimiters
     if remaining_children >= 2 {
-        if let (Some(first_child), Some(last_child)) = (
-            ts_node.child(0),
-            ts_node.child((remaining_children - 1) as u32),
-        ) {
+        if let (Some(first_child), Some(last_child)) =
+            (ts_node.child(0), ts_node.child(remaining_children - 1))
+        {
             if first_child.start_byte() == ts_node.start_byte()
                 && last_child.end_byte() == ts_node.end_byte()
             {

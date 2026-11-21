@@ -9,7 +9,7 @@ fn parse_with_language(source: &str, language: tree_sitter::Language) -> SyntaxT
     parser
         .set_language(&language)
         .expect("failed to set language");
-    let tree = parser.parse(source, None).expect("failed to parse");
+    let tree = parser.parse(source, None).expect("parse");
     build_tree(tree.walk(), source)
 }
 
