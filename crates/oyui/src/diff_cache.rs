@@ -2,6 +2,7 @@ use crate::commons::cache_map::CacheMap;
 use crate::diff::{DiffResult, DiffStats, LineRanges};
 use std::ops::Deref;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use syntect::highlighting::Style as SyntectStyle;
 
 /// All lazily-computed diff data, keyed by file path.
@@ -14,6 +15,18 @@ impl Deref for DiffCache {
 
     fn deref(&self) -> &DiffCacheInner {
         &self.0
+    }
+}
+
+impl DiffCache {
+    /// Advances the selected-row generation used to discard stale hover
+    /// preloads. This is intentionally independent of cache invalidation.
+    pub fn next_preload_generation(&self) -> u64 {
+        self.0.preload_generation.fetch_add(1, Ordering::Relaxed) + 1
+    }
+
+    pub fn preload_generation(&self) -> u64 {
+        self.0.preload_generation.load(Ordering::Relaxed)
     }
 }
 
@@ -64,6 +77,8 @@ pub struct DiffCacheInner {
     /// content changing, so the diff listener derives it once instead of every
     /// scroll keypress rescanning the whole file.
     pub line_widths: CacheMap<LineWidths>,
+    /// Shared generation for debounced tree-hover preloads.
+    preload_generation: Arc<AtomicU64>,
 }
 
 /// Syntax tokens for both sides of a diff, in line order.

@@ -8,6 +8,7 @@ pub mod cpu;
 
 pub mod events {
     pub mod diff_update;
+    pub mod file_hovered;
     pub mod file_opened;
     pub mod syntax_res;
     pub mod theme_update;
@@ -39,6 +40,7 @@ tasker_registry! {
         WatchConfig          => tasks::watch_config::WatchConfigReq,
         WatchConfigRes       => tasks::watch_config::WatchConfigRes,
         FileOpened           => events::file_opened::FileOpened,
+        FileHovered          => events::file_hovered::FileHovered,
         ThemeUpdate          => events::theme_update::ThemeUpdate,
         Analysis             => Asked<tasks::analysis::AnalysisReq>,
         AnalysisRes          => tasks::analysis::AnalysisRes,
@@ -56,6 +58,7 @@ tasker_registry! {
         Stats,
         FullDiff,
         Syntax,
+        FileHovered,
         WatchConfig,
         Analysis,
     ],
@@ -77,6 +80,7 @@ tasker_registry! {
         Syntax               => [tasks::syntax::Syntax],
         WatchConfig          => [tasks::watch_config::WatchConfig],
         FileOpened           => [tasks::syntax::Syntax],
+        FileHovered          => [tasks::syntax::Syntax],
         DiffUpdate           => [tasks::syntax::Syntax],
         ThemeUpdate          => [tasks::syntax::Syntax],
     ],

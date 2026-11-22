@@ -12,9 +12,9 @@ use crate::syntax::SyntaxEngine;
 use crate::terminal_colors::TerminalColorMode;
 use crate::theme::ThemeState;
 use crate::tree::FileTree;
+use crate::worker::EventRegistry;
 use crate::worker::context::AppWorkerContext;
 use crate::worker::tasks::calculate_file_tree::CalculateFileTreeReq;
-use crate::worker::EventRegistry;
 
 /// Polls `condition` until it yields `Some` or the timeout elapses.
 async fn wait_for<T>(timeout: Duration, mut condition: impl FnMut() -> Option<T>) -> Option<T> {
@@ -87,6 +87,21 @@ async fn startup_pipeline_delivers_tree_and_stats() {
     assert!(
         stats_applied.is_some(),
         "StatsRes never reached the cache: the downstream event chain is broken"
+    );
+
+    let preload_path = PathBuf::from("sub/a.txt");
+    let generation = cache.next_preload_generation();
+    registry
+        .send(crate::worker::events::file_hovered::FileHovered {
+            path: preload_path.clone(),
+            generation,
+        })
+        .expect("hover preload queued");
+    let syntax_applied =
+        wait_for(Duration::from_secs(10), || cache.syntax.get(&preload_path)).await;
+    assert!(
+        syntax_applied.is_some(),
+        "hover preload did not populate syntax before opening the file"
     );
 
     registry

@@ -4,6 +4,7 @@ use crate::actions::*;
 
 use crate::diff_cache::DiffCache;
 use crate::tree::FileTree;
+use crate::worker::events::file_hovered::FileHovered;
 use crate::worker::events::file_opened::FileOpened;
 use tracing::debug;
 
@@ -82,34 +83,62 @@ impl AppActionsHandler {
         let mut ui = self.ui.lock();
         ui.tree_view.selected_row(&tree, &self.cache)
     }
+
+    /// Starts background work for the selected file without changing views.
+    fn preload_selected_file(&self) {
+        let generation = self.cache.next_preload_generation();
+        let path = {
+            let tree = self.tree.read();
+            let mut ui = self.ui.lock();
+            ui.tree_view
+                .selected_row(&tree, &self.cache)
+                .filter(|row| !row.is_dir)
+                .map(|row| row.path)
+        };
+        if let Some(path) = path {
+            let _ = self.worker.send(FileHovered { path, generation });
+        }
+    }
 }
 
 impl ViewTreeCursorActionsHandler for AppActionsHandler {
     fn up(&self, val: u32) {
-        let view = &mut self.ui.lock().tree_view;
-        let previous_index = view.selected_index;
-        view.selected_index = view.selected_index.saturating_sub(val as usize);
-        tracing::debug!(
-            previous_index,
-            selected_index = view.selected_index,
-            "updated tree cursor state"
-        );
+        let changed = {
+            let view = &mut self.ui.lock().tree_view;
+            let previous_index = view.selected_index;
+            view.selected_index = view.selected_index.saturating_sub(val as usize);
+            tracing::debug!(
+                previous_index,
+                selected_index = view.selected_index,
+                "updated tree cursor state"
+            );
+            previous_index != view.selected_index
+        };
+        if changed {
+            self.preload_selected_file();
+        }
     }
 
     fn down(&self, val: u32) {
-        let tree = self.tree.read();
-        let view = &mut self.ui.lock().tree_view;
+        let changed = {
+            let tree = self.tree.read();
+            let view = &mut self.ui.lock().tree_view;
 
-        let len = view.flat_rows(&tree, &self.cache).len();
-        let max_idx = len.saturating_sub(1);
-        let previous_index = view.selected_index;
-        view.selected_index = (view.selected_index + val as usize).min(max_idx);
-        tracing::debug!(
-            previous_index,
-            selected_index = view.selected_index,
-            row_count = len,
-            "updated tree cursor state"
-        );
+            let len = view.flat_rows(&tree, &self.cache).len();
+            let max_idx = len.saturating_sub(1);
+            let previous_index = view.selected_index;
+            view.selected_index = (view.selected_index + val as usize).min(max_idx);
+            tracing::debug!(
+                previous_index,
+                selected_index = view.selected_index,
+                row_count = len,
+                "updated tree cursor state"
+            );
+            previous_index != view.selected_index
+        };
+        if changed {
+            self.preload_selected_file();
+        }
     }
 
     fn half_page_up(&self) {
@@ -121,45 +150,71 @@ impl ViewTreeCursorActionsHandler for AppActionsHandler {
     }
 
     fn page_up(&self) {
-        let view = &mut self.ui.lock().tree_view;
-        let page_size = view.last_height.saturating_sub(2).max(1);
-        view.selected_index = view.selected_index.saturating_sub(page_size);
+        let changed = {
+            let view = &mut self.ui.lock().tree_view;
+            let previous_index = view.selected_index;
+            let page_size = view.last_height.saturating_sub(2).max(1);
+            view.selected_index = view.selected_index.saturating_sub(page_size);
+            previous_index != view.selected_index
+        };
+        if changed {
+            self.preload_selected_file();
+        }
     }
 
     fn page_down(&self) {
-        let tree = self.tree.read();
-        let view = &mut self.ui.lock().tree_view;
-        let len = view.flat_rows(&tree, &self.cache).len();
-        let max_idx = len.saturating_sub(1);
-        let page_size = view.last_height.saturating_sub(2).max(1);
-        view.selected_index = (view.selected_index + page_size).min(max_idx);
+        let changed = {
+            let tree = self.tree.read();
+            let view = &mut self.ui.lock().tree_view;
+            let len = view.flat_rows(&tree, &self.cache).len();
+            let max_idx = len.saturating_sub(1);
+            let previous_index = view.selected_index;
+            let page_size = view.last_height.saturating_sub(2).max(1);
+            view.selected_index = (view.selected_index + page_size).min(max_idx);
+            previous_index != view.selected_index
+        };
+        if changed {
+            self.preload_selected_file();
+        }
     }
 
     fn top(&self) {
-        let view = &mut self.ui.lock().tree_view;
-        let previous_index = view.selected_index;
-        view.selected_index = 0;
-        tracing::debug!(
-            previous_index,
-            selected_index = view.selected_index,
-            "updated tree cursor state"
-        );
+        let changed = {
+            let view = &mut self.ui.lock().tree_view;
+            let previous_index = view.selected_index;
+            view.selected_index = 0;
+            tracing::debug!(
+                previous_index,
+                selected_index = view.selected_index,
+                "updated tree cursor state"
+            );
+            previous_index != view.selected_index
+        };
+        if changed {
+            self.preload_selected_file();
+        }
     }
 
     fn bottom(&self) {
-        let tree = self.tree.read();
-        let view = &mut self.ui.lock().tree_view;
+        let changed = {
+            let tree = self.tree.read();
+            let view = &mut self.ui.lock().tree_view;
 
-        let len = view.flat_rows(&tree, &self.cache).len();
-        let max_idx = len.saturating_sub(1);
-        let previous_index = view.selected_index;
-        view.selected_index = max_idx;
-        tracing::debug!(
-            previous_index,
-            selected_index = view.selected_index,
-            row_count = len,
-            "updated tree cursor state"
-        );
+            let len = view.flat_rows(&tree, &self.cache).len();
+            let max_idx = len.saturating_sub(1);
+            let previous_index = view.selected_index;
+            view.selected_index = max_idx;
+            tracing::debug!(
+                previous_index,
+                selected_index = view.selected_index,
+                row_count = len,
+                "updated tree cursor state"
+            );
+            previous_index != view.selected_index
+        };
+        if changed {
+            self.preload_selected_file();
+        }
     }
 }
 

@@ -183,7 +183,7 @@ mod syntax_tree;
 
 pub use diff_source::*;
 
-pub use inline::{diff_inline, InlineDiff};
+pub use inline::{diff_inline, diff_inline_words, InlineDiff};
 
 pub use line_ops::{diff_line_ops, LineDiff, LineOp};
 

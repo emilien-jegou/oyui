@@ -7,11 +7,12 @@ use crate::diff_cache::{DiffCache, SideTokens};
 use crate::syntax::SyntaxEngine;
 use crate::theme::ThemeState;
 use crate::tree::FileTree;
+use crate::worker::EventSender;
 use crate::worker::events::diff_update::DiffUpdate;
+use crate::worker::events::file_hovered::FileHovered;
 use crate::worker::events::file_opened::FileOpened;
 use crate::worker::events::syntax_res::SyntaxRes;
 use crate::worker::events::theme_update::ThemeUpdate;
-use crate::worker::EventSender;
 use oyui_tasker::{Listener, TaskerContext};
 use parking_lot::RwLock;
 
@@ -74,6 +75,11 @@ impl Syntax {
         tx: &EventSender,
         diff_result: &DiffResult,
     ) -> eyre::Result<()> {
+        if ctx.cache.syntax.get(&path).is_some() {
+            tracing::trace!(node_path = %path.display(), "Syntax is already cached");
+            return Ok(());
+        }
+
         if let DiffResult::Text(ref file_diff) = diff_result {
             let text = file_diff.new_file_content.clone();
             // Old side only when it exists (new files have none).
@@ -99,6 +105,46 @@ impl Syntax {
         }
 
         Ok(())
+    }
+
+    fn queue_file(path: PathBuf, ctx: &SyntaxContext, tx: &EventSender) -> eyre::Result<()> {
+        // Queue full diff calculation if not already cached or in flight. Its
+        // DiffUpdate re-enters this listener and queues syntax afterward.
+        let diff_result = match ctx.cache.diffs.get(&path) {
+            Some(diff_result) => diff_result,
+            None => {
+                let claim = ctx.cache.diffs.mark_started(&path);
+                if let Some(generation) = claim {
+                    // Do not hold the tree lock while calling the cache.
+                    let paths = ctx.tree.read().find_paths(&path);
+                    match paths {
+                        Some((left_path, right_path)) => {
+                            let req = crate::worker::tasks::full_diff::FullDiffReq {
+                                node_path: path.clone(),
+                                left_path,
+                                right_path,
+                                generation,
+                            };
+                            if tx.send(req).is_err() {
+                                ctx.cache.diffs.cancel(&path, generation);
+                            }
+                        }
+                        None => {
+                            ctx.cache.diffs.cancel(&path, generation);
+                            tracing::warn!(
+                                node_path = %path.display(),
+                                "No diff paths for file; syntax highlighting skipped"
+                            );
+                        }
+                    }
+                } else {
+                    tracing::trace!(node_path = %path.display(), "Full diff already in flight");
+                }
+                return Ok(());
+            }
+        };
+
+        Self::try_queue_syntax_task(path, ctx, tx, &diff_result)
     }
 }
 
@@ -185,49 +231,24 @@ impl Listener<FileOpened> for Syntax {
 
     #[tracing::instrument(skip_all, fields(node_path = %event.path.display()))]
     async fn handle(event: FileOpened, ctx: Self::Context, tx: EventSender) -> eyre::Result<()> {
-        // Queue full diff calculation if not already cached or in flight; the
-        // resulting DiffUpdate event re-enters this listener, so return early.
-        let diff_result = match ctx.cache.diffs.get(&event.path) {
-            Some(diff_result) => diff_result,
-            None => {
-                // Atomically claim the computation: concurrent FileOpened events
-                // for the same path only queue one FullDiff task.
-                let claim = ctx.cache.diffs.mark_started(&event.path);
-                if let Some(generation) = claim {
-                    // Bind before matching: the tree guard in the scrutinee
-                    // must not stay alive across the cache calls below.
-                    let paths = ctx.tree.read().find_paths(&event.path);
-                    match paths {
-                        Some((left_path, right_path)) => {
-                            let req = crate::worker::tasks::full_diff::FullDiffReq {
-                                node_path: event.path.clone(),
-                                left_path,
-                                right_path,
-                                generation,
-                            };
-                            if tx.send(req).is_err() {
-                                ctx.cache.diffs.cancel(&event.path, generation);
-                            }
-                        }
-                        None => {
-                            ctx.cache.diffs.cancel(&event.path, generation);
-                            tracing::warn!(
-                                node_path = %event.path.display(),
-                                "No diff paths for file; syntax highlighting skipped"
-                            );
-                        }
-                    }
-                } else {
-                    tracing::trace!(
-                        node_path = %event.path.display(),
-                        "Full diff already in flight"
-                    );
-                }
-                return Ok(());
-            }
-        };
+        Self::queue_file(event.path, &ctx, &tx)
+    }
+}
 
-        Self::try_queue_syntax_task(event.path, &ctx, &tx, &diff_result)
+impl Listener<FileHovered> for Syntax {
+    type Sender = EventSender;
+    type Context = SyntaxContext;
+
+    #[tracing::instrument(skip_all, fields(node_path = %event.path.display()))]
+    async fn handle(event: FileHovered, ctx: Self::Context, tx: EventSender) -> eyre::Result<()> {
+        // Cursor movement is frequent. Debounce off the worker and discard the
+        // request if selection moved again; no timer or parsing runs on the UI
+        // thread.
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        if ctx.cache.preload_generation() != event.generation {
+            return Ok(());
+        }
+        Self::queue_file(event.path, &ctx, &tx)
     }
 }
 

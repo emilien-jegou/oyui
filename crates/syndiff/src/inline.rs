@@ -59,8 +59,12 @@ use crate::syntax_tree::{SyntaxHint, SyntaxId, SyntaxTree};
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct InlineDiff {
     /// Byte ranges of novel tokens on the left side (absolute offsets).
+    ///
+    /// Ranges may also include horizontal whitespace between adjacent changed
+    /// tokens so they render as one coherent highlight.
     pub lhs_ranges: Vec<Range<usize>>,
-    /// Byte ranges of novel tokens on the right side (absolute offsets).
+    /// Byte ranges of novel tokens on the right side (absolute offsets),
+    /// possibly including horizontal whitespace between adjacent changes.
     pub rhs_ranges: Vec<Range<usize>>,
 }
 
@@ -110,13 +114,101 @@ pub fn diff_inline(
         }
     }
 
-    // Within a hunk the novel tokens are ordered but may surround small runs
-    // of trivia; merge only truly overlapping/adjacent-byte ranges so that
-    // highlights never stretch across untouched whitespace.
+    // Coalesce adjacent changed tokens across horizontal whitespace so a
+    // phrase reads as one highlight; whitespace-only changes remain unmarked.
     InlineDiff {
-        lhs_ranges: merge_overlapping(lhs_ranges),
-        rhs_ranges: merge_overlapping(rhs_ranges),
+        lhs_ranges: merge_changed_whitespace(lhs_source, merge_overlapping(lhs_ranges)),
+        rhs_ranges: merge_changed_whitespace(rhs_source, merge_overlapping(rhs_ranges)),
     }
+}
+
+/// Diffs two source spans without requiring a language parser.
+///
+/// Word runs are kept whole; non-whitespace punctuation is tokenized
+/// individually. This is intended as a useful fallback for prose and
+/// unsupported languages, while [`diff_inline`] remains preferable when
+/// syntax trees are available. Returned ranges are absolute byte offsets into
+/// the respective source strings.
+pub fn diff_inline_words(
+    lhs_source: &str,
+    lhs_span: Range<usize>,
+    rhs_source: &str,
+    rhs_span: Range<usize>,
+) -> InlineDiff {
+    let lhs_tokens = text_token_ranges(lhs_source, lhs_span);
+    let rhs_tokens = text_token_ranges(rhs_source, rhs_span);
+
+    let mut input = InternedInput {
+        before: Vec::with_capacity(lhs_tokens.len()),
+        after: Vec::with_capacity(rhs_tokens.len()),
+        interner: Interner::new(lhs_tokens.len() + rhs_tokens.len()),
+    };
+    input.update_before(lhs_tokens.iter().map(|r| &lhs_source[r.clone()]));
+    input.update_after(rhs_tokens.iter().map(|r| &rhs_source[r.clone()]));
+
+    let diff = Diff::compute(Algorithm::Myers, &input);
+    let mut lhs_ranges = Vec::new();
+    let mut rhs_ranges = Vec::new();
+    for hunk in diff.hunks() {
+        lhs_ranges.extend(
+            hunk.before
+                .clone()
+                .map(|idx| lhs_tokens[idx as usize].clone()),
+        );
+        rhs_ranges.extend(
+            hunk.after
+                .clone()
+                .map(|idx| rhs_tokens[idx as usize].clone()),
+        );
+    }
+
+    InlineDiff {
+        lhs_ranges: merge_changed_whitespace(lhs_source, merge_overlapping(lhs_ranges)),
+        rhs_ranges: merge_changed_whitespace(rhs_source, merge_overlapping(rhs_ranges)),
+    }
+}
+
+fn text_token_ranges(source: &str, span: Range<usize>) -> Vec<Range<usize>> {
+    let Some(text) = source.get(span.clone()) else {
+        return Vec::new();
+    };
+    let mut ranges = Vec::new();
+    let mut word_start = None;
+    for (offset, ch) in text.char_indices() {
+        let is_word = ch.is_alphanumeric() || ch == '_';
+        if is_word {
+            word_start.get_or_insert(offset);
+        } else {
+            if let Some(start) = word_start.take() {
+                ranges.push(span.start + start..span.start + offset);
+            }
+            if !ch.is_whitespace() {
+                ranges.push(span.start + offset..span.start + offset + ch.len_utf8());
+            }
+        }
+    }
+    if let Some(start) = word_start {
+        ranges.push(span.start + start..span.end);
+    }
+    ranges
+}
+
+fn merge_changed_whitespace(source: &str, ranges: Vec<Range<usize>>) -> Vec<Range<usize>> {
+    let mut merged: Vec<Range<usize>> = Vec::with_capacity(ranges.len());
+    for range in ranges {
+        match merged.last_mut() {
+            Some(last)
+                if range.start <= last.end
+                    || source.get(last.end..range.start).is_some_and(|gap| {
+                        !gap.is_empty() && gap.chars().all(|ch| ch == ' ' || ch == '\t')
+                    }) =>
+            {
+                last.end = last.end.max(range.end);
+            }
+            _ => merged.push(range),
+        }
+    }
+    merged
 }
 
 /// Collects the leaf token ranges of `tree` that intersect `span`.
@@ -342,6 +434,52 @@ mod tests {
                 .map(|r| &new[r.clone()])
                 .collect::<Vec<_>>(),
             vec!["red"]
+        );
+    }
+
+    #[test]
+    fn parser_free_word_diff_highlights_changed_prose() {
+        let old = "A prototype now selects stdout when it is a terminal";
+        let new = "The event loop selects stdout when it is a terminal";
+
+        let diff = diff_inline_words(old, 0..old.len(), new, 0..new.len());
+
+        assert_eq!(
+            diff.lhs_ranges
+                .iter()
+                .map(|r| &old[r.clone()])
+                .collect::<Vec<_>>(),
+            vec!["A prototype now"]
+        );
+        assert_eq!(
+            diff.rhs_ranges
+                .iter()
+                .map(|r| &new[r.clone()])
+                .collect::<Vec<_>>(),
+            vec!["The event loop"]
+        );
+    }
+
+    #[test]
+    fn inline_highlights_join_changed_tokens_across_spaces() {
+        let old = "inner: terminal_output()?";
+        let new = "inner: Box<dyn Write>";
+        let (lhs_tree, rhs_tree) = (parse(old), parse(new));
+        let diff = diff_inline(&lhs_tree, old, 0..old.len(), &rhs_tree, new, 0..new.len());
+
+        assert_eq!(
+            diff.lhs_ranges
+                .iter()
+                .map(|r| &old[r.clone()])
+                .collect::<Vec<_>>(),
+            vec!["terminal_output()?"]
+        );
+        assert_eq!(
+            diff.rhs_ranges
+                .iter()
+                .map(|r| &new[r.clone()])
+                .collect::<Vec<_>>(),
+            vec!["Box<dyn Write>"]
         );
     }
 

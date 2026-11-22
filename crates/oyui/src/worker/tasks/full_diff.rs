@@ -316,10 +316,6 @@ fn token_highlights(
     let mut del = vec![Vec::new(); before.len()];
     let mut add = vec![Vec::new(); after.len()];
 
-    let Some((lhs_tree, rhs_tree)) = trees else {
-        return (del, add);
-    };
-
     let (Some(lhs_span), Some(rhs_span)) = (
         line_block_span(old_ranges, before),
         line_block_span(new_ranges, after),
@@ -327,7 +323,11 @@ fn token_highlights(
         return (del, add);
     };
 
-    let res = oyui_syndiff::diff_inline(lhs_tree, left, lhs_span, rhs_tree, right, rhs_span);
+    let res = if let Some((lhs_tree, rhs_tree)) = trees {
+        oyui_syndiff::diff_inline(lhs_tree, left, lhs_span, rhs_tree, right, rhs_span)
+    } else {
+        oyui_syndiff::diff_inline_words(left, lhs_span, right, rhs_span)
+    };
 
     bucket_to_lines(&res.lhs_ranges, old_ranges, before, &mut del);
     bucket_to_lines(&res.rhs_ranges, new_ranges, after, &mut add);
@@ -550,6 +550,23 @@ mod tests {
 
         assert_eq!(del, vec!["foo"]);
         assert_eq!(add, vec!["bar"]);
+    }
+
+    #[test]
+    fn mode_a_uses_word_diff_for_unsupported_extensions() {
+        let left = "A prototype now selects stdout when it is a terminal\n";
+        let right = "The event loop selects stdout when it is a terminal\n";
+
+        let hunks = compute(&DiffAlgorithm::Myers, left, right, Path::new("notes.md"))
+            .expect("plain-text inline diff");
+        let old = line_ranges(left);
+        let new = line_ranges(right);
+
+        assert_eq!(row_texts(&hunks, left, &old, true), vec!["A prototype now"]);
+        assert_eq!(
+            row_texts(&hunks, right, &new, false),
+            vec!["The event loop"]
+        );
     }
 
     #[test]
