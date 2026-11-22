@@ -28,7 +28,7 @@ use std::{
     time::Instant,
 };
 
-type Tui = Terminal<CrosstermBackend<crate::commons::frame_log::CountingStdout>>;
+type Tui = Terminal<CrosstermBackend<crate::commons::frame_log::CountingWriter>>;
 
 /// Longest a frame may go without being written in full.
 ///
@@ -282,11 +282,12 @@ impl Drop for InputEvents {
 impl App {
     pub async fn run(&mut self) -> Result<(), CommandError> {
         tracing::debug!("Initializing terminal");
+        let terminal_writer = frame_log::CountingWriter::terminal()?;
         enable_raw_mode()?;
         // The backend owns the tty from here on. Setup sequences are also
         // written through it — entering the alternate screen on a separate
         // handle is what allowed two writers to interleave on one terminal.
-        let backend = CrosstermBackend::new(crate::commons::frame_log::CountingStdout::new());
+        let backend = CrosstermBackend::new(terminal_writer);
         let mut terminal = Terminal::new(backend)?;
         execute!(terminal.backend_mut(), EnterAlternateScreen)?;
         // Armed from here on: both `?` returns and panics unwinding out of

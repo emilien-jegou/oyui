@@ -3,6 +3,7 @@
 //! the appender ignores failures so tracing can never affect the session.
 
 use std::fs::{File, OpenOptions};
+use std::io::IsTerminal;
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
@@ -69,26 +70,62 @@ pub fn flush(written: &[u8]) {
     );
 }
 
-/// io::Write wrapper logging every terminal write through [`flush`].
+/// Selects a terminal output handle without writing UI bytes to a pipe.
 ///
-/// Attached to `CrosstermBackend`'s writer, so every flush ratatui performs
-/// is timestamped with the exact bytes — the one probe the traces never had:
-/// if a frame's bytes are empty, nothing was flushed at all.
-pub struct CountingStdout {
-    inner: io::Stdout,
-    pending: Vec<u8>,
-}
+/// When stdout is redirected (for example, by `jj diff --tool`), interactive
+/// rendering must use the controlling terminal rather than the diff tool's
+/// stdout protocol. Crossterm's input/raw-mode path remains on stdin.
+fn terminal_output() -> io::Result<Box<dyn Write>> {
+    let stdout = io::stdout();
+    if stdout.is_terminal() {
+        return Ok(Box::new(stdout));
+    }
 
-impl CountingStdout {
-    pub fn new() -> Self {
-        Self {
-            inner: io::stdout(),
-            pending: Vec::new(),
-        }
+    #[cfg(unix)]
+    {
+        return OpenOptions::new()
+            .write(true)
+            .open("/dev/tty")
+            .map(|tty| Box::new(tty) as Box<dyn Write>);
+    }
+
+    #[cfg(windows)]
+    {
+        return OpenOptions::new()
+            .write(true)
+            .open("CONOUT$")
+            .map(|tty| Box::new(tty) as Box<dyn Write>);
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "stdout is not a terminal and controlling-terminal output is unsupported",
+        ))
     }
 }
 
-impl Write for CountingStdout {
+/// io::Write wrapper logging every terminal write through [`flush`].
+///
+/// Attached to `CrosstermBackend`'s writer, so every flush ratatui performs
+/// is timestamped with the exact bytes. The wrapped handle is either stdout
+/// (when stdout is a terminal) or the controlling terminal.
+pub struct CountingWriter {
+    inner: Box<dyn Write>,
+    pending: Vec<u8>,
+}
+
+impl CountingWriter {
+    pub fn terminal() -> io::Result<Self> {
+        Ok(Self {
+            inner: terminal_output()?,
+            pending: Vec::new(),
+        })
+    }
+}
+
+impl Write for CountingWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let written = self.inner.write(buf)?;
         self.pending.extend_from_slice(&buf[..written]);
@@ -100,12 +137,6 @@ impl Write for CountingStdout {
         flush(&self.pending);
         self.pending.clear();
         Ok(())
-    }
-}
-
-impl Default for CountingStdout {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
