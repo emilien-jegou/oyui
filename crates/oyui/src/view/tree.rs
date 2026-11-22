@@ -346,26 +346,28 @@ impl TreeViewData {
         if end > start && area.width > 0 {
             let selected_screen_row = selected.clamp(start, end - 1) - start;
             let selected_y = area.y.saturating_add(selected_screen_row as u16);
-            let row_styles: Vec<String> = (area.x..area.x.saturating_add(area.width))
-                .map(|x| {
-                    let cell = &frame.buffer_mut()[(x, selected_y)];
-                    format!(
-                        "x={x} sym={:?} fg={:?} bg={:?} mod={:?}",
-                        cell.symbol(),
-                        cell.fg,
-                        cell.bg,
-                        cell.modifier
-                    )
-                })
-                .collect();
-            tracing::debug!(
-                selected_index = selected,
-                start,
-                end,
-                selected_screen_row,
-                row_styles = ?row_styles,
-                "rendered tree cursor row styles"
-            );
+            if tracing::enabled!(tracing::Level::DEBUG) {
+                let row_styles: Vec<String> = (area.x..area.x.saturating_add(area.width))
+                    .map(|x| {
+                        let cell = &frame.buffer_mut()[(x, selected_y)];
+                        format!(
+                            "x={x} sym={:?} fg={:?} bg={:?} mod={:?}",
+                            cell.symbol(),
+                            cell.fg,
+                            cell.bg,
+                            cell.modifier
+                        )
+                    })
+                    .collect();
+                tracing::debug!(
+                    selected_index = selected,
+                    start,
+                    end,
+                    selected_screen_row,
+                    row_styles = ?row_styles,
+                    "rendered tree cursor row styles"
+                );
+            }
         } else {
             tracing::debug!(
                 selected_index = selected,

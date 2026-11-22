@@ -37,6 +37,7 @@ use crate::actions::BoxedHandler;
 use crate::commands::CommandError;
 use crate::config::Config;
 use crate::worker::tasks;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 #[derive(TypedBuilder)]
@@ -48,6 +49,10 @@ pub struct App {
     /// Set when the first tree calculation finds nothing to show.
     #[builder(default = false)]
     pub no_modifications: bool,
+    /// Per-path instant of the last automatic diff re-request, so a view
+    /// held on `Loading...` retries instead of waiting indefinitely.
+    #[builder(default)]
+    pub last_diff_request: std::collections::HashMap<PathBuf, std::time::Instant>,
 }
 
 impl std::ops::Deref for App {

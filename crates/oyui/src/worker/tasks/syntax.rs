@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::diff::DiffResult;
-use crate::diff_cache::DiffCache;
+use crate::diff_cache::{DiffCache, SideTokens};
 use crate::syntax::SyntaxEngine;
 use crate::theme::ThemeState;
 use crate::tree::FileTree;
@@ -21,6 +21,8 @@ pub struct Syntax;
 pub struct SyntaxReq {
     pub node_path: PathBuf,
     pub text: Arc<str>,
+    /// The old side of the diff: deletions keep their syntax fg through it.
+    pub old_text: Option<Arc<str>>,
     /// Cache generation this task's claim was made under.
     pub generation: u64,
 }
@@ -74,6 +76,9 @@ impl Syntax {
     ) -> eyre::Result<()> {
         if let DiffResult::Text(ref file_diff) = diff_result {
             let text = file_diff.new_file_content.clone();
+            // Old side only when it exists (new files have none).
+            let old_text = (!file_diff.old_file_content.is_empty())
+                .then(|| file_diff.old_file_content.clone());
 
             if let Some(generation) = ctx.cache.syntax.mark_started(&path) {
                 tracing::trace!(node_path = %path.display(), "Queueing Syntax task");
@@ -81,6 +86,7 @@ impl Syntax {
                     .send(SyntaxReq {
                         node_path: path.clone(),
                         text,
+                        old_text,
                         generation,
                     })
                     .is_err()
@@ -106,13 +112,23 @@ impl Listener<SyntaxReq> for Syntax {
 
         let theme = ctx.theme.read().tm_theme.clone();
         let engine = ctx.engine.clone();
-        let node_path = event.node_path;
-        let text = event.text;
+        let node_path = event.node_path.clone();
+        let text = event.text.clone();
+        let old_text = event.old_text.clone();
         let generation = event.generation;
 
         let highlighted = tokio::task::spawn_blocking({
             let node_path = node_path.clone();
-            move || Self::highlight_blocking(&engine, theme.as_ref(), &node_path, &text)
+            move || {
+                let new = Self::highlight_blocking(&engine, theme.as_ref(), &node_path, &text);
+                let old = old_text
+                    .map(|old| Self::highlight_blocking(&engine, theme.as_ref(), &node_path, &old))
+                    .unwrap_or_default();
+                SideTokens {
+                    old: Arc::new(old),
+                    new: Arc::new(new),
+                }
+            }
         })
         .await;
 
@@ -137,7 +153,26 @@ impl Listener<SyntaxReq> for Syntax {
             // app to repaint so the first paint of a file is not colorless.
             let _ = tx.send(SyntaxRes { path: node_path });
         } else {
-            tracing::debug!("Discarded stale syntax result (cache was cleared)");
+            // The cache moved under us (a clear bumped the generation between
+            // the claim and completion). Re-queue once: the open file's
+            // highlight must return without user interaction.
+            tracing::debug!(
+                node_path = %node_path.display(),
+                "syntax result rejected as stale; re-queueing"
+            );
+            if let Some(generation) = ctx.cache.syntax.mark_started(&node_path) {
+                if tx
+                    .send(SyntaxReq {
+                        node_path: node_path.clone(),
+                        text: event.text,
+                        old_text: event.old_text,
+                        generation,
+                    })
+                    .is_err()
+                {
+                    ctx.cache.syntax.cancel(&node_path, generation);
+                }
+            }
         }
 
         Ok(())

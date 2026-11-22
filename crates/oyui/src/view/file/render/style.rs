@@ -169,6 +169,49 @@ pub fn to_tui_style(style: syntect::highlighting::Style) -> Style {
         .fg(Color::Rgb(style.foreground.r, style.foreground.g, style.foreground.b).into())
 }
 
+/// Word-level (inner) highlight for the changed parts of a changed row.
+///
+/// Computed once per row from the theme; painted by char-painting over
+/// whatever background the row shows at that char (cursor, staged and
+/// preview washes survive underneath).
+pub struct WordLayer {
+    color: Color,
+    opacity: f64,
+    pub fg: Option<Color>,
+}
+
+impl WordLayer {
+    /// The char background when this char sits inside a changed span:
+    /// the word color lerped over the row's own background at that char.
+    pub fn bg_over(&self, row_bg: Color) -> Color {
+        safe_lerp_color(&row_bg, &self.color, self.opacity as f32)
+    }
+}
+
+/// The word layer for a changed row, or `None` when the theme disables it.
+///
+/// The bg derives from `add_word_bg`/`del_word_bg`, falling back to the
+/// row's own change color (`add_bg`/`del_bg`) — denser than the line wash,
+/// which is what makes the changed span pop (GitHub behavior).
+pub fn word_layer(is_add: bool, theme: &UiTheme) -> Option<WordLayer> {
+    if matches!(theme.file_change_word_highlight, LineHighlightMode::None) {
+        return None;
+    }
+
+    let (bg, fg) = if is_add {
+        (theme.add_word_bg, theme.add_word_fg)
+    } else {
+        (theme.del_word_bg, theme.del_word_fg)
+    };
+    let row_color = if is_add { theme.add_bg } else { theme.del_bg };
+
+    Some(WordLayer {
+        color: bg.unwrap_or(row_color),
+        opacity: theme.file_change_word_highlight_opacity,
+        fg,
+    })
+}
+
 pub struct LineBgCalculator {
     grad1_width: f32,
     grad2_width: f32,
@@ -395,5 +438,47 @@ mod tests {
         let mut theme = ansi_default_theme(&TerminalColorMode::NoColor);
         theme.conflict_fg = Color::Rgb(1, 2, 3);
         assert_eq!(conflict_orange(&theme), Color::Rgb(1, 2, 3));
+    }
+
+    /// The word layer derives its color from the row color when the theme
+    /// does not override it, and is disabled by `LineHighlightMode::None`.
+    #[test]
+    fn word_layer_defaults_and_disable() {
+        let mut theme = ansi_default_theme(&TerminalColorMode::NoColor);
+        theme.add_bg = Color::Rgb(0, 200, 0);
+        theme.del_bg = Color::Rgb(200, 0, 0);
+
+        let add = word_layer(true, &theme).expect("add word layer");
+        assert_eq!(add.color, theme.add_bg, "add words derive from add_bg");
+        assert!(add.fg.is_none(), "word fg stays unset by default");
+
+        let del = word_layer(false, &theme).expect("del word layer");
+        assert_eq!(del.color, theme.del_bg, "del words derive from del_bg");
+
+        theme.file_change_word_highlight = LineHighlightMode::None;
+        assert!(word_layer(true, &theme).is_none());
+        assert!(word_layer(false, &theme).is_none());
+    }
+
+    /// The word layer paints over the row background by its opacity.
+    #[test]
+    fn word_bg_over_layers_over_row_bg() {
+        let mut theme = ansi_default_theme(&TerminalColorMode::NoColor);
+        theme.add_bg = Color::Rgb(0, 200, 0);
+        theme.file_change_word_highlight_opacity = 0.4;
+
+        let layer = word_layer(true, &theme).expect("word layer");
+        let (row_bg, color) = (Color::Rgb(20, 20, 20), theme.add_bg);
+        let over = layer.bg_over(row_bg);
+
+        assert_eq!(over, safe_lerp_color(&row_bg, &color, 0.4));
+        assert_ne!(over, row_bg, "word paint must be visible");
+        // The painted char sits strictly between the row bg and the word
+        // color: closer to the word color than the row bg is.
+        let green = |c: &Color| match c {
+            Color::Rgb(_, g, _) => *g,
+            _ => panic!("rgb expected"),
+        };
+        assert!(green(&over) > green(&row_bg) && green(&over) < green(&color));
     }
 }

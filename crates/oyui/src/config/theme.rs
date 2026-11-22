@@ -141,8 +141,36 @@ pub struct UiTheme {
 
     #[builder(default = LineHighlightMode::Gradient(3.0))]
     pub file_change_highlight: LineHighlightMode,
-    #[builder(default = 0.1)]
+    /// Line-level change tint. Light by default (GitHub-like: the background
+    /// wash is subtle and the word layer does the pointing).
+    #[builder(default = 0.06)]
     pub file_change_highlight_opacity: f64,
+
+    /// Word-level (inner) highlight for the changed parts of a changed row.
+    /// `Gradient` degrades to `Solid`: a percent-of-line ramp inside a
+    /// few-chars span reads as noise.
+    #[builder(default = LineHighlightMode::Solid)]
+    pub file_change_word_highlight: LineHighlightMode,
+    #[builder(default = 0.4)]
+    pub file_change_word_highlight_opacity: f64,
+
+    /// Line-level foreground override for changed rows. `None` (default)
+    /// keeps the syntax fg — the background carries the add/del signal.
+    #[builder(default = None)]
+    pub add_text_fg: Option<Color>,
+    #[builder(default = None)]
+    pub del_text_fg: Option<Color>,
+    /// Word-level color overrides. `None` derives the bg from
+    /// `add_bg`/`del_bg` (denser than the line wash) and keeps the token's
+    /// syntax fg.
+    #[builder(default = None)]
+    pub add_word_bg: Option<Color>,
+    #[builder(default = None)]
+    pub del_word_bg: Option<Color>,
+    #[builder(default = None)]
+    pub add_word_fg: Option<Color>,
+    #[builder(default = None)]
+    pub del_word_fg: Option<Color>,
 
     /// Conflict accent (markers, frames). Derived from the theme like
     /// `add_fg`/`del_fg`; override it per-theme instead of hardcoding orange.

@@ -177,6 +177,12 @@ macros::impl_opt_color_getset!(char_line_split_color);
 macros::impl_opt_color_getset!(char_hunk_split_color);
 macros::impl_color_getset!(conflict_fg);
 macros::impl_opt_color_getset!(conflict_bg);
+macros::impl_opt_color_getset!(add_text_fg);
+macros::impl_opt_color_getset!(del_text_fg);
+macros::impl_opt_color_getset!(add_word_bg);
+macros::impl_opt_color_getset!(del_word_bg);
+macros::impl_opt_color_getset!(add_word_fg);
+macros::impl_opt_color_getset!(del_word_fg);
 
 // String fields
 macros::impl_ty_getset!(tree_progressive_change_dim, bool);
@@ -232,6 +238,28 @@ impl ThemeFileChangeHighlightOpacityActionsHandler for AppThemeActionsHandler {
 
     fn set(&self, val: f64) {
         self.theme.write().ui.file_change_highlight_opacity = val;
+        self.notify_ui_changed();
+    }
+}
+
+impl ThemeFileChangeWordHighlightActionsHandler for AppThemeActionsHandler {
+    fn get(&self) -> LineHighlightMode {
+        self.theme.read().ui.file_change_word_highlight
+    }
+
+    fn set(&self, val: LineHighlightMode) {
+        self.theme.write().ui.file_change_word_highlight = val;
+        self.notify_ui_changed();
+    }
+}
+
+impl ThemeFileChangeWordHighlightOpacityActionsHandler for AppThemeActionsHandler {
+    fn get(&self) -> f64 {
+        self.theme.read().ui.file_change_word_highlight_opacity
+    }
+
+    fn set(&self, val: f64) {
+        self.theme.write().ui.file_change_word_highlight_opacity = val;
         self.notify_ui_changed();
     }
 }

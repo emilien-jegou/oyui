@@ -473,3 +473,50 @@ fn wildly_different_files_terminate_via_graph_limit() {
         },
     );
 }
+
+/// A function body of many small statements with edits interleaved dense:
+/// every unchanged statement subtree sits below the unchanged-split
+/// threshold, so the sectioned preprocessing aggregates the whole body into
+/// ONE large conflict region (the rows.rs pathology that made a
+/// syntax-aware diff walk ~1M states for ~10s before falling back).
+///
+/// The section budget must bound the walk and yield the line-diff fallback
+/// in a blink instead.
+#[test]
+fn dense_small_statement_edits_bounded_by_section_budget() {
+    // A body of small statements; the mutation edits identifiers inline
+    // (same shape, novel tokens), which is exactly the class that used to
+    // aggregate into one enormous conflict region.
+    let body = |edit: bool| -> String {
+        let mut text = String::from("fn work() {\n");
+        for i in 0..500 {
+            let name = if edit && i % 7 == 3 { "guard" } else { "step" };
+            let value = if edit && i % 11 == 5 {
+                i * 3 + 1
+            } else {
+                i * 3
+            };
+            text.push_str(&format!(
+                "    let {name}_{i} = {value} + 1;\n    run_{i}({name}_{i});\n"
+            ));
+        }
+        text.push_str("}\n");
+        text
+    };
+
+    let lhs = body(false);
+    let rhs = body(true);
+    let (lhs, rhs) = (leak(lhs), leak(rhs));
+
+    within(
+        "dense small-statement edits (the rows.rs pathology)",
+        Duration::from_secs(5),
+        || {
+            let (lt, rt) = (parse_rust(lhs), parse_rust(rhs));
+            diff_line_ops(&lt, lhs, &rt, rhs, None)
+        },
+    );
+
+    // Either a structural answer or the caller's fallback: the only
+    // contract is bounded time.
+}

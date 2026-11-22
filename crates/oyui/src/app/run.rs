@@ -10,6 +10,7 @@ use crate::commons::frame_log;
 use crate::commons::frame_log::epoch_millis;
 use crate::config::UiTheme;
 use crate::view::ViewKind;
+use crate::worker::events::file_opened::FileOpened;
 use crossterm::{
     event::{Event, EventStream},
     execute,
@@ -85,6 +86,17 @@ fn paint_key(app: &App) -> PaintKey {
             .unwrap_or(0),
         folded: file.is_folded,
     }
+}
+
+/// Whether a state change invalidates enough of the presentation to require a
+/// full reconciliation. Cursor selection and scrolling are intentionally
+/// excluded: Ratatui's normal buffer diff must emit those changed cells.
+fn requires_full_repaint(previous: &PaintKey, current: &PaintKey) -> bool {
+    previous.view != current.view
+        || previous.theme != current.theme
+        || previous.path != current.path
+        || previous.hscroll != current.hscroll
+        || previous.folded != current.folded
 }
 
 /// Discards both buffers so the next frame is written in full.
@@ -313,7 +325,11 @@ impl App {
         let worker = self.worker.clone();
         let mut draw_id = 0_u64;
         let mut last_full_repaint = Instant::now();
-        restore.terminal.draw(|f| draw::draw(f, self))?;
+        let mut last_rendered_buffer = None;
+        restore.terminal.draw(|f| {
+            draw::draw(f, self);
+            last_rendered_buffer = Some(f.buffer_mut().clone());
+        })?;
         let mut last_paint_key = Some(paint_key(self));
 
         loop {
@@ -330,6 +346,25 @@ impl App {
             let message_deadline = message_expires
                 .unwrap_or_else(|| std::time::Instant::now() + Duration::from_secs(3600));
             let message_timer = tokio::time::sleep_until(message_deadline.into());
+
+            // While a view waits on a missing diff, keep a slow tick alive:
+            // the worker may have lost the claim (a cache invalidation
+            // mid-flight), and a view must not hold `Loading...`
+            // indefinitely — the diff itself is sub-100ms (measured), so a
+            // 1s retry is silence-tolerant and heals every loss class.
+            let requeue_path = {
+                let ui = self.ui.lock();
+                (ui.current == ViewKind::File)
+                    .then(|| ui.file_view.current_path.clone())
+                    .flatten()
+            };
+            let requeue_path = requeue_path.filter(|p| self.cache.diffs.get(p).is_none());
+            let requeue_deadline = if requeue_path.is_some() {
+                std::time::Instant::now() + Duration::from_secs(1)
+            } else {
+                std::time::Instant::now() + Duration::from_secs(3600)
+            };
+            let requeue_timer = tokio::time::sleep_until(requeue_deadline.into());
 
             tokio::select! {
                 maybe_event = events.next() => {
@@ -403,6 +438,24 @@ impl App {
                 }
                 // Only fires while a transient message is on screen.
                 _ = message_timer => { branch = "message"; }
+                // Missing-diff retry for the on-screen file: re-request the
+                // diff at most once per second while it is missing. The
+                // re-request is a no-op while a worker holds the claim, and
+                // heals every loss class (a result lost to an invalidation
+                // while its task was in flight) without user interaction.
+                _ = requeue_timer => {
+                    branch = "requeue";
+                    if let Some(path) = &requeue_path {
+                        if self.cache.diffs.get(path).is_none() {
+                            let last = self.last_diff_request.get(path).copied();
+                            if last.is_none_or(|t| t.elapsed() > Duration::from_secs(1)) {
+                                self.last_diff_request
+                                    .insert(path.clone(), std::time::Instant::now());
+                                let _ = self.worker.send(FileOpened { path: path.clone() });
+                            }
+                        }
+                    }
+                }
             }
 
             if aborted || self.ui.lock().should_quit {
@@ -424,21 +477,91 @@ impl App {
                 ("branch", branch.to_string()),
                 ("ms", epoch_millis().to_string()),
             ]);
-            // A frame that only restyles cells is the one a lost delta hides,
-            // so it is written in full; the interval bounds any other desync.
             let key = paint_key(self);
-            let full_repaint = last_paint_key.as_ref() != Some(&key)
-                || last_full_repaint.elapsed() >= FULL_REPAINT_INTERVAL;
+            let broad_change = last_paint_key
+                .as_ref()
+                .is_some_and(|previous| requires_full_repaint(previous, &key));
+            let full_repaint = broad_change || last_full_repaint.elapsed() >= FULL_REPAINT_INTERVAL;
             if full_repaint {
                 last_full_repaint = Instant::now();
                 frame_log::frame(&[("src", "full_repaint".to_string())]);
                 force_full_repaint(restore.terminal);
             }
-            restore.terminal.draw(|f| draw::draw(f, self))?;
+            let mut rendered_buffer = None;
+            restore.terminal.draw(|f| {
+                draw::draw(f, self);
+                rendered_buffer = Some(f.buffer_mut().clone());
+            })?;
             last_paint_key = Some(paint_key(self));
             // Out-of-band sequences go after the frame: below the frame's
             // flush, through the same backend, never inside it.
             emit_terminal_writes(self, restore.terminal);
+            let (view, writable, tree_selected, tree_offset, file_selected, file_offset) = {
+                let ui = self.ui.lock();
+                let file = &ui.file_view;
+                let file_state = file
+                    .current_path
+                    .as_ref()
+                    .and_then(|path| file.scroll_states.get(path));
+                (
+                    format!("{:?}", ui.current),
+                    ui.writable,
+                    ui.tree_view.selected_index,
+                    ui.tree_view.list_state.offset(),
+                    file_state.and_then(|state| state.selected()).unwrap_or(0),
+                    file_state.map(|state| state.offset()).unwrap_or(0),
+                )
+            };
+            frame_log::frame(&[
+                ("src", "ui_state".to_string()),
+                ("draw_id", draw_id.to_string()),
+                ("view", view),
+                ("writable", writable.to_string()),
+                ("tree_selected", tree_selected.to_string()),
+                ("tree_offset", tree_offset.to_string()),
+                ("file_selected", file_selected.to_string()),
+                ("file_offset", file_offset.to_string()),
+            ]);
+            if branch == "input" {
+                if let Some(current) = rendered_buffer.as_ref() {
+                    let reset_diff = full_repaint
+                        || last_rendered_buffer
+                            .as_ref()
+                            .is_none_or(|previous| previous.area != current.area);
+                    let changes = if reset_diff {
+                        current
+                            .area
+                            .positions()
+                            .map(|pos| (pos.x, pos.y, &current[(pos.x, pos.y)]))
+                            .collect::<Vec<_>>()
+                    } else {
+                        last_rendered_buffer
+                            .as_ref()
+                            .map(|previous| previous.diff(current))
+                            .unwrap_or_default()
+                    };
+                    let cells = changes
+                        .iter()
+                        .map(|(x, y, cell)| {
+                            format!(
+                                "({x},{y}) sym={:?} fg={:?} bg={:?} mod={:?}",
+                                cell.symbol(),
+                                cell.fg,
+                                cell.bg,
+                                cell.modifier
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(";");
+                    frame_log::frame(&[
+                        ("src", "rendered_cell_diff".to_string()),
+                        ("draw_id", draw_id.to_string()),
+                        ("reset_diff", reset_diff.to_string()),
+                        ("cells", cells),
+                    ]);
+                }
+            }
+            last_rendered_buffer = rendered_buffer;
             frame_log::frame(&[
                 ("src", "draw_end".to_string()),
                 ("draw_id", draw_id.to_string()),
@@ -491,5 +614,67 @@ impl App {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::{
+        buffer::Buffer,
+        layout::Rect,
+        style::{Color, Style},
+    };
+
+    fn key() -> PaintKey {
+        PaintKey {
+            view: ViewKind::File,
+            theme: crate::theme::ThemeState::new(
+                &crate::terminal_colors::TerminalColorMode::NoColor,
+            )
+            .ui,
+            tree_selected: 0,
+            tree_offset: 0,
+            path: Some("file".into()),
+            file_selected: 0,
+            file_offset: 0,
+            hscroll: 0,
+            folded: false,
+        }
+    }
+
+    #[test]
+    fn cursor_and_scroll_changes_use_the_normal_diff() {
+        let previous = key();
+        let mut current = previous.clone();
+        current.file_selected += 1;
+        current.file_offset += 1;
+        assert!(!requires_full_repaint(&previous, &current));
+        current.tree_selected += 1;
+        current.tree_offset += 1;
+        assert!(!requires_full_repaint(&previous, &current));
+
+        let area = Rect::new(0, 0, 2, 2);
+        let previous_buffer = Buffer::empty(area);
+        let mut current_buffer = previous_buffer.clone();
+        current_buffer[(0, 0)].set_style(Style::default().bg(Color::Red));
+        current_buffer[(0, 1)].set_style(Style::default().bg(Color::Blue));
+        let changed = previous_buffer.diff(&current_buffer);
+        assert_eq!(
+            changed.iter().map(|(x, y, _)| (*x, *y)).collect::<Vec<_>>(),
+            [(0, 0), (0, 1)]
+        );
+    }
+
+    #[test]
+    fn broad_visual_changes_still_force_reconciliation() {
+        let previous = key();
+        let mut current = previous.clone();
+        current.theme.cursor_bg = crate::config::theme::Color::Rgb(1, 2, 3);
+        assert!(requires_full_repaint(&previous, &current));
+
+        current = previous.clone();
+        current.path = Some("other-file".into());
+        assert!(requires_full_repaint(&previous, &current));
     }
 }

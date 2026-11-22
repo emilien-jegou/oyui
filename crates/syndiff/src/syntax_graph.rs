@@ -403,7 +403,13 @@ fn is_section_end(v: &SyntaxVertex<'_>, lhs_end_byte: usize, rhs_end_byte: usize
 ///
 /// Sections are produced by the preprocessing in [`crate::line_ops`]; they
 /// are small (a handful of siblings), so this walk stays cheap even when the
-/// file as a whole is huge.
+/// file as a whole is huge. Dense same-shape edits can still hand this walk
+/// a large region (every unchanged statement between edits aggregates into
+/// one region); the budget caps how much a single section may explore
+/// before the whole diff falls back to the fast line path — bounded time is
+/// worth more than a structural answer on a region that pathological.
+const SECTION_STATE_BUDGET: usize = 30_000;
+
 pub(crate) fn section_route<'a>(
     lhs_tree: &'a SyntaxTree,
     rhs_tree: &'a SyntaxTree,
@@ -424,7 +430,10 @@ pub(crate) fn section_route<'a>(
     // whole-file conflicts (wildly different files).
     let lhs_span = lhs_end - lhs_start.index();
     let rhs_span = rhs_end - rhs_start.index();
-    let graph_limit = std::cmp::min(2 * lhs_span * rhs_span + GRAPH_SLACK, graph_limit);
+    let graph_limit = std::cmp::min(
+        2 * lhs_span * rhs_span + GRAPH_SLACK,
+        std::cmp::min(graph_limit, SECTION_STATE_BUDGET),
+    );
 
     let mut heap: BinaryHeap<Reverse<SyntaxPath<'a>>> = BinaryHeap::default();
     let mut visited: FxHashMap<SyntaxVertex<'a>, SyntaxPath<'a>> =

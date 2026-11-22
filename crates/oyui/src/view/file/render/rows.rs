@@ -38,6 +38,8 @@ pub(crate) struct RowBuilder<'a> {
     pub old_lines: LineAccess<'a>,
     pub new_lines: LineAccess<'a>,
     pub syntax_opt: Option<&'a Vec<Vec<(Style, String)>>>,
+    /// Old side's tokens, indexed by deletion rows.
+    pub syntax_opt_old: Option<&'a Vec<Vec<(Style, String)>>>,
     pub theme: &'a UiTheme,
     pub hscroll: usize,
     pub area_width: u16,
@@ -262,6 +264,7 @@ impl<'a> RowBuilder<'a> {
                             .is_conflict(in_conflict)
                             .mode(line_mode)
                             .inline_highlights(inline_highlights)
+                            .syntax_opt(self.syntax_opt_old)
                             .area_width(self.area_width)
                             .use_gradient(self.use_gradient)
                             .theme(theme)
@@ -552,6 +555,7 @@ mod tests {
             old_lines: LineAccess::new(&diff.old_file_content, ranges),
             new_lines: LineAccess::new(&diff.new_file_content, ranges),
             syntax_opt: None,
+            syntax_opt_old: None,
             theme,
             hscroll: 0,
             area_width: 80,
@@ -732,6 +736,7 @@ mod tests {
             old_lines: LineAccess::new(&diff.old_file_content, &ranges),
             new_lines: LineAccess::new(&diff.new_file_content, &ranges),
             syntax_opt: None,
+            syntax_opt_old: None,
             theme: &theme,
             hscroll: 0,
             area_width: 80,
@@ -842,6 +847,7 @@ mod tests {
             old_lines: LineAccess::new(&diff.old_file_content, &ranges),
             new_lines: LineAccess::new(&diff.new_file_content, &ranges),
             syntax_opt: None,
+            syntax_opt_old: None,
             theme: &theme,
             hscroll: 0,
             area_width: 80,
@@ -902,5 +908,139 @@ mod tests {
         assert_eq!(scroll_offset(2, 0, 2, 40, 5), 0);
         // No height: keep the anchor.
         assert_eq!(scroll_offset(2, 7, 2, 0, 100), 7);
+    }
+    /// Round-4 plumbing lock: deletion rows receive the OLD side's tokens
+    /// (so they keep syntax fg), additions the new side's.
+    #[test]
+    fn deletion_rows_keep_old_side_syntax() {
+        use ratatui::layout::Rect;
+        use ratatui::widgets::Widget;
+
+        fn token(r: u8, g: u8, b: u8, text: &str) -> (syntect::highlighting::Style, String) {
+            let style = syntect::highlighting::Style {
+                foreground: syntect::highlighting::Color { r, g, b, a: 255 },
+                ..Default::default()
+            };
+            (style, text.to_string())
+        }
+
+        // one_hunk_diff: deletion = old line 1, addition = new line 1.
+        let old_tokens = vec![vec![], vec![token(11, 22, 33, "b")]];
+        let new_tokens = vec![vec![], vec![token(44, 55, 66, "B")]];
+
+        let diff = one_hunk_diff();
+        let theme = ansi_default_theme(&TerminalColorMode::NoColor);
+        let mut theme = theme;
+        theme.fg = crate::config::theme::Color::Rgb(240, 240, 240);
+        let ranges = line_ranges(&diff.old_file_content);
+
+        let mut rows = Vec::new();
+        let builder = builder(&diff, false, &theme, &ranges);
+        let builder = RowBuilder {
+            syntax_opt: Some(&new_tokens),
+            syntax_opt_old: Some(&old_tokens),
+            ..builder
+        };
+        let total = builder.build(None, &mut rows);
+        builder.build(Some(0..total), &mut rows);
+
+        let table = crate::view::file::render::line::build_line_table(rows, &theme);
+        let mut buf = ratatui::buffer::Buffer::empty(Rect::new(0, 0, 80, 4));
+        table.render(Rect::new(0, 0, 80, 4), &mut buf);
+
+        // Row layout: y=0 context "a", y=1 deletion "b", y=2 addition "B",
+        // y=3 context "c" (assuming a 1-line gutter). Text starts after the
+        // gutter (indicator 1 + numbers 5 + sign 2).
+        let fg_at = |x: u16, y: u16| buf[(x, y)].fg;
+
+        let old_fg = ratatui::prelude::Color::Rgb(11, 22, 33);
+        let new_fg = ratatui::prelude::Color::Rgb(44, 55, 66);
+
+        // Find the change rows by symbol so the test does not depend on
+        // gutter detail; the sign column carries +/-.
+        let mut del_y = None;
+        let mut add_y = None;
+        for y in 0..4 {
+            let syms: Vec<String> = (0..80).map(|x| buf[(x, y)].symbol().to_string()).collect();
+            if syms.iter().any(|s| s == "-") {
+                del_y = Some(y);
+            }
+            if syms.iter().any(|s| s == "+") {
+                add_y = Some(y);
+            }
+        }
+
+        let del_y = del_y.expect("deletion row in output");
+        let add_y = add_y.expect("addition row in output");
+
+        // The deletion row shows the OLD token fg somewhere in its text.
+        let del_fgs: Vec<ratatui::prelude::Color> = (8..80).map(|x| fg_at(x, del_y)).collect();
+        assert!(
+            del_fgs.contains(&old_fg),
+            "old-side fg on deletion: {del_fgs:?}"
+        );
+        assert!(!del_fgs.contains(&new_fg), "no new-side fg on deletion");
+        let add_fgs: Vec<ratatui::prelude::Color> = (8..80).map(|x| fg_at(x, add_y)).collect();
+        assert!(
+            add_fgs.contains(&new_fg),
+            "new-side fg on addition: {add_fgs:?}"
+        );
+        assert!(!add_fgs.contains(&old_fg), "no old-side fg on addition");
+    }
+
+    /// Without old-side tokens the deletion row falls back to the plain fg —
+    /// the sides must not mix (no new-side tokens on deletions).
+    #[test]
+    fn deletion_rows_without_old_tokens_fall_back() {
+        use ratatui::layout::Rect;
+        use ratatui::widgets::Widget;
+
+        fn token(r: u8, g: u8, b: u8, text: &str) -> (syntect::highlighting::Style, String) {
+            let style = syntect::highlighting::Style {
+                foreground: syntect::highlighting::Color { r, g, b, a: 255 },
+                ..Default::default()
+            };
+            (style, text.to_string())
+        }
+
+        // one_hunk_diff: addition = new line 1.
+        let new_tokens = vec![vec![], vec![token(44, 55, 66, "B")]];
+
+        let diff = one_hunk_diff();
+        let mut theme = ansi_default_theme(&TerminalColorMode::NoColor);
+        theme.fg = crate::config::theme::Color::Rgb(240, 240, 240);
+        let ranges = line_ranges(&diff.old_file_content);
+
+        let mut rows = Vec::new();
+        let builder = builder(&diff, false, &theme, &ranges);
+        let builder = RowBuilder {
+            syntax_opt: Some(&new_tokens),
+            ..builder
+        };
+        let total = builder.build(None, &mut rows);
+        builder.build(Some(0..total), &mut rows);
+
+        let table = crate::view::file::render::line::build_line_table(rows, &theme);
+        let mut buf = ratatui::buffer::Buffer::empty(Rect::new(0, 0, 80, 4));
+        table.render(Rect::new(0, 0, 80, 4), &mut buf);
+
+        let new_fg = ratatui::prelude::Color::Rgb(44, 55, 66);
+        let mut del_y = None;
+        for y in 0..4 {
+            let syms: Vec<String> = (0..80).map(|x| buf[(x, y)].symbol().to_string()).collect();
+            if syms.iter().any(|s| s == "-") {
+                del_y = Some(y);
+            }
+        }
+        let del_y = del_y.expect("deletion row");
+        let del_fgs: Vec<ratatui::prelude::Color> = (8..80).map(|x| buf[(x, del_y)].fg).collect();
+        assert!(
+            !del_fgs.contains(&new_fg),
+            "new-side tokens must not leak onto deletion rows: {del_fgs:?}"
+        );
+        assert!(
+            del_fgs.contains(&ratatui::prelude::Color::Rgb(240, 240, 240)),
+            "deletion falls back to the plain fg: {del_fgs:?}"
+        );
     }
 }

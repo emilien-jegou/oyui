@@ -108,7 +108,6 @@ impl Listener<FullDiffReq> for FullDiff {
         // line offsets. Both are read off the content we already hold here.
         if let DiffResult::Text(ref diff) = diff_result {
             let generation = ctx.cache.line_index.generation();
-            let node_path = event.node_path.clone();
             let widths = Arc::new(LineWidths {
                 old: widest_line(&diff.old_file_content),
                 new: widest_line(&diff.new_file_content),
@@ -116,18 +115,43 @@ impl Listener<FullDiffReq> for FullDiff {
             let index = Arc::new(LineIndex::of(diff));
             ctx.cache
                 .line_widths
-                .set(node_path.clone(), widths, generation);
-            ctx.cache.line_index.set(node_path, index, generation);
+                .set(event.node_path.clone(), widths, generation);
+            ctx.cache
+                .line_index
+                .set(event.node_path.clone(), index, generation);
         }
 
-        ctx.cache.diffs.set(
+        if !ctx.cache.diffs.set(
             event.node_path.clone(),
             Arc::new(diff_result),
             event.generation,
-        );
-        let _ = tx.send(DiffUpdate {
-            path: event.node_path,
-        });
+        ) {
+            // The cache moved under us while we computed (a clear bumped the
+            // generation between claim and completion). Re-queue once: the
+            // open file must not sit in Loading until the user interacts
+            // again.
+            tracing::debug!(
+                node_path = %event.node_path.display(),
+                "diff result rejected as stale; re-queueing"
+            );
+            if let Some(generation) = ctx.cache.diffs.mark_started(&event.node_path) {
+                if tx
+                    .send(FullDiffReq {
+                        node_path: event.node_path.clone(),
+                        left_path: left_path_clone,
+                        right_path: right_path_clone,
+                        generation,
+                    })
+                    .is_err()
+                {
+                    ctx.cache.diffs.cancel(&event.node_path, generation);
+                }
+            }
+        } else {
+            let _ = tx.send(DiffUpdate {
+                path: event.node_path,
+            });
+        }
         Ok(())
     }
 }

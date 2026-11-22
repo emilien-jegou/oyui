@@ -95,6 +95,16 @@ define_actions! {
         file_change_highlight { @getset(LineHighlightMode) }
         file_change_highlight_opacity { @getset(f64) }
 
+        // Word-level (inner) highlight for the changed parts of changed rows.
+        file_change_word_highlight { @getset(LineHighlightMode) }
+        file_change_word_highlight_opacity { @getset(f64) }
+        add_text_fg { @getset(String) }
+        del_text_fg { @getset(String) }
+        add_word_bg { @getset(String) }
+        del_word_bg { @getset(String) }
+        add_word_fg { @getset(String) }
+        del_word_fg { @getset(String) }
+
         // Conflict accent + block underlay. `conflict_bg` empty derives it from the bg.
         conflict_fg { @getset(String) }
         conflict_bg { @getset(String) }

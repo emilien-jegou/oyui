@@ -27,12 +27,13 @@ teardown code.
    diff bytes and cut it apart — the confirmed trigger of the stale-highlight
    bug this file exists to prevent.
 
-3. **Make presentation reconcile instead of assuming the delta landed.** Each
-   frame is preceded by a style-only snapshot (`PaintKey` in `app/run.rs`);
-   when it changed since the previous frame — or every
-   `FULL_REPAINT_INTERVAL` (2 s safety net) — the frame is written in full via
-   `force_full_repaint`: two public `swap_buffers()` calls, which empties both
-   buffers. That is the same reset a resize performs, using public API only.
+3. **Make presentation reconcile instead of assuming the delta landed.** Broad
+   view/theme/layout changes — and every `FULL_REPAINT_INTERVAL` (2 s safety
+   net) — are written in full via `force_full_repaint`: two public
+   `swap_buffers()` calls, which empties both buffers. Ordinary cursor movement
+   uses Ratatui's normal buffer diff; it must not reset both buffers on every
+   key. This relies on rule 2: the backend is the sole writer, and backend
+   write/flush errors propagate rather than being ignored.
 
 4. **Never `Terminal::clear()`** as a resync primitive: it writes `\x1b[6n`
    and reads stdin, stalling the event loop (~2 s observed in-session) and

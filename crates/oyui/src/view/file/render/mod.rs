@@ -208,8 +208,11 @@ impl FileViewData {
             }
         };
 
-        let syntax_df = cache.syntax.get(&path);
-        let syntax_opt = syntax_df.as_deref();
+        let tokens = cache.syntax.get(&path);
+        let (syntax_opt, syntax_opt_old) = match tokens.as_deref() {
+            Some(side) => (Some(&*side.new), Some(&*side.old)),
+            None => (None, None),
+        };
 
         // The diff listener published the line offsets while it had both sides
         // in memory; borrowing them keeps the frame off the whole-file
@@ -254,6 +257,7 @@ impl FileViewData {
             old_lines,
             new_lines,
             syntax_opt,
+            syntax_opt_old,
             theme,
             hscroll,
             area_width,
@@ -323,26 +327,28 @@ impl FileViewData {
             let selected_y = list_area
                 .y
                 .saturating_add((selected_row_idx - start) as u16);
-            let row_styles: Vec<String> = (list_area.x
-                ..list_area.x.saturating_add(list_area.width))
-                .map(|x| {
-                    let cell = &frame.buffer_mut()[(x, selected_y)];
-                    format!(
-                        "x={x} sym={:?} fg={:?} bg={:?} mod={:?}",
-                        cell.symbol(),
-                        cell.fg,
-                        cell.bg,
-                        cell.modifier
-                    )
-                })
-                .collect();
-            tracing::debug!(
-                path = %path.display(),
-                selected_row_idx,
-                selected_screen_y = selected_y,
-                row_styles = ?row_styles,
-                "rendered diff cursor row styles"
-            );
+            if tracing::enabled!(tracing::Level::DEBUG) {
+                let row_styles: Vec<String> = (list_area.x
+                    ..list_area.x.saturating_add(list_area.width))
+                    .map(|x| {
+                        let cell = &frame.buffer_mut()[(x, selected_y)];
+                        format!(
+                            "x={x} sym={:?} fg={:?} bg={:?} mod={:?}",
+                            cell.symbol(),
+                            cell.fg,
+                            cell.bg,
+                            cell.modifier
+                        )
+                    })
+                    .collect();
+                tracing::debug!(
+                    path = %path.display(),
+                    selected_row_idx,
+                    selected_screen_y = selected_y,
+                    row_styles = ?row_styles,
+                    "rendered diff cursor row styles"
+                );
+            }
         } else {
             tracing::debug!(
                 path = %path.display(),

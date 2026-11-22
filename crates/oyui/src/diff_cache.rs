@@ -56,7 +56,7 @@ impl LineIndex {
 pub struct DiffCacheInner {
     pub stats: CacheMap<DiffStats>,
     pub diffs: CacheMap<DiffResult>,
-    pub syntax: CacheMap<Vec<Vec<(SyntectStyle, String)>>>,
+    pub syntax: CacheMap<SideTokens>,
     pub line_index: CacheMap<LineIndex>,
     /// Widest line of each side, in display columns.
     ///
@@ -64,6 +64,16 @@ pub struct DiffCacheInner {
     /// content changing, so the diff listener derives it once instead of every
     /// scroll keypress rescanning the whole file.
     pub line_widths: CacheMap<LineWidths>,
+}
+
+/// Syntax tokens for both sides of a diff, in line order.
+///
+/// Deletion rows index `old` (they show old-side content), additions and
+/// context rows index `new`.
+#[derive(Clone, Default)]
+pub struct SideTokens {
+    pub old: Arc<Vec<Vec<(SyntectStyle, String)>>>,
+    pub new: Arc<Vec<Vec<(SyntectStyle, String)>>>,
 }
 
 /// Widest line of each side of a diff, in display columns.
