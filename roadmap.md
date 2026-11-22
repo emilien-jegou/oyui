@@ -44,7 +44,8 @@ emulator, and file-view evidence is still outstanding.
 ### 2. Design the terminal writer selection
 
 - [x] Select stdout when it is a TTY; otherwise use the platform controlling
-  terminal for rendering.
+  terminal for rendering. Selection lives in `app/run.rs`; `frame_log` only
+  wraps the chosen backend writer for diagnostics.
 - [x] Keep the backend as the sole UI writer and preserve the frame logger.
 - [ ] Further verify input/raw-mode behavior on supported platforms.
 

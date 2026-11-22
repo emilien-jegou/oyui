@@ -3,7 +3,6 @@
 //! the appender ignores failures so tracing can never affect the session.
 
 use std::fs::{File, OpenOptions};
-use std::io::IsTerminal;
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
@@ -70,42 +69,6 @@ pub fn flush(written: &[u8]) {
     );
 }
 
-/// Selects a terminal output handle without writing UI bytes to a pipe.
-///
-/// When stdout is redirected (for example, by `jj diff --tool`), interactive
-/// rendering must use the controlling terminal rather than the diff tool's
-/// stdout protocol. Crossterm's input/raw-mode path remains on stdin.
-fn terminal_output() -> io::Result<Box<dyn Write>> {
-    let stdout = io::stdout();
-    if stdout.is_terminal() {
-        return Ok(Box::new(stdout));
-    }
-
-    #[cfg(unix)]
-    {
-        return OpenOptions::new()
-            .write(true)
-            .open("/dev/tty")
-            .map(|tty| Box::new(tty) as Box<dyn Write>);
-    }
-
-    #[cfg(windows)]
-    {
-        return OpenOptions::new()
-            .write(true)
-            .open("CONOUT$")
-            .map(|tty| Box::new(tty) as Box<dyn Write>);
-    }
-
-    #[cfg(not(any(unix, windows)))]
-    {
-        Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "stdout is not a terminal and controlling-terminal output is unsupported",
-        ))
-    }
-}
-
 /// io::Write wrapper logging every terminal write through [`flush`].
 ///
 /// Attached to `CrosstermBackend`'s writer, so every flush ratatui performs
@@ -117,11 +80,11 @@ pub struct CountingWriter {
 }
 
 impl CountingWriter {
-    pub fn terminal() -> io::Result<Self> {
-        Ok(Self {
-            inner: terminal_output()?,
+    pub fn new(inner: Box<dyn Write>) -> Self {
+        Self {
+            inner,
             pending: Vec::new(),
-        })
+        }
     }
 }
 

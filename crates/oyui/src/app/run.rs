@@ -20,6 +20,8 @@ use futures_lite::StreamExt;
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::time::Duration;
 use std::{
+    fs::OpenOptions,
+    io::IsTerminal,
     io::{self, Write},
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -30,6 +32,40 @@ use std::{
 };
 
 type Tui = Terminal<CrosstermBackend<crate::commons::frame_log::CountingWriter>>;
+
+/// Select a terminal writer without sending interactive escape sequences into
+/// an output pipe (for example, the stdout protocol used by `jj diff --tool`).
+fn terminal_output() -> io::Result<Box<dyn Write>> {
+    let stdout = io::stdout();
+    if stdout.is_terminal() {
+        return Ok(Box::new(stdout));
+    }
+
+    #[cfg(unix)]
+    let (path, display_path) = ("/dev/tty", "/dev/tty");
+    #[cfg(windows)]
+    let (path, display_path) = ("CONOUT$", "CONOUT$");
+    #[cfg(not(any(unix, windows)))]
+    return Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "stdout is not a terminal and controlling-terminal output is unsupported",
+    ));
+
+    #[cfg(any(unix, windows))]
+    OpenOptions::new()
+        .write(true)
+        .open(path)
+        .map(|tty| Box::new(tty) as Box<dyn Write>)
+        .map_err(|error| {
+            io::Error::new(
+                error.kind(),
+                format!(
+                    "stdout is not a terminal and could not open controlling terminal \
+                     {display_path}: {error}"
+                ),
+            )
+        })
+}
 
 /// Longest a frame may go without being written in full.
 ///
@@ -294,7 +330,7 @@ impl Drop for InputEvents {
 impl App {
     pub async fn run(&mut self) -> Result<(), CommandError> {
         tracing::debug!("Initializing terminal");
-        let terminal_writer = frame_log::CountingWriter::terminal()?;
+        let terminal_writer = frame_log::CountingWriter::new(terminal_output()?);
         enable_raw_mode()?;
         // The backend owns the tty from here on. Setup sequences are also
         // written through it — entering the alternate screen on a separate

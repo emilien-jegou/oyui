@@ -146,12 +146,12 @@ that the relay causes the visible stale highlight.
 
 ## Controlling-terminal fallback experiment
 
-A prototype now selects stdout when it is a terminal and otherwise opens the
+The event loop selects stdout when it is a terminal and otherwise opens the
 controlling terminal (`/dev/tty` on Unix, `CONOUT$` on Windows) for the
-Ratatui backend. The frame-logging writer wraps either handle, so frame output,
-queued terminal sequences, and teardown remain serialized through the same
-backend. Input and raw-mode handling are unchanged and continue to use
-crossterm's stdin path.
+Ratatui backend. The frame-logging writer only wraps the selected handle for
+diagnostics; frame output, queued terminal sequences, and teardown remain
+serialized through the same backend. Input and raw-mode handling are unchanged
+and continue to use crossterm's stdin path.
 
 Validation in a pseudo-terminal with the built oyui binary:
 
