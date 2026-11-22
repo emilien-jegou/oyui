@@ -48,8 +48,8 @@ pub struct FileTree {
     pub nodes: Vec<TreeNode>,
     pub is_file_diff: bool,
     version: u64,
-    /// Path → child-index path from the root, maintained by `insert_file` so
-    /// `file()`/`file_mut()` skip the full recursive walk.
+    /// Path → node-index path from the root, maintained by `insert_file` so
+    /// `file()` skips the full recursive walk.
     index: std::collections::HashMap<PathBuf, Vec<usize>>,
 }
 
@@ -82,11 +82,11 @@ impl FileTree {
         self.node_at(path)?.as_file()
     }
 
-    /// Navigates the tree along a child-index path from the root.
+    /// Navigates the tree along a node-index path, including its root node.
     fn node_at(&self, path: &[usize]) -> Option<&TreeNode> {
-        let nodes = &self.nodes[..];
-        let mut node = nodes.first()?;
-        for &idx in path {
+        let (&root_idx, child_indices) = path.split_first()?;
+        let mut node = self.nodes.get(root_idx)?;
+        for &idx in child_indices {
             let d = node.as_directory()?;
             node = d.children.get(idx)?;
         }
@@ -400,6 +400,7 @@ impl FileTree {
             let is_last = i == rel_path.components().count() - 1;
 
             if is_last {
+                let idx = current_nodes.len();
                 current_nodes.push(TreeNode::File(TreeNodeFile {
                     name: comp.to_string_lossy().into_owned(),
                     path: current_path.clone(),
@@ -407,6 +408,7 @@ impl FileTree {
                     right_path: right_path.clone(),
                     state: StagingState::Unstaged,
                 }));
+                nav_path.push(idx);
                 self.index.insert(rel_path, nav_path);
                 return;
             }
@@ -589,5 +591,47 @@ mod tests {
         assert!(file.right_path.is_none(), "right must be treated as absent");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn file_index_handles_multiple_root_files_and_directories() {
+        let mut tree = FileTree::default();
+        tree.insert_file(
+            PathBuf::from("report.md"),
+            Some(PathBuf::from("left/report.md")),
+            Some(PathBuf::from("right/report.md")),
+        );
+        tree.insert_file(
+            PathBuf::from("crates/oyui/src/commons/frame_log.rs"),
+            Some(PathBuf::from("left/crates/oyui/src/commons/frame_log.rs")),
+            Some(PathBuf::from("right/crates/oyui/src/commons/frame_log.rs")),
+        );
+        tree.insert_file(
+            PathBuf::from("roadmap.md"),
+            Some(PathBuf::from("left/roadmap.md")),
+            Some(PathBuf::from("right/roadmap.md")),
+        );
+
+        assert_eq!(
+            tree.find_paths(Path::new("crates/oyui/src/commons/frame_log.rs")),
+            Some((
+                Some(PathBuf::from("left/crates/oyui/src/commons/frame_log.rs")),
+                Some(PathBuf::from("right/crates/oyui/src/commons/frame_log.rs")),
+            )),
+        );
+        assert_eq!(
+            tree.find_paths(Path::new("report.md")),
+            Some((
+                Some(PathBuf::from("left/report.md")),
+                Some(PathBuf::from("right/report.md")),
+            )),
+        );
+        assert_eq!(
+            tree.find_paths(Path::new("roadmap.md")),
+            Some((
+                Some(PathBuf::from("left/roadmap.md")),
+                Some(PathBuf::from("right/roadmap.md")),
+            )),
+        );
     }
 }
