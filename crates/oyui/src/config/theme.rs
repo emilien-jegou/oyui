@@ -139,11 +139,10 @@ pub struct UiTheme {
     #[builder(default = 0.1)]
     pub file_staged_highlight_opacity: f64,
 
-    #[builder(default = LineHighlightMode::Gradient(3.0))]
+    #[builder(default = LineHighlightMode::Gradient(2.0))]
     pub file_change_highlight: LineHighlightMode,
-    /// Line-level change tint. Light by default (GitHub-like: the background
-    /// wash is subtle and the word layer does the pointing).
-    #[builder(default = 0.06)]
+    /// Line-level change tint, blended against the base background.
+    #[builder(default = 0.1)]
     pub file_change_highlight_opacity: f64,
 
     /// Word-level (inner) highlight for the changed parts of a changed row.
@@ -151,7 +150,7 @@ pub struct UiTheme {
     /// few-chars span reads as noise.
     #[builder(default = LineHighlightMode::Solid)]
     pub file_change_word_highlight: LineHighlightMode,
-    #[builder(default = 0.4)]
+    #[builder(default = 0.2)]
     pub file_change_word_highlight_opacity: f64,
 
     /// Line-level foreground override for changed rows. `None` (default)
@@ -167,9 +166,9 @@ pub struct UiTheme {
     pub add_word_bg: Option<Color>,
     #[builder(default = None)]
     pub del_word_bg: Option<Color>,
-    #[builder(default = None)]
+    #[builder(default = Some(Color::Green))]
     pub add_word_fg: Option<Color>,
-    #[builder(default = None)]
+    #[builder(default = Some(Color::Red))]
     pub del_word_fg: Option<Color>,
 
     /// Conflict accent (markers, frames). Derived from the theme like

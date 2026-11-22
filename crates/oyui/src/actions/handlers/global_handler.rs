@@ -1,5 +1,8 @@
 use crate::actions::handlers::AppActionsHandler;
-use crate::actions::{GlobalActionsHandler, GlobalConfirmMergeWindowEnabledActionsHandler};
+use crate::actions::{
+    CommandsActionsHandler, GlobalActionsHandler, GlobalConfirmMergeWindowEnabledActionsHandler,
+    SessionActionsHandler,
+};
 use crate::app::ui_state::{HelpState, Message, MessageLevel};
 use crate::app::CommandMode;
 
@@ -92,90 +95,6 @@ impl GlobalActionsHandler for AppActionsHandler {
         self.ui.lock().command_mode = CommandMode::Active(String::new());
     }
 
-    fn left_path(&self) -> String {
-        self.left_path.display().to_string()
-    }
-
-    fn right_path(&self) -> String {
-        self.right_path.display().to_string()
-    }
-
-    fn base_path(&self) -> String {
-        self.base_path
-            .as_ref()
-            .map(|p| p.display().to_string())
-            .unwrap_or_default()
-    }
-
-    fn view(&self) -> String {
-        match self.ui.lock().current {
-            crate::view::ViewKind::File => "file".into(),
-            crate::view::ViewKind::Tree => "tree".into(),
-        }
-    }
-
-    fn algorithm(&self) -> String {
-        format!("{:?}", self.algorithm).to_lowercase()
-    }
-
-    fn operation(&self) -> String {
-        self.operation.as_str().to_string()
-    }
-
-    fn writable(&self) -> bool {
-        self.write_target.is_some()
-    }
-
-    fn conflict_count(&self) -> u32 {
-        self.ui
-            .lock()
-            .resolve
-            .as_ref()
-            .map_or(0, |r| r.count() as u32)
-    }
-
-    fn switch(&self, view: String) {
-        let target = match view.to_lowercase().as_str() {
-            "file" => crate::view::ViewKind::File,
-            "tree" => crate::view::ViewKind::Tree,
-            other => {
-                self.set_message(
-                    MessageLevel::Error,
-                    format!("global::switch: unknown view '{other}' (expected 'file' or 'tree')"),
-                );
-                return;
-            }
-        };
-        self.ui.lock().current = target;
-    }
-
-    fn command(&self, cmd: String) {
-        let is_staging = matches!(
-            cmd.trim().split_whitespace().next(),
-            Some("add" | "a" | "unstage" | "u" | "invert" | "i")
-        );
-        if is_staging {
-            if self.reject_read_only() {
-                return;
-            }
-            // Same policy as keybind staging: merge output is driven by
-            // conflict choices alone (finding 6.10).
-            if self.reject_merge() {
-                return;
-            }
-            self.push_undo_snapshot();
-        }
-        let matched = {
-            let mut tree = self.tree.write();
-            let mut ui = self.ui.lock();
-            crate::app::commands::execute(&cmd, &mut tree, &mut ui.tree_view, &self.cache)
-        };
-        if let Some(0) = matched {
-            // A pattern that matched nothing must not read as success.
-            self.set_message(MessageLevel::Info, format!("no files matched '{cmd}'"));
-        }
-    }
-
     fn clear_error(&self) {
         *self.error.write() = None;
     }
@@ -242,6 +161,88 @@ impl GlobalActionsHandler for AppActionsHandler {
             Some(_) => None,
             None => Some(HelpState::default()),
         };
+    }
+}
+
+impl SessionActionsHandler for AppActionsHandler {
+    fn active_view(&self) -> String {
+        match self.ui.lock().current {
+            crate::view::ViewKind::File => "file".into(),
+            crate::view::ViewKind::Tree => "tree".into(),
+        }
+    }
+
+    fn switch(&self, view: String) {
+        let target = match view.to_lowercase().as_str() {
+            "file" => crate::view::ViewKind::File,
+            "tree" => crate::view::ViewKind::Tree,
+            other => {
+                self.set_message(
+                    MessageLevel::Error,
+                    format!("session::switch: unknown view '{other}' (expected 'file' or 'tree')"),
+                );
+                return;
+            }
+        };
+        self.ui.lock().current = target;
+    }
+
+    fn old_path(&self) -> String {
+        self.left_path.display().to_string()
+    }
+
+    fn new_path(&self) -> String {
+        self.right_path.display().to_string()
+    }
+
+    fn base_path(&self) -> String {
+        self.base_path
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default()
+    }
+
+    fn diff_algorithm(&self) -> String {
+        format!("{:?}", self.algorithm).to_lowercase()
+    }
+
+    fn operation(&self) -> String {
+        self.operation.as_str().to_string()
+    }
+
+    fn writable(&self) -> bool {
+        self.write_target.is_some()
+    }
+
+    fn conflict_count(&self) -> u32 {
+        self.ui
+            .lock()
+            .resolve
+            .as_ref()
+            .map_or(0, |r| r.count() as u32)
+    }
+}
+
+impl CommandsActionsHandler for AppActionsHandler {
+    fn run(&self, cmd: String) {
+        let is_staging = matches!(
+            cmd.trim().split_whitespace().next(),
+            Some("add" | "a" | "unstage" | "u" | "invert" | "i")
+        );
+        if is_staging {
+            if self.reject_read_only() || self.reject_merge() {
+                return;
+            }
+            self.push_undo_snapshot();
+        }
+        let matched = {
+            let mut tree = self.tree.write();
+            let mut ui = self.ui.lock();
+            crate::app::commands::execute(&cmd, &mut tree, &mut ui.tree_view, &self.cache)
+        };
+        if let Some(0) = matched {
+            self.set_message(MessageLevel::Info, format!("no files matched '{cmd}'"));
+        }
     }
 }
 

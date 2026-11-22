@@ -98,11 +98,9 @@ pub struct KeybindEntry {
 
 #[derive(Clone)]
 pub struct KeybindRegistry {
-    /// Bindings in registration order; dispatch visits **every** match in
-    /// this order — `Global` and the active view's bindings both fire, and a
-    /// key bound twice runs twice (a script binding on an already-bound key
-    /// extends it instead of shadowing it — see also finding 6.11). The
-    /// registry-level test pins the order.
+    /// Bindings in registration order. Matching global and active-view
+    /// bindings both dispatch; script registrations replace an existing
+    /// binding in their scope.
     pub bindings: Vec<(KeybindMode, KeySource, Vec<ActionTarget>)>,
     /// Optional human labels for script callbacks, keyed by callback id.
     labels: std::collections::HashMap<u64, String>,
@@ -219,6 +217,23 @@ impl KeybindRegistry {
             KeySource::Keybinds(ks) => {
                 ks.0.retain(|k| k.canonical() != target);
                 !ks.0.is_empty()
+            }
+        });
+    }
+
+    /// Removes a binding only from the requested scope.
+    pub fn remove_in_mode(&mut self, mode: KeybindMode, kb: &Keybind) {
+        let target = kb.canonical();
+        self.bindings.retain_mut(|(m, source, _)| {
+            if *m != mode {
+                return true;
+            }
+            match source {
+                KeySource::Keybind(k) => k.canonical() != target,
+                KeySource::Keybinds(ks) => {
+                    ks.0.retain(|k| k.canonical() != target);
+                    !ks.0.is_empty()
+                }
             }
         });
     }

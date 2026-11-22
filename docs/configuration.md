@@ -5,8 +5,9 @@ default path is `~/.config/oyui/config.rn`; override it with `oyui -c <path>`
 or `--config <path>`.
 
 The script's entrypoint is `config()`. It runs once at startup and again on
-every save (hot reload); failed reloads keep the previous keybinds and show the
-compiler error in an overlay.
+every save (hot reload). Compile errors and failed `config()` calls keep the
+last working configuration. Registration errors are reported during load;
+the invalid config is discarded and the last working configuration remains.
 
 ```rune
 pub fn config() {
@@ -22,7 +23,7 @@ See [actions.md](./actions.md) for every function, and
 ## Keybinds
 
 ```rune
-keybind("ctrl-j", || view::file::cursor::down(5));
+keybind::global("ctrl-j", || view::file::cursor::down(5));
 ```
 
 A chord is built from modifiers joined to a key:
@@ -36,28 +37,38 @@ A chord is built from modifiers joined to a key:
 Unknown key names and malformed chords are reported as configuration errors
 rather than silently binding the wrong key.
 
-Binds are **global** unless wrapped in `on_mode`:
+`keybind::in_view` evaluates its closure immediately while registering
+view-specific bindings. It is not a callback that runs when the user changes
+views. Use `keybind::global` for a binding that applies in every view, or
+`keybind::bind` inside a view scope:
 
 ```rune
-on_mode("file", || {
-    keybind("ctrl-j", || view::file::cursor::down(5));
-    keybind("ctrl-k", || view::file::cursor::up(5));
+keybind::in_view("file", || {
+    keybind::bind("ctrl-j", || view::file::cursor::down(5));
+    keybind::bind("ctrl-k", || view::file::cursor::up(5));
 });
 
-on_mode("tree", || {
-    keybind("ctrl-j", || view::tree::cursor::down(5));
+keybind::in_view("tree", || {
+    keybind::bind("ctrl-j", || view::tree::cursor::down(5));
 });
 ```
 
-`on_mode` accepts only `"file"` and `"tree"`; anything else is a load error.
+Views are named `"file"` and `"tree"`; an unknown view is a load error.
+`keybind::bind` replaces an existing binding in its scope (it does not add a
+second callback). A global binding and an active-view binding can both run for
+the same key. A global rebind takes ownership of that key across views; a
+view-scoped rebind replaces only that view's binding.
 
 ### Naming keybinds
 
-Use `keybind_named(chord, label, callback)` to give a bind a readable label
-shown in the help overlay. Plain `keybind` binds appear as `<script>`.
+Use `keybind::named(chord, label, callback)` to give a binding a readable
+label shown in the help overlay. Unlabeled script bindings appear as
+`<script>`. It uses the current registration scope.
 
 ```rune
-keybind_named("ctrl-j", "scroll down 5", || view::file::cursor::down(5));
+keybind::in_view("file", || {
+    keybind::named("ctrl-j", "scroll down 5", || view::file::cursor::down(5));
+});
 ```
 
 ### Seeing all keybinds
@@ -75,39 +86,39 @@ config. The active view is marked `(current)`.
 
 ### Removing default binds
 
-`unbind` removes every binding for a chord (in all modes). It prunes the chord
-from multi-key sources without dropping its siblings:
+Use `keybind::remove_global`, `keybind::remove_from_view`, or
+`keybind::remove_everywhere` to remove a chord at the intended scope:
 
 ```rune
-unbind("s");       // stop the default split binding
-unbind("space");   // stop the default stage binding
+keybind::remove_from_view("file", "s"); // stop file-view split
+keybind::remove_everywhere("space");    // stop staging in both views
 ```
 
-Registering a new callback on an already-bound chord **adds** to it; use
-`unbind` first to replace.
-
-To drop **all** binds (core and custom) and start from a clean slate:
+To drop **all** bindings (built-in and custom) and start from a clean slate:
 
 ```rune
-unbind_all();
-keybind("j", || view::file::cursor::down(1));   // only this binding remains
+keybind::remove_all();
+keybind::global("j", || view::file::cursor::down(1)); // only this binding remains
 ```
 
 To restore the built-in defaults after clearing or overriding them:
 
 ```rune
-unbind_all();
-reset_keybinds();   // back to the default key map
+keybind::remove_all();
+keybind::restore_defaults(); // back to the default key map
 ```
+
+`keybind::list()` returns one string per binding (`scope: keys = labels`) and
+includes built-in and script bindings.
 
 ---
 
 ## Commands
 
-Register commands the `:` prompt (and `global::command`) can run:
+Register commands the `:` prompt and `commands::run` can execute:
 
 ```rune
-command("copy_hunk", |args| {
+commands::register("copy_hunk", |args| {
     if !view::file::inspect::hunk_has() {
         global::error("no hunk under cursor");
         return;
@@ -120,8 +131,8 @@ command("copy_hunk", |args| {
 - The callback receives the raw, untyped argument string (everything after the
   command name).
 - Run it as `:copy_hunk` or from a keybind with
-  `global::command("copy_hunk")`.
-- `command_names()` returns a newline-separated list of registered script
+  `commands::run("copy_hunk")`.
+- `commands::list()` returns a list of registered script
   commands (built-in palette commands are listed in
   [actions.md](./actions.md#palette-commands)).
 
@@ -129,22 +140,25 @@ command("copy_hunk", |args| {
 
 ## Events
 
-React to application events with `on`:
+React to application events with `events::on`:
 
 ```rune
-on("file_opened", || global::notify("opened " + view::file::path()));
-on("quit", || {});
+events::on("file_opened", || global::notify("opened " + view::file::path()));
+events::on("quit", || {});
 ```
 
 | Event | When |
 |---|---|
 | `config_reload` | After a successful configuration reload. |
 | `file_opened` | After a file is opened in the file view. |
-| `view_changed` | When a keybind switches the active pane. |
+| `view_changed` | When the active view changes. |
 | `quit` | Right before the application exits. |
 
-Callbacks are invoked on the main thread and take no arguments; read context
-through the getters (for example `view::file::path()`).
+Callbacks run synchronously on the main thread and take no arguments. Multiple
+callbacks run in registration order; a callback failure stops later callbacks
+for that event and reports an error. `config_reload` fires only after a
+successfully applied configuration. Read context through getters (for example
+`view::file::path()`).
 
 ---
 
@@ -189,29 +203,37 @@ Bulk operations record a single undo point.
 
 ## Analysis
 
-`analysis::files_containing` scans file contents with a
+`analysis::find_files_containing` scans file contents with a
 [Rust `regex`](https://docs.rs/regex) pattern:
 
 ```rune
 // Blocking: runs on the UI thread.
-let matches = analysis::files_containing("TODO|FIXME");
+let matches = analysis::find_files_containing("TODO|FIXME");
 ```
 
-For large repositories use the async form, which runs on the worker thread and
-delivers results to a callback on the main thread:
+The result is a list of paths (not a newline-joined string). The scan reads
+both old and new file contents from disk; unreadable files are skipped. For
+large repositories use the async form, which runs on a worker thread and calls
+back on the main thread with `(matches, error)`:
 
 ```rune
-command("commit_regex", |pattern| {
-    analysis::files_containing_async(pattern, |matches| {
-        for path in matches.split("\n") {
-            if path != "" { view::tree::staging::set(path, true); }
+commands::register("commit_regex", |pattern| {
+    analysis::find_files_containing_async(pattern, |matches, error| {
+        if let Some(message) = error {
+            global::error(message);
+            return;
+        }
+        for path in matches {
+            view::tree::staging::set(path, true);
         }
         global::notify("staged matching files");
     });
 });
 ```
 
-An invalid pattern is reported through `global::error`.
+The synchronous form reports invalid patterns as a transient error and returns
+an empty list. The async callback receives an optional error as its second
+argument.
 
 ---
 
@@ -242,7 +264,21 @@ are no-ops inside conflicts, and conflict colors never reflect staging, so
 identical conflict states always look identical. The written resolution is
 driven by choices alone — to take a resolution back, unfold it to the
 markers.
-`global::conflict_count()` reports how many conflicts were detected.
+`session::conflict_count()` reports how many conflicts were detected.
+
+Conflict choices can also be driven from scripts. Conflict indexes are
+zero-based; `choose` accepts `"ours"`, `"theirs"`, or `"both"` and returns
+`false` when the index, side, or active resolver is invalid:
+
+```rune
+commands::register("take-ours", |args| {
+    let count = view::file::conflict::count();
+    for index in 0..count {
+        view::file::conflict::choose(index, "ours");
+        view::file::conflict::set_folded(index, true);
+    }
+});
+```
 
 Orange is the color of conflict, kept subtle: unfolded conflicts render as
 plain rows (no green/red/blue, no background wash) with orange marker lines
@@ -270,8 +306,8 @@ In a merge session, confirm never runs the two-way staging write; it writes the
 resolved working file, so the merge target is never clobbered.
 
 ```rune
-on("config_reload", || {
-    if global::conflict_count() > 0 {
+events::on("config_reload", || {
+    if session::conflict_count() > 0 {
         global::warn("conflicts remain");
     }
 });

@@ -2,7 +2,8 @@
 
 Oyui's configuration is a [Rune](https://rune-rs.github.io/) script. Every
 feature below is called from your `config()` entrypoint or from a callback
-registered with `keybind`, `command`, or `on`.
+registered with `keybind::global`, `keybind::bind`, `commands::register`, or
+`events::on`.
 
 ```rune
 pub fn config() {
@@ -24,25 +25,15 @@ pub fn config() {
 
 ## `global`
 
-Session-level actions and context.
+Application actions and notifications.
 
 | Function | Returns | Description |
 |---|---|---|
 | `global::quit()` | | Quit the application. |
 | `global::confirm()` | | Confirm the current action; opens the merge window when `confirm_merge_window_enabled` is set. |
-| `global::execute_merge()` | | Apply the staged result and exit. |
+| `global::execute_merge()` | | Apply the selected/staged result and exit. In merge sessions, conflict choices determine output. |
 | `global::open_command_mode()` | | Open the `:` command prompt. |
 | `global::confirm_merge_window_enabled` | `bool` | Whether `confirm()` opens the merge confirmation window. |
-| `global::left_path()` | `String` | Left/old input path. |
-| `global::right_path()` | `String` | Right/new input path. |
-| `global::base_path()` | `String` | Base path, or `""` when unset. |
-| `global::view()` | `String` | Active pane: `"file"` or `"tree"`. |
-| `global::algorithm()` | `String` | Diff algorithm: `histogram`, `myers`, `myersminimal`, `syntaxaware`. |
-| `global::operation()` | `String` | Session kind: `diff` or `merge`. |
-| `global::writable()` | `bool` | Whether confirming writes a result (`false` for read-only viewers like `jj difftool` / `git difftool`). |
-| `global::conflict_count()` | `u32` | Conflicts detected in the merge target (0 when none/not a merge). |
-| `global::switch(view)` | | Switch pane; `view` is `"file"` or `"tree"`. |
-| `global::command(cmd)` | | Run a palette command (see [commands](#palette-commands)). |
 | `global::undo()` | | Undo the last staging mutation. |
 | `global::redo()` | | Redo the last undone staging mutation. |
 | `global::copy(text)` | | Copy `text` to the system clipboard via OSC 52. |
@@ -53,6 +44,63 @@ Session-level actions and context.
 | `global::error(msg)` | | Show a transient error message. |
 | `global::clear_message()` | | Clear the transient message. |
 | `global::clear_error()` | | Clear the persistent configuration-error overlay. |
+
+---
+
+## `session`
+
+| Function | Returns | Description |
+|---|---|---|
+| `session::active_view()` | `String` | Active view: `"file"` or `"tree"`. |
+| `session::switch(view)` | | Switch to `"file"` or `"tree"`. |
+| `session::old_path()` / `new_path()` | `String` | Old/new input path. |
+| `session::base_path()` | `String` | Base path, or `""` when unset. |
+| `session::diff_algorithm()` | `String` | `histogram`, `myers`, `myersminimal`, or `syntaxaware`. |
+| `session::operation()` | `String` | Session kind: `diff` or `merge`. |
+| `session::writable()` | `bool` | Whether confirmation writes a result; false in read-only viewer sessions. |
+| `session::conflict_count()` | `u32` | Detected conflicts (0 when none/not a merge). |
+
+---
+
+## Keybindings
+
+These functions run while `config()` is evaluated. `keybind::in_view(view, cb)`
+evaluates `cb` immediately to scope registrations; it is not a callback for
+view changes. `keybind::bind` binds in the current scope (global outside
+`in_view`), while `keybind::global` always binds globally. New bindings replace
+the prior binding for that chord in their scope. Global and active-view
+bindings can both run for the same key.
+
+| Function | Returns | Description |
+|---|---|---|
+| `keybind::global(chord, cb)` | | Bind globally. |
+| `keybind::bind(chord, cb)` | | Bind in the current scope. |
+| `keybind::named(chord, label, cb)` | | Bind with a help-overlay label. |
+| `keybind::in_view(view, cb)` | | Register bindings for `"file"` or `"tree"`. |
+| `keybind::remove_global(chord)` | | Remove only the global binding. |
+| `keybind::remove_from_view(view, chord)` | | Remove only that view's binding. |
+| `keybind::remove_everywhere(chord)` | | Remove the chord from every scope. |
+| `keybind::remove_all()` | | Remove all built-in and script bindings. |
+| `keybind::restore_defaults()` | | Restore built-ins, discarding custom bindings. |
+| `keybind::list()` | `Vec<String>` | List bindings as `scope: keys = labels` strings. |
+
+Script callbacks must be convertible to Rune's thread-safe callback type; don't
+capture runtime values in callback closures.
+
+---
+
+## Commands and events
+
+| Function | Returns | Description |
+|---|---|---|
+| `commands::register(name, cb)` | | Register a command for the `:` prompt. Receives raw arguments as a string. |
+| `commands::run(text)` | | Run a built-in or registered palette command. |
+| `commands::list()` | `Vec<String>` | Names of registered script commands. |
+| `events::on(name, cb)` | | Register a no-argument event callback. |
+
+Events: `config_reload` (after a successful config apply), `file_opened`,
+`view_changed`, and `quit`. Callbacks run synchronously on the main thread, in
+registration order; if one fails, later callbacks for that event are skipped.
 
 ---
 
@@ -71,19 +119,25 @@ Both apply immediately and affect the tree and file panes.
 
 | Function | Returns | Description |
 |---|---|---|
-| `analysis::files_containing(pattern)` | `String` | Newline-joined paths whose old **or** new side matches the regex. **Blocking** (runs on the UI thread). |
-| `analysis::files_containing_async(pattern, cb)` | | Same, on the worker thread. `cb(matches: String)` receives the newline-joined result. |
+| `analysis::find_files_containing(pattern)` | `Vec<String>` | Paths whose old **or** new disk contents match the regex. **Blocking** (runs on the UI thread). |
+| `analysis::find_files_containing_async(pattern, cb)` | | Same scan on a worker thread. `cb(matches: Vec<String>, error: Option<String>)` runs on the main thread. |
 
 `pattern` is a Rust `regex` pattern. Matching reads file contents from disk
 (both sides of the diff), not the in-memory diff.
 
 ```rune
-analysis::files_containing_async("TODO|FIXME", |matches| {
-    for path in matches.split("\n") {
-        if path != "" { global::warn(path); }
+analysis::find_files_containing_async("TODO|FIXME", |matches, error| {
+    if let Some(message) = error {
+        global::error(message);
+        return;
     }
+    for path in matches { global::warn(path); }
 });
 ```
+
+Unreadable files are skipped. The synchronous form reports invalid regexes as a
+transient error and returns an empty list; the async form passes an optional
+error as its second callback argument.
 
 ---
 
@@ -124,10 +178,11 @@ Every color field below is `{ get; set }` and takes/returns a color string.
 
 `bg`, `fg`, `cursor_bg`, `dim`, `dimmer`, `staged`, `unstaged`, `partial`,
 `dir`, `cmd`, `add_bg`, `del_bg`, `add_fg`, `del_fg`,
-`char_scroll_fg`, `char_trailing_space_fg`, `char_tab_fg`
+`char_scroll_fg`, `char_trailing_space_fg`, `char_tab_fg`, `conflict_fg`
 
-`char_line_split_color` and `char_hunk_split_color` additionally accept `""`
-or `"none"` to clear the override.
+`char_line_split_color`, `char_hunk_split_color`, `conflict_bg`, `add_text_fg`,
+`del_text_fg`, `add_word_bg`, `del_word_bg`, `add_word_fg`, and `del_word_fg`
+also accept `""` or `"none"` to clear the override.
 
 **Color string formats**
 
@@ -153,9 +208,16 @@ or `"none"` to clear the override.
 | `theme::file_staged_highlight_opacity` | `f64` | Gradient opacity for staged lines. |
 | `theme::file_change_highlight` | `LineHighlightMode` | Changed-line highlight. |
 | `theme::file_change_highlight_opacity` | `f64` | Gradient opacity for changed lines. |
+| `theme::file_change_word_highlight` | `LineHighlightMode` | Highlight mode for changed token/word portions inside changed rows. |
+| `theme::file_change_word_highlight_opacity` | `f64` | Opacity for changed token/word highlights. |
 | `theme::file_conflict_highlight` | `LineHighlightMode` | Conflict-block underlay: `None` disables it. |
 | `theme::file_conflict_highlight_opacity` | `f64` | Conflict underlay opacity. |
 | `theme::conflict_bg` | `String` | Underlay color for conflict blocks; `""` derives it from the background (darkened, or lightened when the background is near-black). |
+
+`None` disables that highlight and `Solid` uses a solid fill.
+`Gradient(fraction)` uses a horizontal ramp across the indicated fraction of the
+line; for word highlights it renders as solid because a short token ramp is
+visually noisy. The separate opacity fields control the blend strength.
 
 ### Glyphs and strings
 
@@ -231,14 +293,27 @@ theme::gradient::set(true);
 | `view::file::staging::invert()` | | Invert all selections. |
 | `view::file::staging::state()` | `String` | File staging state: `staged`, `partial`, `unstaged`, `none`. |
 
+Hunk indexes and the `hunk` / `line` arguments to staging operations are
+zero-based. Staging selections describe the two-way diff; merge conflict
+choices are separate and do not stage conflict lines.
+
 ### Conflicts
 
 Merge sessions only. Put the cursor on a conflict side and press `space` to
 fold the conflict with that side; space anywhere on a folded conflict
-expands it back to the markers. There are no conflict-specific actions, and conflict
-hunks are not stageable: `t`, `split` and in-hunk `space` toggles are no-ops
+expands it back to the markers. Conflict hunks are not stageable: `t`, `split` and in-hunk `space` toggles are no-ops
 there, and conflict colors never reflect staging. The written resolution is
 driven by choices alone — to take a resolution back, unfold it.
+
+Scripts can inspect and change choices by zero-based conflict index:
+
+| Function | Returns | Description |
+|---|---|---|
+| `view::file::conflict::count()` | `u32` | Number of conflicts (0 when no resolver is active). |
+| `view::file::conflict::choice(i)` | `Option<String>` | `"ours"`, `"theirs"`, `"both"`, or `None` when unresolved/invalid. |
+| `view::file::conflict::choose(i, side)` | `bool` | Choose `"ours"`, `"theirs"`, or `"both"`; false for invalid input or no resolver. |
+| `view::file::conflict::reset(i)` | `bool` | Clear the choice; unresolved markers remain in output. |
+| `view::file::conflict::set_folded(i, folded)` | `bool` | Set display folding without changing the choice. |
 
 ### Folding and file
 
@@ -267,7 +342,7 @@ driven by choices alone — to take a resolution back, unfold it.
 | `view::file::inspect::is_binary()` | `bool` | Whether the open file is binary. |
 
 ```rune
-command("copy_hunk", |args| {
+commands::register("copy_hunk", |args| {
     if let Some(_hunk) = view::file::cursor::hunk_index() {
         global::copy(view::file::inspect::hunk_text());
         global::notify("hunk copied");
@@ -309,6 +384,8 @@ command("copy_hunk", |args| {
 |---|---|
 | `view::tree::open_selected()` | Open the selected file or toggle the selected directory. |
 | `view::tree::open_file(path)` | Open `path` in the file view. |
+| `view::tree::select_path(path)` | Select a currently visible row; returns whether it was found. |
+| `view::tree::reveal_path(path)` | Expand ancestors and select the row; returns whether it was found. |
 
 ### Selection context
 
@@ -335,10 +412,14 @@ command("copy_hunk", |args| {
 | `view::tree::inspect::file_staging(path)` | `String` | Staging state of `path`. |
 
 ```rune
-command("commit_regex", |pattern| {
-    analysis::files_containing_async(pattern, |matches| {
-        for path in matches.split("\n") {
-            if path != "" { view::tree::staging::set(path, true); }
+commands::register("commit_regex", |pattern| {
+    analysis::find_files_containing_async(pattern, |matches, error| {
+        if let Some(message) = error {
+            global::error(message);
+            return;
+        }
+        for path in matches {
+            view::tree::staging::set(path, true);
         }
         global::notify("staged matching files");
     });
@@ -349,23 +430,23 @@ command("commit_regex", |pattern| {
 
 ## Palette commands
 
-Run with `global::command(cmd)` or from the `:` prompt. Script commands
-registered with `command(...)` are also reachable from the prompt.
+Run with `commands::run(cmd)` or from the `:` prompt. Script commands
+registered with `commands::register(...)` are also reachable from the prompt.
 
 | Command | Description |
 |---|---|
 | `invert` / `i` | Invert staging for every file. |
 | `add <glob>` / `a <glob>` | Stage every file matching the glob. |
 | `unstage <glob>` / `u <glob>` | Unstage every file matching the glob. |
-| `<script-name> [args]` | Invoke a command registered with `command(name, ...)`. |
+| `<script-name> [args]` | Invoke a command registered with `commands::register(name, ...)`. |
 
 ```rune
-global::command("add **/*.md");
+commands::run("add **/*.md");
 ```
 
 ---
 
 ## Default keybindings
 
-Set by the built-in registry and overridable with `keybind`/`unbind`.
+Set by the built-in registry and overridable with the `keybind` functions.
 See [keybindings.md](./keybindings.md) for the full table.

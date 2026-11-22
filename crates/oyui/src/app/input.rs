@@ -61,13 +61,10 @@ impl App {
             drop(ui);
             // Standard keybind handling.
             //
-            // Dispatch semantics (designed; pinned by a registry-level test):
-            // every binding whose mode matches — `Global` and the active
-            // view both apply — and whose key matches fires, in registration
-            // order. A key bound twice therefore runs twice; that is what
-            // lets a script binding extend a default instead of shadowing
-            // it (finding 6.12; the multi-fire of the SAME default is
-            // finding 6.11, still open).
+            // Matching global and active-view bindings both apply, in
+            // registration order. Script registration replaces the prior
+            // binding in its scope; a global binding and a view binding for
+            // the same key remain independently active.
             let active_mode = if self.ui.lock().current == crate::view::ViewKind::File {
                 crate::actions::keybinds::KeybindMode::View(crate::actions::keybinds::View::File)
             } else {

@@ -1,23 +1,23 @@
 // Removing built-in keybindings.
 pub fn config() {
-    // Selectively drop single chords (across every mode).
-    unbind("s");
-    unbind("space");
+    // Remove chords from every scope.
+    keybind::remove_everywhere("s");
+    keybind::remove_everywhere("space");
 
     // `h` and `esc` share one source (close the file view). Unbinding `esc`
     // prunes only that chord and leaves `h` working.
-    unbind("esc");
+    keybind::remove_everywhere("esc");
 
     // Re-add only what you want.
-    on_mode("file", || {
-        keybind("space", || view::file::staging::toggle());
-        keybind("x", || view::file::staging::split());
+    keybind::in_view("file", || {
+        keybind::bind("space", || view::file::staging::toggle());
+        keybind::bind("x", || view::file::staging::split());
     });
 
     // Wipe everything (core + custom) and start clean:
-    // unbind_all();
-    // keybind("j", || view::file::cursor::down(1));
+    // keybind::remove_all();
+    // keybind::bind("j", || view::file::cursor::down(1));
 
     // Restore the built-in defaults after clearing or overriding:
-    // reset_keybinds();
+    // keybind::restore_defaults();
 }

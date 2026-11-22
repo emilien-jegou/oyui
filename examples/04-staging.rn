@@ -1,25 +1,25 @@
 // Staging hunks/lines, bulk operations and undo.
 pub fn config() {
-    on_mode("file", || {
-        keybind("space", || view::file::staging::toggle());
-        keybind("t", || view::file::staging::toggle_line());
-        keybind("s", || view::file::staging::split());
-        keybind("J", || view::file::staging::join());
-        keybind("i", || view::file::staging::invert());
+    keybind::in_view("file", || {
+        keybind::bind("space", || view::file::staging::toggle());
+        keybind::bind("t", || view::file::staging::toggle_line());
+        keybind::bind("s", || view::file::staging::split());
+        keybind::bind("J", || view::file::staging::join());
+        keybind::bind("i", || view::file::staging::invert());
     });
 
-    on_mode("tree", || {
-        keybind("space", || view::tree::staging::toggle_selected());
-        keybind("i", || view::tree::staging::invert());
+    keybind::in_view("tree", || {
+        keybind::bind("space", || view::tree::staging::toggle_selected());
+        keybind::bind("i", || view::tree::staging::invert());
     });
 
-    keybind("u", || global::undo());
-    keybind("ctrl-r", || global::redo());
+    keybind::bind("u", || global::undo());
+    keybind::bind("ctrl-r", || global::redo());
 
     // Palette commands for bulk work.
-    command("stage-tests", |args| view::tree::staging::set_matching("**/*test*", true));
-    command("unstage-all", |args| view::tree::staging::unstage_all());
-    command("stage-src", |args| {
+    commands::register("stage-tests", |args| view::tree::staging::set_matching("**/*test*", true));
+    commands::register("unstage-all", |args| view::tree::staging::unstage_all());
+    commands::register("stage-src", |args| {
         view::tree::staging::set_matching("src/**", true);
         global::notify("staged src/**");
     });

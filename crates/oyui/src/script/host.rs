@@ -207,11 +207,18 @@ fn compile_staging(
     }
     let keybinds = staging.registration.lock().registry.clone();
     let native_error = staging.registration.lock().error.take();
+    if let Some(message) = native_error {
+        return ParkedReload {
+            host: None,
+            keybinds: None,
+            error: Some(ScriptError::new(message)),
+        };
+    }
     info!("Config loaded successfully");
     ParkedReload {
         host: Some(staging),
         keybinds: Some(keybinds),
-        error: native_error.map(ScriptError::new),
+        error: None,
     }
 }
 

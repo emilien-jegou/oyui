@@ -50,6 +50,21 @@ where
     }
 }
 
+impl<T> ScriptRepr for Vec<T>
+where
+    T: ScriptRepr,
+{
+    type Repr = Vec<T::Repr>;
+
+    fn into_repr(self) -> Self::Repr {
+        self.into_iter().map(T::into_repr).collect()
+    }
+
+    fn from_repr(repr: Self::Repr) -> Self {
+        repr.into_iter().map(T::from_repr).collect()
+    }
+}
+
 pub mod reexport {
     pub use rune;
 }

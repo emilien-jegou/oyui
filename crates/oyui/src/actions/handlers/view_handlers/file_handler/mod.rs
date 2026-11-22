@@ -416,3 +416,77 @@ impl ViewFileFoldActionsHandler for AppActionsHandler {
         }
     }
 }
+
+impl ViewFileConflictActionsHandler for AppActionsHandler {
+    fn count(&self) -> u32 {
+        self.ui
+            .lock()
+            .resolve
+            .as_ref()
+            .map_or(0, |state| state.count() as u32)
+    }
+
+    fn choice(&self, index: u32) -> Option<String> {
+        self.ui
+            .lock()
+            .resolve
+            .as_ref()?
+            .choice(index as usize)
+            .map(|side| {
+                match side {
+                    crate::diff::Side::Ours => "ours",
+                    crate::diff::Side::Theirs => "theirs",
+                    crate::diff::Side::Both => "both",
+                }
+                .to_string()
+            })
+    }
+
+    fn choose(&self, index: u32, side: String) -> bool {
+        let side = match side.to_lowercase().as_str() {
+            "ours" => crate::diff::Side::Ours,
+            "theirs" => crate::diff::Side::Theirs,
+            "both" => crate::diff::Side::Both,
+            _ => return false,
+        };
+        let mut ui = self.ui.lock();
+        let Some(state) = ui.resolve.as_mut() else {
+            return false;
+        };
+        let index = index as usize;
+        if index >= state.count() {
+            return false;
+        }
+        state.set_choice(index, side);
+        ui.file_view.mark_dirty();
+        true
+    }
+
+    fn reset(&self, index: u32) -> bool {
+        let mut ui = self.ui.lock();
+        let Some(state) = ui.resolve.as_mut() else {
+            return false;
+        };
+        let index = index as usize;
+        if index >= state.count() {
+            return false;
+        }
+        state.reset_choice(index);
+        ui.file_view.mark_dirty();
+        true
+    }
+
+    fn set_folded(&self, index: u32, folded: bool) -> bool {
+        let mut ui = self.ui.lock();
+        let Some(state) = ui.resolve.as_mut() else {
+            return false;
+        };
+        let index = index as usize;
+        if index >= state.count() {
+            return false;
+        }
+        state.set_folded(index, folded);
+        ui.file_view.mark_dirty();
+        true
+    }
+}

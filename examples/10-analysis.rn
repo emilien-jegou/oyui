@@ -1,13 +1,13 @@
 // Inspecting the open diff and scanning file contents.
 pub fn config() {
     // Current cursor context.
-    command("where", |args| {
+    commands::register("where", |args| {
         global::notify(
             view::file::cursor::kind() + " @ " + view::file::path()
         );
     });
 
-    command("show-stats", |args| {
+    commands::register("show-stats", |args| {
         let stats = view::file::inspect::stats();
         if stats == "" {
             global::warn("no stats");
@@ -16,7 +16,7 @@ pub fn config() {
         }
     });
 
-    command("show-hunk", |args| {
+    commands::register("show-hunk", |args| {
         if view::file::inspect::hunk_has() {
             global::notify(view::file::inspect::hunk_text());
         } else {
@@ -25,18 +25,18 @@ pub fn config() {
     });
 
     // Blocking scan; use commit_regex.rn for the async version.
-    command("find-todo", |args| {
-        let matches = analysis::files_containing("TODO|FIXME|XXX");
-        if matches == "" {
+    commands::register("find-todo", |args| {
+        let matches = analysis::find_files_containing("TODO|FIXME|XXX");
+        if matches.is_empty() {
             global::warn("nothing found");
         } else {
-            global::copy(matches);
+            global::copy(matches.join("\n"));
             global::notify("matches copied");
         }
     });
 
     // Per-file queries straight from the tree.
-    command("selected-stats", |args| {
+    commands::register("selected-stats", |args| {
         let path = view::tree::selected_path();
         if path == "" {
             global::warn("nothing selected");

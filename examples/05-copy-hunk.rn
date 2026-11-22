@@ -1,7 +1,7 @@
 // Copy a hunk or the current path to the system clipboard (OSC 52).
 pub fn config() {
     // Copy the hunk under the cursor. `hunk_index` is `Option`.
-    command("copy_hunk", |args| {
+    commands::register("copy_hunk", |args| {
         if let Some(_hunk) = view::file::cursor::hunk_index() {
             global::copy(view::file::inspect::hunk_text());
             global::notify("hunk copied");
@@ -11,7 +11,7 @@ pub fn config() {
     });
 
     // Copy the unified diff of the open file.
-    command("copy_diff", |args| {
+    commands::register("copy_diff", |args| {
         let text = view::file::inspect::diff_text();
         if text == "" {
             global::warn("no diff to copy");
@@ -22,7 +22,7 @@ pub fn config() {
     });
 
     // Copy the open file path, or the tree selection.
-    command("copy_path", |args| {
+    commands::register("copy_path", |args| {
         let path = view::file::path();
         if path == "" {
             global::copy(view::tree::selected_path());
@@ -32,5 +32,5 @@ pub fn config() {
         global::notify("path copied");
     });
 
-    keybind("Y", || global::command("copy_hunk"));
+    keybind::bind("Y", || commands::run("copy_hunk"));
 }

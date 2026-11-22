@@ -29,7 +29,7 @@ fn load(source: &str) -> (RuneHost, KeybindRegistry, Option<ScriptError>) {
     let _ = fs::remove_file(&path);
     (
         host,
-        outcome.keybinds.expect("load always reports keybinds"),
+        outcome.keybinds.unwrap_or_else(default_keybinds),
         outcome.error,
     )
 }
@@ -95,8 +95,9 @@ fn load_with_worker(source: &str) -> (RuneHost, std::sync::Arc<crate::worker::Ev
 async fn reloading_releases_an_in_flight_request() {
     let source = r#"
         pub fn config() {
-            analysis::files_containing_async("needle", |matches| {
+            analysis::find_files_containing_async("needle", |matches, error| {
                 let _ = matches;
+                let _ = error;
             });
         }
     "#;
@@ -139,9 +140,9 @@ fn script_keybinds_arrive_as_opaque_handles_and_still_run() {
     let source = r#"
         pub fn config() {
             theme::file_staged_highlight::set(LineHighlightMode::Gradient(0.05));
-            keybind("ctrl-j", || view::file::cursor::down(5));
-            keybind("ctrl-h", || ());
-            on_mode("file", || { keybind("ctrl-x", || view::file::cursor::up(1)); });
+            keybind::bind("ctrl-j", || view::file::cursor::down(5));
+            keybind::bind("ctrl-h", || ());
+            keybind::in_view("file", || { keybind::bind("ctrl-x", || view::file::cursor::up(1)); });
         }
     "#;
     let (host, reg, error) = load(source);
@@ -164,7 +165,7 @@ fn a_failed_reload_keeps_the_previous_callbacks_alive() {
     let (mut host, reg, error) = load(
         r#"
         pub fn config() {
-            keybind("ctrl-h", || ());
+            keybind::bind("ctrl-h", || ());
         }
     "#,
     );
@@ -197,10 +198,10 @@ fn a_failed_reload_keeps_the_previous_callbacks_alive() {
 }
 
 #[test]
-fn unknown_modes_are_reported_and_ignored() {
+fn unknown_view_scopes_are_reported_and_ignored() {
     let source = r#"
         pub fn config() {
-            on_mode("nope", || { keybind("ctrl-bad", || view::file::cursor::up(1)); });
+            keybind::in_view("nope", || { keybind::bind("ctrl-bad", || view::file::cursor::up(1)); });
         }
     "#;
     let (_host, reg, error) = load(source);
@@ -219,7 +220,7 @@ fn unknown_modes_are_reported_and_ignored() {
 fn multi_modifier_keybinds_are_bound() {
     let source = r#"
         pub fn config() {
-            keybind("ctrl-shift-j", || view::file::cursor::down(1));
+            keybind::bind("ctrl-shift-j", || view::file::cursor::down(1));
         }
     "#;
     let (_host, reg, error) = load(source);
@@ -233,7 +234,7 @@ fn multi_modifier_keybinds_are_bound() {
 fn invalid_keybind_names_are_reported() {
     let source = r#"
         pub fn config() {
-            keybind("bogus", || ());
+            keybind::bind("bogus", || ());
         }
     "#;
     let (_host, _reg, error) = load(source);
@@ -247,10 +248,49 @@ fn invalid_keybind_names_are_reported() {
 }
 
 #[test]
-fn unbind_removes_a_default_binding() {
+fn registration_errors_discard_the_new_config() {
+    let (mut host, registry, error) = load(
+        r#"
+        pub fn config() {
+            keybind::global("ctrl-h", || ());
+        }
+    "#,
+    );
+    assert!(error.is_none());
+    let old_id = callback_id(&registry, KeybindMode::Global, "ctrl-h").unwrap();
+
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!(
+        "oyui_script_bad_bind_{}_{n}.rn",
+        std::process::id()
+    ));
+    fs::write(
+        &path,
+        r#"pub fn config() { keybind::global("bogus", || ()); }"#,
+    )
+    .unwrap();
+    let outcome = host.load(
+        &&path,
+        &ScriptContext {
+            handler: BoxedHandler::empty(),
+            worker: None,
+        },
+    );
+    let _ = fs::remove_file(path);
+
+    assert!(outcome.error.is_some());
+    assert!(
+        outcome.keybinds.is_none(),
+        "invalid config must not be adopted"
+    );
+    host.call(old_id).expect("previous callback remains active");
+}
+
+#[test]
+fn remove_everywhere_removes_a_default_binding() {
     let source = r#"
         pub fn config() {
-            unbind("s");
+            keybind::remove_everywhere("s");
         }
     "#;
     let (_host, reg, error) = load(source);
@@ -259,28 +299,49 @@ fn unbind_removes_a_default_binding() {
     let target = Keybind::parse("s");
     assert!(
         !reg.bindings.iter().any(|(_, k, _)| k.binds(&target)),
-        "unbind('s') must drop the default split binding"
+        "remove_everywhere('s') must drop the default split binding"
     );
 }
 
 #[test]
-fn unbind_all_clears_core_bindings() {
+fn remove_from_view_preserves_other_scopes() {
+    let (_, reg, error) = load(
+        r#"
+        pub fn config() {
+            keybind::remove_from_view("file", "space");
+        }
+    "#,
+    );
+    assert!(error.is_none());
+    let space = Keybind::parse("space");
+    assert!(!reg
+        .bindings
+        .iter()
+        .any(|(mode, keys, _)| { *mode == KeybindMode::View(View::File) && keys.binds(&space) }));
+    assert!(reg
+        .bindings
+        .iter()
+        .any(|(mode, keys, _)| { *mode == KeybindMode::View(View::Tree) && keys.binds(&space) }));
+}
+
+#[test]
+fn remove_all_clears_core_bindings() {
     let source = r#"
-        pub fn config() { unbind_all(); }
+        pub fn config() { keybind::remove_all(); }
     "#;
     let (_host, reg, error) = load(source);
 
     assert!(error.is_none(), "{:?}", error.map(|e| e.message));
     assert!(
         reg.bindings.is_empty(),
-        "unbind_all must remove every core binding"
+        "remove_all must remove every core binding"
     );
 }
 
 #[test]
-fn reset_keybinds_restores_defaults() {
+fn restore_defaults_restores_builtins() {
     let source = r#"
-        pub fn config() { unbind_all(); reset_keybinds(); }
+        pub fn config() { keybind::remove_all(); keybind::restore_defaults(); }
     "#;
     let (_host, reg, error) = load(source);
 
@@ -289,14 +350,14 @@ fn reset_keybinds_restores_defaults() {
 }
 
 #[test]
-fn keybinds_can_be_added_after_unbind_all() {
+fn keybinds_can_be_added_after_remove_all() {
     let source = r#"
-        pub fn config() { unbind_all(); keybind("ctrl-x", || ()); }
+        pub fn config() { keybind::remove_all(); keybind::bind("ctrl-x", || ()); }
     "#;
     let (_host, reg, error) = load(source);
 
     assert!(error.is_none(), "{:?}", error.map(|e| e.message));
-    callback_id(&reg, KeybindMode::Global, "ctrl-x").expect("bound after unbind_all");
+    callback_id(&reg, KeybindMode::Global, "ctrl-x").expect("bound after remove_all");
     assert_eq!(reg.bindings.len(), 1);
 }
 
@@ -304,7 +365,7 @@ fn keybinds_can_be_added_after_unbind_all() {
 fn named_keybinds_carry_their_label() {
     let source = r#"
         pub fn config() {
-            keybind_named("ctrl-y", "my custom action", || ());
+            keybind::named("ctrl-y", "my custom action", || ());
         }
     "#;
     let (_host, reg, error) = load(source);
@@ -322,8 +383,8 @@ fn named_keybinds_carry_their_label() {
 fn commands_and_events_round_trip() {
     let source = r#"
         pub fn config() {
-            command("go-down", |args| view::file::cursor::down(5));
-            on("file_opened", || ());
+            commands::register("go-down", |args| view::file::cursor::down(5));
+            events::on("file_opened", || ());
         }
     "#;
     let (host, _reg, error) = load(source);
@@ -364,16 +425,25 @@ fn bundled_examples_compile() {
 fn the_full_api_surface_compiles() {
     let source = r#"
         pub fn config() {
-            let _ = global::left_path();
-            let _ = global::right_path();
-            let _ = global::base_path();
-            let _ = global::view();
-            let _ = global::algorithm();
-            let _ = global::operation();
-            let _ = global::writable();
-            let _ = global::conflict_count();
-            global::switch("tree");
-            global::command("invert");
+            let _ = session::active_view();
+            let _ = session::old_path();
+            let _ = session::new_path();
+            let _ = session::base_path();
+            let _ = session::diff_algorithm();
+            let _ = session::operation();
+            let _ = session::writable();
+            let _ = session::conflict_count();
+            let _ = view::file::conflict::count();
+            let _ = view::file::conflict::choice(0);
+            let _ = view::file::conflict::choose(0, "ours");
+            let _ = view::file::conflict::reset(0);
+            let _ = view::file::conflict::set_folded(0, true);
+            for index in 0..view::file::conflict::count() {
+                view::file::conflict::choose(index, "ours");
+                view::file::conflict::set_folded(index, true);
+            }
+            session::switch("tree");
+            commands::run("invert");
             global::clear_error();
             global::notify("hi");
             global::warn("careful");
@@ -384,9 +454,10 @@ fn the_full_api_surface_compiles() {
             global::undo();
             global::redo();
 
-            let _ = analysis::files_containing("needle");
-            analysis::files_containing_async("needle", |matches| {
+            let _ = analysis::find_files_containing("needle");
+            analysis::find_files_containing_async("needle", |matches, error| {
                 let _ = matches;
+                let _ = error;
             });
 
             let _ = settings::scrolloff::get();
@@ -439,6 +510,8 @@ fn the_full_api_surface_compiles() {
             let _ = view::tree::selected_is_dir();
             let _ = view::tree::selected_staging();
             let _ = view::tree::is_folded("a");
+            let _ = view::tree::select_path("a");
+            let _ = view::tree::reveal_path("a");
             view::tree::directory::expand_all();
             view::tree::directory::collapse_all();
             view::tree::staging::set("a", true);
@@ -459,14 +532,18 @@ fn the_full_api_surface_compiles() {
             let _ = ui::status::get();
             ui::status::set("ready");
 
-            keybind("ctrl-shift-j", || view::file::cursor::down(1));
-            keybind_named("ctrl-y", "labelled", || ());
-            unbind("s");
-            unbind_all();
-            reset_keybinds();
-            command("go", |args| global::command("invert"));
-            let _ = command_names();
-            on("file_opened", || global::clear_error());
+            keybind::bind("ctrl-shift-j", || view::file::cursor::down(1));
+            keybind::global("ctrl-shift-k", || view::file::cursor::up(1));
+            keybind::named("ctrl-y", "labelled", || ());
+            keybind::remove_global("ctrl-y");
+            keybind::remove_from_view("file", "ctrl-y");
+            keybind::remove_everywhere("s");
+            keybind::remove_all();
+            keybind::restore_defaults();
+            let _ = keybind::list();
+            commands::register("go", |args| commands::run("invert"));
+            let _ = commands::list();
+            events::on("file_opened", || global::clear_error());
         }
     "#;
     let (_host, _reg, error) = load(source);

@@ -1,4 +1,4 @@
-//! Script natives: the `keybind` and `on_mode` functions exposed to scripts.
+//! Registration natives for script keybindings, commands, events, and analysis.
 
 use super::host::RuneHost;
 use super::{CallbackId, PendingScriptResult, ScriptError};
@@ -18,7 +18,7 @@ use tracing::error;
 pub(super) struct Registration {
     pub(super) registry: KeybindRegistry,
     pub(super) mode: Option<KeybindMode>,
-    /// First native-side failure (bad keybind / `on_mode` panic); surfaced by load.
+    /// First native-side registration failure; surfaced by load.
     pub(super) error: Option<String>,
 }
 
@@ -32,7 +32,7 @@ impl Registration {
     }
 }
 
-/// Stores `cb` and binds it to `kb` under the mode currently being wired.
+/// Stores `cb` and binds it to `kb` under the active registration scope.
 fn register_keybind(
     kb: &str,
     label: Option<String>,
@@ -40,6 +40,7 @@ fn register_keybind(
     callbacks: &Mutex<HashMap<CallbackId, SyncFunction>>,
     next_id: &AtomicU64,
     registration: &Mutex<Registration>,
+    forced_mode: Option<KeybindMode>,
 ) {
     let cb = match cb.into_sync() {
         Ok(cb) => cb,
@@ -65,7 +66,7 @@ fn register_keybind(
 
     let mut state = registration.lock();
     let registry = std::mem::take(&mut state.registry);
-    let mode = state.mode.clone();
+    let mode = forced_mode.or_else(|| state.mode.clone());
     state.registry = match mode {
         Some(mode) => registry.register_fn_mode(mode, kb, id),
         None => registry.register_fn(kb, id),
@@ -75,13 +76,14 @@ fn register_keybind(
     }
 }
 
-/// Runs `cb` with `mode` active so nested keybinds land in that scope.
-fn run_scoped(mode: &str, cb: Function, registration: &Mutex<Registration>) {
+/// Runs `cb` while registrations are scoped to the selected view.
+fn register_in_view(mode: &str, cb: Function, registration: &Mutex<Registration>) {
     let mode = match mode.to_lowercase().as_str() {
         "file" => KeybindMode::View(View::File),
         "tree" => KeybindMode::View(View::Tree),
         other => {
-            let message = format!("on_mode: unknown view '{other}' (expected 'file' or 'tree')");
+            let message =
+                format!("keybind::in_view: unknown view '{other}' (expected 'file' or 'tree')");
             error!("{message}");
             registration.lock().error.get_or_insert(message);
             return;
@@ -93,16 +95,22 @@ fn run_scoped(mode: &str, cb: Function, registration: &Mutex<Registration>) {
     registration.lock().mode = None;
 
     if let Err(e) = result.into_result() {
-        let message = format!("on_mode callback failed: {e}");
+        let message = format!("keybind::in_view callback failed: {e}");
         error!("{message}");
         registration.lock().error.get_or_insert(message);
     }
 }
 
-/// Removes every binding for `kb` from the registry being built.
-fn unbind(kb: &str, registration: &Mutex<Registration>) {
+/// Removes a binding from the requested scope.
+fn remove_binding(kb: &str, mode: Option<KeybindMode>, registration: &Mutex<Registration>) {
     match Keybind::parse_checked(kb) {
-        Ok(kb) => registration.lock().registry.remove(&kb),
+        Ok(kb) => {
+            let mut state = registration.lock();
+            match mode {
+                Some(mode) => state.registry.remove_in_mode(mode, &kb),
+                None => state.registry.remove(&kb),
+            }
+        }
         Err(message) => {
             error!("{message}");
             registration.lock().error.get_or_insert(message);
@@ -110,7 +118,7 @@ fn unbind(kb: &str, registration: &Mutex<Registration>) {
     }
 }
 
-/// Stores `cb` as a named command the `:` palette can run.
+/// Stores `cb` as a registered command the `:` palette can run.
 fn register_command(
     name: &str,
     cb: Function,
@@ -129,13 +137,23 @@ fn register_command(
     }
 }
 
-/// Stores `cb` to run whenever `event` is emitted.
+/// Stores `cb` to run whenever a known application event is emitted.
 fn register_event(
     event: &str,
     cb: Function,
     events: &Mutex<HashMap<String, Vec<Arc<SyncFunction>>>>,
     registration: &Mutex<Registration>,
 ) {
+    const KNOWN_EVENTS: &[&str] = &["config_reload", "file_opened", "view_changed", "quit"];
+    if !KNOWN_EVENTS.contains(&event) {
+        let message = format!(
+            "unknown event '{event}' (expected one of: {})",
+            KNOWN_EVENTS.join(", ")
+        );
+        error!("{message}");
+        registration.lock().error.get_or_insert(message);
+        return;
+    }
     match cb.into_sync() {
         Ok(cb) => {
             events
@@ -161,94 +179,157 @@ pub(super) fn build_context(
     let mut context = Context::with_default_modules()?;
     context.install(super::highlight::base_module()?)?;
 
-    let mut m = Module::new();
-
     let callbacks = Arc::clone(&host.callbacks);
     let next_id = Arc::clone(&host.next_id);
     let registration = Arc::clone(&host.registration);
-    m.function("keybind", move |kb: String, cb: Function| {
-        register_keybind(&kb, None, cb, &callbacks, &next_id, &registration);
+    let mut m = Module::with_item(["keybind"])?;
+    m.function("global", move |kb: String, cb: Function| {
+        register_keybind(
+            &kb,
+            None,
+            cb,
+            &callbacks,
+            &next_id,
+            &registration,
+            Some(KeybindMode::Global),
+        );
     })
     .build()?;
-
     let callbacks = Arc::clone(&host.callbacks);
     let next_id = Arc::clone(&host.next_id);
     let registration = Arc::clone(&host.registration);
-    m.function(
-        "keybind_named",
-        move |kb: String, label: String, cb: Function| {
-            register_keybind(&kb, Some(label), cb, &callbacks, &next_id, &registration);
-        },
-    )
-    .build()?;
-
-    let registration = Arc::clone(&host.registration);
-    m.function("on_mode", move |mode: String, cb: Function| {
-        run_scoped(&mode, cb, &registration)
+    m.function("bind", move |kb: String, cb: Function| {
+        register_keybind(&kb, None, cb, &callbacks, &next_id, &registration, None);
     })
     .build()?;
-
+    let callbacks = Arc::clone(&host.callbacks);
+    let next_id = Arc::clone(&host.next_id);
     let registration = Arc::clone(&host.registration);
-    m.function("unbind", move |kb: String| {
-        unbind(&kb, &registration);
+    m.function("named", move |kb: String, label: String, cb: Function| {
+        register_keybind(
+            &kb,
+            Some(label),
+            cb,
+            &callbacks,
+            &next_id,
+            &registration,
+            None,
+        );
     })
     .build()?;
-
     let registration = Arc::clone(&host.registration);
-    m.function("unbind_all", move || {
-        registration.lock().registry.clear();
+    m.function("in_view", move |view: String, cb: Function| {
+        register_in_view(&view, cb, &registration)
     })
     .build()?;
-
     let registration = Arc::clone(&host.registration);
-    m.function("reset_keybinds", move || {
-        registration.lock().registry.reset();
+    m.function("remove_global", move |kb: String| {
+        remove_binding(&kb, Some(KeybindMode::Global), &registration)
     })
     .build()?;
+    let registration = Arc::clone(&host.registration);
+    m.function("remove_from_view", move |view: String, kb: String| {
+        let mode = match view.to_lowercase().as_str() {
+            "file" => Some(KeybindMode::View(View::File)),
+            "tree" => Some(KeybindMode::View(View::Tree)),
+            _ => None,
+        };
+        if let Some(mode) = mode {
+            remove_binding(&kb, Some(mode), &registration);
+        } else {
+            let message = format!("keybind::remove_from_view: unknown view '{view}'");
+            registration.lock().error.get_or_insert(message);
+        }
+    })
+    .build()?;
+    let registration = Arc::clone(&host.registration);
+    m.function("remove_everywhere", move |kb: String| {
+        remove_binding(&kb, None, &registration)
+    })
+    .build()?;
+    let registration = Arc::clone(&host.registration);
+    m.function("remove_all", move || registration.lock().registry.clear())
+        .build()?;
+    let registration = Arc::clone(&host.registration);
+    m.function("restore_defaults", move || {
+        registration.lock().registry.reset()
+    })
+    .build()?;
+    let registration = Arc::clone(&host.registration);
+    m.function("list", move || -> Vec<String> {
+        registration
+            .lock()
+            .registry
+            .entries()
+            .into_iter()
+            .map(|entry| {
+                let scope = match entry.mode {
+                    KeybindMode::Global => "global",
+                    KeybindMode::View(View::File) => "file",
+                    KeybindMode::View(View::Tree) => "tree",
+                };
+                format!(
+                    "{scope}: {} = {}",
+                    entry.keys.join(", "),
+                    entry.labels.join(", ")
+                )
+            })
+            .collect()
+    })
+    .build()?;
+    context.install(m)?;
 
     let commands = Arc::clone(&host.commands);
     let registration = Arc::clone(&host.registration);
-    m.function("command", move |name: String, cb: Function| {
+    let mut m = Module::with_item(["commands"])?;
+    m.function("register", move |name: String, cb: Function| {
         register_command(&name, cb, &commands, &registration);
     })
     .build()?;
+    let commands = Arc::clone(&host.commands);
+    m.function("list", move || -> Vec<String> {
+        let mut names: Vec<String> = commands.lock().keys().cloned().collect();
+        names.sort_unstable();
+        names
+    })
+    .build()?;
+    context.install(m)?;
 
     let events = Arc::clone(&host.events);
     let registration = Arc::clone(&host.registration);
+    let mut m = Module::with_item(["events"])?;
     m.function("on", move |event: String, cb: Function| {
         register_event(&event, cb, &events, &registration);
     })
     .build()?;
-
-    // Discoverability: names of every script-registered `command`.
-    let commands = Arc::clone(&host.commands);
-    m.function("command_names", move || -> String {
-        let mut names: Vec<String> = commands.lock().keys().cloned().collect();
-        names.sort_unstable();
-        names.join("\n")
-    })
-    .build()?;
-
     context.install(m)?;
 
     // Off-thread analysis native; always registered so the LSP can see it,
     // but a no-op when there is no worker.
     let pending = Arc::clone(&host.pending);
+    let registration = Arc::clone(&host.registration);
     let mut m = Module::with_item(["analysis"])?;
     m.function(
-        "files_containing_async",
+        "find_files_containing_async",
         move |pattern: String, cb: Function| {
             let Some(worker) = &worker else {
-                error!("analysis::files_containing_async requires a running worker");
+                error!("analysis::find_files_containing_async requires a running worker");
                 return;
             };
             let Ok(cb) = cb.into_sync() else {
-                error!("analysis callback captures a non-constant value; dropped");
+                let message =
+                    "analysis callback captures a non-constant value; dropped".to_string();
+                error!("{message}");
+                registration.lock().error.get_or_insert(message);
                 return;
             };
             match worker.ask(crate::worker::tasks::analysis::AnalysisReq { pattern }) {
                 Ok(reply) => pending.lock().push(Box::new(PendingAnalysis { reply, cb })),
-                Err(e) => error!("analysis request failed: {e}"),
+                Err(e) => {
+                    let message = format!("analysis request failed: {e}");
+                    error!("{message}");
+                    registration.lock().error.get_or_insert(message);
+                }
             }
         },
     )
@@ -274,7 +355,7 @@ impl PendingScriptResult for PendingAnalysis {
         let answer = self.reply.try_recv()?;
         Some(
             self.cb
-                .call::<()>((answer.matches.join("\n"),))
+                .call::<()>((answer.matches, answer.error))
                 .into_result()
                 .map_err(|e| ScriptError::new(format!("analysis callback failed: {e}"))),
         )

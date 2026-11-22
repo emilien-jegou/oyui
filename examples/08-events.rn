@@ -2,18 +2,18 @@
 //
 // Events: config_reload, file_opened, view_changed, quit.
 pub fn config() {
-    on("config_reload", || {
+    events::on("config_reload", || {
         global::notify("config reloaded");
     });
 
-    on("file_opened", || {
+    events::on("file_opened", || {
         global::notify("opened " + view::file::path());
     });
 
-    on("view_changed", || {
-        global::warn("view: " + global::view());
+    events::on("view_changed", || {
+        global::warn("view: " + session::active_view());
     });
 
     // Runs once on exit; keep it quick.
-    on("quit", || {});
+    events::on("quit", || {});
 }

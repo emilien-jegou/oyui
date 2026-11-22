@@ -34,6 +34,42 @@ impl ViewTreeActionsHandler for AppActionsHandler {
         let _ = self.worker.send(FileOpened { path });
     }
 
+    fn select_path(&self, path: String) -> bool {
+        let target = std::path::PathBuf::from(path);
+        let tree = self.tree.read();
+        let mut ui = self.ui.lock();
+        let rows = ui.tree_view.flat_rows(&tree, &self.cache);
+        let Some(index) = rows.iter().position(|row| row.path == target) else {
+            return false;
+        };
+        ui.tree_view.selected_index = index;
+        ui.tree_view.mark_dirty();
+        drop(ui);
+        self.preload_selected_file();
+        true
+    }
+
+    fn reveal_path(&self, path: String) -> bool {
+        let target = std::path::PathBuf::from(path);
+        let tree = self.tree.read();
+        let mut ui = self.ui.lock();
+        // Expand every ancestor so the target can appear in the flat rows.
+        let mut parent = target.parent();
+        while let Some(path) = parent {
+            ui.tree_view.ui_state.set_folded(path, false);
+            parent = path.parent();
+        }
+        let rows = ui.tree_view.flat_rows(&tree, &self.cache);
+        let Some(index) = rows.iter().position(|row| row.path == target) else {
+            return false;
+        };
+        ui.tree_view.selected_index = index;
+        ui.tree_view.mark_dirty();
+        drop(ui);
+        self.preload_selected_file();
+        true
+    }
+
     fn selected_index(&self) -> u32 {
         self.ui.lock().tree_view.selected_index as u32
     }

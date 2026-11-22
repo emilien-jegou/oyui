@@ -39,6 +39,8 @@ pub fn generate(actions_handler: AppActionsHandler) -> BoxedHandler {
 
     build_handler! {
         global: actions_handler.clone(),
+        session: actions_handler.clone(),
+        commands: actions_handler.clone(),
         theme: theme_handler.clone(),
         settings: actions_handler.clone(),
         analysis: actions_handler.clone(),

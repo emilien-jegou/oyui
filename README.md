@@ -88,16 +88,16 @@ pub fn config() {
   theme::bg::set("#000000");
   theme::file_staged_highlight::set(LineHighlightMode::Gradient(0.05));
 
-  // You can nest config per view with on_mode:
-  on_mode("file", || {
+  // Register view-specific bindings (this closure runs during config loading):
+  keybind::in_view("file", || {
     // keybind can take modifiers: "ctrl", "shift" or "alt"
-    keybind("ctrl-j", || view::file::cursor::down(5));
-    keybind("ctrl-k", || view::file::cursor::up(5));
+    keybind::bind("ctrl-j", || view::file::cursor::down(5));
+    keybind::bind("ctrl-k", || view::file::cursor::up(5));
   });
 
-  on_mode("tree", || {
-    keybind("ctrl-j", || view::tree::cursor::down(5));
-    keybind("ctrl-k", || view::tree::cursor::up(5));
+  keybind::in_view("tree", || {
+    keybind::bind("ctrl-j", || view::tree::cursor::down(5));
+    keybind::bind("ctrl-k", || view::tree::cursor::up(5));
   });
 }
 ```

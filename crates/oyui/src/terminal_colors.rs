@@ -89,11 +89,11 @@ fn parse_channel(c: &str) -> Option<u8> {
 
 /// Reads all incoming terminal response bytes until a quiet period is detected.
 #[cfg(unix)]
-fn read_response_timeout(initial_timeout: Duration) -> Option<Vec<u8>> {
-    use std::os::unix::io::AsRawFd;
-
-    let stdin = std::io::stdin();
-    let fd = stdin.as_raw_fd();
+fn read_response_timeout(
+    initial_timeout: Duration,
+    tty: &mut (impl Read + std::os::fd::AsRawFd),
+) -> Option<Vec<u8>> {
+    let fd = tty.as_raw_fd();
     let mut accumulated = Vec::new();
 
     let mut poll_fd = libc::pollfd {
@@ -110,7 +110,7 @@ fn read_response_timeout(initial_timeout: Duration) -> Option<Vec<u8>> {
 
         if ret > 0 && (poll_fd.revents & libc::POLLIN) != 0 {
             let mut buf = [0; 1024];
-            match std::io::stdin().read(&mut buf) {
+            match tty.read(&mut buf) {
                 Ok(0) => break, // EOF
                 Ok(n) => {
                     accumulated.extend_from_slice(&buf[..n]);
@@ -130,21 +130,67 @@ fn read_response_timeout(initial_timeout: Duration) -> Option<Vec<u8>> {
     }
 }
 
+#[cfg(unix)]
+fn controlling_tty_available() -> bool {
+    std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/tty")
+        .is_ok()
+}
+
+#[cfg(not(unix))]
+fn controlling_tty_available() -> bool {
+    false
+}
+
 #[cfg(not(unix))]
 fn read_response_timeout(_timeout: Duration) -> Option<Vec<u8>> {
     None
 }
 
 /// An RAII guard to guarantee raw mode is disabled even if an error is thrown.
-struct RawModeGuard;
+#[cfg(unix)]
+struct RawModeGuard {
+    fd: std::os::fd::RawFd,
+    original: libc::termios,
+}
 
+#[cfg(unix)]
 impl RawModeGuard {
-    fn new() -> eyre::Result<Self> {
-        crossterm::terminal::enable_raw_mode()?;
-        Ok(RawModeGuard)
+    fn new(fd: std::os::fd::RawFd) -> eyre::Result<Self> {
+        let mut original = unsafe { std::mem::zeroed() };
+        if unsafe { libc::tcgetattr(fd, &mut original) } != 0 {
+            return Err(std::io::Error::last_os_error().into());
+        }
+        let mut raw = original;
+        unsafe { libc::cfmakeraw(&mut raw) };
+        if unsafe { libc::tcsetattr(fd, libc::TCSAFLUSH, &raw) } != 0 {
+            return Err(std::io::Error::last_os_error().into());
+        }
+        Ok(Self { fd, original })
     }
 }
 
+#[cfg(unix)]
+impl Drop for RawModeGuard {
+    fn drop(&mut self) {
+        unsafe { libc::tcsetattr(self.fd, libc::TCSAFLUSH, &self.original) };
+    }
+}
+
+#[cfg(not(unix))]
+struct RawModeGuard;
+
+#[cfg(not(unix))]
+impl RawModeGuard {
+    fn new() -> eyre::Result<Self> {
+        crossterm::terminal::enable_raw_mode()?;
+        Ok(Self)
+    }
+}
+
+#[cfg(not(unix))]
 impl Drop for RawModeGuard {
     fn drop(&mut self) {
         let _ = crossterm::terminal::disable_raw_mode();
@@ -257,7 +303,9 @@ pub fn detect_color_mode() -> eyre::Result<TerminalColorMode> {
         return Ok(TerminalColorMode::NoColor);
     }
 
-    if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+    if (!std::io::stdin().is_terminal() || !std::io::stdout().is_terminal())
+        && !controlling_tty_available()
+    {
         // If not running in a terminal, check FORCE_COLOR override
         if let Ok(force_color) = std::env::var("FORCE_COLOR") {
             if force_color == "0" || force_color.eq_ignore_ascii_case("false") {
@@ -297,6 +345,21 @@ pub fn detect_color_mode() -> eyre::Result<TerminalColorMode> {
 
     // If TrueColor capabilities are detected, attempt to retrieve the exact palette values
     if let TerminalColorMode::TrueColor(_) = base_mode {
+        #[cfg(unix)]
+        let mut tty = match std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open("/dev/tty")
+        {
+            Ok(tty) => tty,
+            Err(_) => return Ok(TerminalColorMode::TrueColor(TerminalPalette::default())),
+        };
+        #[cfg(unix)]
+        let _guard = match RawModeGuard::new(std::os::fd::AsRawFd::as_raw_fd(&tty)) {
+            Ok(guard) => guard,
+            Err(_) => return Ok(TerminalColorMode::TrueColor(TerminalPalette::default())),
+        };
+        #[cfg(not(unix))]
         // This runs before the TUI owns the tty (no raw-mode session, no
         // Ratatui backend yet), so the single-writer rule in AGENTS.md does
         // not apply: there is no Ratatui bookkeeping to desync, and the
@@ -316,10 +379,17 @@ pub fn detect_color_mode() -> eyre::Result<TerminalColorMode> {
         }
         query.push_str("\x1b]10;?\x1b\\\x1b]11;?\x1b\\");
 
+        #[cfg(unix)]
+        let out = &mut tty as &mut dyn Write;
+        #[cfg(not(unix))]
         let mut out = std::io::stdout();
         if out.write_all(query.as_bytes()).is_ok() && out.flush().is_ok() {
             let mut palette = TerminalPalette::default();
-            if let Some(data) = read_response_timeout(Duration::from_millis(1000)) {
+            #[cfg(unix)]
+            let response = read_response_timeout(Duration::from_millis(1000), &mut tty);
+            #[cfg(not(unix))]
+            let response = read_response_timeout(Duration::from_millis(1000));
+            if let Some(data) = response {
                 let response = String::from_utf8_lossy(&data).into_owned();
 
                 for chunk in response.split("\x1b]") {

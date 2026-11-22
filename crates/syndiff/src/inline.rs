@@ -107,10 +107,16 @@ pub fn diff_inline(
 
     for hunk in diff.hunks() {
         for idx in hunk.before.clone() {
-            lhs_ranges.push(lhs_tokens[idx as usize].clone());
+            let range = lhs_tokens[idx as usize].clone();
+            if !is_open_delimiter(lhs_source, &range) {
+                lhs_ranges.push(range);
+            }
         }
         for idx in hunk.after.clone() {
-            rhs_ranges.push(rhs_tokens[idx as usize].clone());
+            let range = rhs_tokens[idx as usize].clone();
+            if !is_open_delimiter(rhs_source, &range) {
+                rhs_ranges.push(range);
+            }
         }
     }
 
@@ -199,9 +205,7 @@ fn merge_changed_whitespace(source: &str, ranges: Vec<Range<usize>>) -> Vec<Rang
         match merged.last_mut() {
             Some(last)
                 if range.start <= last.end
-                    || source.get(last.end..range.start).is_some_and(|gap| {
-                        !gap.is_empty() && gap.chars().all(|ch| ch == ' ' || ch == '\t')
-                    }) =>
+                    || joins_changed_tokens(source, last.end..range.start, &range) =>
             {
                 last.end = last.end.max(range.end);
             }
@@ -209,6 +213,26 @@ fn merge_changed_whitespace(source: &str, ranges: Vec<Range<usize>>) -> Vec<Rang
         }
     }
     merged
+}
+
+fn is_open_delimiter(source: &str, range: &Range<usize>) -> bool {
+    source
+        .get(range.clone())
+        .is_some_and(|text| matches!(text, "(" | "[" | "{"))
+}
+
+fn joins_changed_tokens(source: &str, gap: Range<usize>, next: &Range<usize>) -> bool {
+    let Some(gap_text) = source.get(gap) else {
+        return false;
+    };
+    let Some(next_text) = source.get(next.clone()) else {
+        return false;
+    };
+    let only_trivia = !gap_text.is_empty() && gap_text.chars().all(|ch| ch == ' ' || ch == '\t');
+    let opener_before_argument = gap_text.len() == 1
+        && matches!(gap_text, "(" | "[" | "{")
+        && next_text.chars().next().is_some_and(char::is_alphanumeric);
+    only_trivia || opener_before_argument
 }
 
 /// Collects the leaf token ranges of `tree` that intersect `span`.
@@ -472,7 +496,7 @@ mod tests {
                 .iter()
                 .map(|r| &old[r.clone()])
                 .collect::<Vec<_>>(),
-            vec!["terminal_output()?"]
+            vec!["terminal_output", ")?"]
         );
         assert_eq!(
             diff.rhs_ranges
@@ -480,6 +504,30 @@ mod tests {
                 .map(|r| &new[r.clone()])
                 .collect::<Vec<_>>(),
             vec!["Box<dyn Write>"]
+        );
+    }
+
+    #[test]
+    fn changed_call_callee_and_argument_highlight_as_one_expression() {
+        let old = "let terminal_writer = frame_log::CountingWriter::terminal()?;";
+        let new = "let terminal_writer = frame_log::CountingWriter::new(terminal_output()?);";
+        let (lhs_tree, rhs_tree) = (parse(old), parse(new));
+
+        let diff = diff_inline(&lhs_tree, old, 0..old.len(), &rhs_tree, new, 0..new.len());
+
+        assert_eq!(
+            diff.lhs_ranges
+                .iter()
+                .map(|r| &old[r.clone()])
+                .collect::<Vec<_>>(),
+            vec!["terminal"]
+        );
+        assert_eq!(
+            diff.rhs_ranges
+                .iter()
+                .map(|r| &new[r.clone()])
+                .collect::<Vec<_>>(),
+            vec!["new(terminal_output", ")"]
         );
     }
 

@@ -8,10 +8,10 @@ use crate::actions::*;
 use crate::app::ui_state::MessageLevel;
 
 impl AnalysisActionsHandler for AppActionsHandler {
-    fn files_containing(&self, pattern: String) -> String {
+    fn find_files_containing(&self, pattern: String) -> Vec<String> {
         let Ok(re) = regex::Regex::new(&pattern) else {
             self.set_message(MessageLevel::Error, format!("invalid regex '{pattern}'"));
-            return String::new();
+            return Vec::new();
         };
         let tree = self.tree.read();
         tree.files()
@@ -26,7 +26,6 @@ impl AnalysisActionsHandler for AppActionsHandler {
                     })
             })
             .map(|f| f.path.display().to_string())
-            .collect::<Vec<_>>()
-            .join("\n")
+            .collect()
     }
 }

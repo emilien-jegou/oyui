@@ -1,7 +1,8 @@
 # Default keybindings
 
-These are the built-in bindings. Override them with `keybind`, remove one with
-`unbind`, or clear/restore them all with `unbind_all` / `reset_keybinds` (see
+These are the built-in bindings. Replace or remove them with the `keybind::*`
+Rune functions, or clear/restore them all with `keybind::remove_all()` /
+`keybind::restore_defaults()` (see
 [configuration.md](./configuration.md#keybinds)).
 
 ## Global
@@ -34,14 +35,11 @@ Active in every view.
 | `N` | Previous hunk |
 | `ctrl-l`, `right` | Scroll right |
 | `ctrl-h`, `left` | Scroll left |
-| `space` | Toggle hunk staging at the cursor |
+| `space` | Toggle hunk staging; on a merge conflict, choose/fold the side under the cursor (or unfold) |
 | `t` | Toggle line staging |
 | `s` | Split hunk at the cursor |
 | `i` | Invert selections |
 | `z` | Toggle unchanged-context folding |
-| `o` | Fold the conflict at the cursor (ours); press again to expand |
-| `T` | Fold the conflict at the cursor (theirs) |
-| `B` | Fold the conflict at the cursor (both) |
 
 ## Tree view
 

@@ -11,18 +11,6 @@ define_actions! {
         confirm_merge_window_enabled { @getset(bool) }
 
         // Read-only context about the session.
-        left_path(|| -> String)
-        right_path(|| -> String)
-        base_path(|| -> String)
-        view(|| -> String)
-        algorithm(|| -> String)
-        operation(|| -> String)
-        writable(|| -> bool)
-        conflict_count(|| -> u32)
-
-        // Switch the active pane and run a command-palette command.
-        switch(String)
-        command(String)
         clear_error()
 
         // Transient bottom-bar notifications for scripts.
@@ -41,14 +29,26 @@ define_actions! {
         // Toggle the keybinding-help overlay.
         help()
     }
+    session {
+        active_view(|| -> String)
+        switch(String)
+        old_path(|| -> String)
+        new_path(|| -> String)
+        base_path(|| -> String)
+        diff_algorithm(|| -> String)
+        operation(|| -> String)
+        writable(|| -> bool)
+        conflict_count(|| -> u32)
+    }
+    commands {
+        run(String)
+    }
+    analysis {
+        find_files_containing(|String| -> Vec<String>)
+    }
     settings {
         scrolloff { @getset(u32) }
         context_lines { @getset(u32) }
-    }
-    analysis {
-        // Blocking: newline-joined paths whose old/new side matches `pattern`.
-        // Prefer `analysis::files_containing_async` for large trees.
-        files_containing(|String| -> String)
     }
     ui {
         // Per-view hint bar: `set(view, "key=desc key=desc")`, `clear(view)`.
@@ -196,6 +196,13 @@ define_actions! {
                 stats(|| -> String)
                 is_binary(|| -> bool)
             }
+            conflict {
+                count(|| -> u32)
+                choice(|u32| -> Option<String>)
+                choose(|u32, String| -> bool)
+                reset(|u32| -> bool)
+                set_folded(|u32, bool| -> bool)
+            }
         }
         tree {
             cursor {
@@ -224,6 +231,8 @@ define_actions! {
             }
             open_selected()
             open_file(String)
+            select_path(|String| -> bool)
+            reveal_path(|String| -> bool)
 
             // Read-only selection context.
             selected_index(|| -> u32)

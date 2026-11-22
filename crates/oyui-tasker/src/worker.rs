@@ -185,7 +185,11 @@ impl<R> Reply<R> {
     ///
     /// Lets a single-threaded consumer resolve replies alongside its other
     /// work, which is what a UI loop needs when the answer must be delivered on
-    /// the same thread that issued the request.
+    /// the same thread that issued the request. `None` means no answer is
+    /// ready (or the reply was already consumed); it does not release the
+    /// registry's reply slot. Keep this handle and poll again, or drop it to
+    /// cancel and release the slot. Use [`Self::recv`] to wait and release the
+    /// slot as soon as the wait completes.
     pub fn try_recv(&mut self) -> Option<R> {
         self.rx.as_mut()?.try_recv().ok()
     }
