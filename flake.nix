@@ -29,6 +29,7 @@
           cargoLock = {
             lockFile = ./Cargo.lock;
           };
+          dontCargoUseSystemLibs = true;
           doCheck = false;
         };
 
