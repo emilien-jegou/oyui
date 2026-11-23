@@ -1,6 +1,5 @@
 use std::{
-    fs::File,
-    io::{self, BufWriter, Write},
+    io::{self, Write},
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -9,7 +8,6 @@ use std::{
 };
 
 use tracing_error::ErrorLayer;
-use tracing_flame::{FlameLayer, FlushGuard};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
 use typed_builder::TypedBuilder;
 
@@ -49,12 +47,6 @@ impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for SuspendableWriter {
 #[derive(TypedBuilder)]
 pub struct Tracer {
     #[builder(default = false)]
-    pub flamegraph_enable: bool,
-
-    #[builder(default = None)]
-    pub flamegraph_save_file: Option<PathBuf>,
-
-    #[builder(default = false)]
     pub log_enable: bool,
 
     #[builder(default = None)]
@@ -65,7 +57,6 @@ pub struct Tracer {
 }
 
 pub struct TracerGuards {
-    pub flame_guard: Option<FlushGuard<BufWriter<File>>>,
     pub file_guard: Option<tracing_appender::non_blocking::WorkerGuard>,
     pub console_suspended: Arc<AtomicBool>,
 }
@@ -121,21 +112,9 @@ impl Tracer {
             .with(file_layer)
             .with(ErrorLayer::default());
 
-        let mut flame_guard = None;
-        if self.flamegraph_enable {
-            let path = self
-                .flamegraph_save_file
-                .unwrap_or_else(|| "/tmp/oyui.tracing.folded".into());
-
-            let (flame_layer, guard) = FlameLayer::with_file(path)?;
-            registry.with(flame_layer).try_init()?;
-            flame_guard = Some(guard);
-        } else {
-            registry.try_init()?;
-        }
+        registry.try_init()?;
 
         Ok(TracerGuards {
-            flame_guard,
             file_guard,
             console_suspended,
         })

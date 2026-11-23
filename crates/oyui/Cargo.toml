@@ -30,14 +30,11 @@ imara-diff = { workspace = true }
 clap = { workspace = true }
 typed-builder = { workspace = true }
 eyre = { workspace = true }
-tracing-flame = { workspace = true }
 infer = { workspace = true }
 serde = { workspace = true }
 dirs = { workspace = true }
 rune = { workspace = true }
-serde_json = { workspace = true }
 parking_lot = { workspace = true }
-once_cell = { workspace = true }
 paste = { workspace = true }
 scc = { workspace = true }
 libc = { workspace = true }

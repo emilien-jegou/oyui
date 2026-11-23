@@ -289,12 +289,6 @@ pub struct CommonArgs {
     #[arg(short = 'c', long = "config", global = true)]
     pub config: Option<PathBuf>,
 
-    #[arg(long = "flamegraph-enable", global = true)]
-    pub flamegraph_enable: bool,
-
-    #[arg(long = "flamegraph-save-path", global = true)]
-    pub flamegraph_save_file: Option<PathBuf>,
-
     #[arg(long = "log-enable", global = true)]
     pub log_enable: bool,
 

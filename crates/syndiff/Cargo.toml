@@ -62,7 +62,6 @@ tree-sitter-css = { workspace = true, optional = true }
 tree-sitter-bash = { workspace = true, optional = true }
 
 [dev-dependencies]
-indoc = { workspace = true }
 rstest = { workspace = true }
 tree-sitter-rust = { workspace = true }
 tree-sitter-json = { workspace = true }

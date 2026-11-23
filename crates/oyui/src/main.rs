@@ -30,8 +30,6 @@ async fn main() -> Result<ExitCode, Box<dyn Error>> {
     let color_mode = terminal_colors::detect_color_mode()?;
 
     let _trace_guard = commons::tracing::Tracer::builder()
-        .flamegraph_enable(args.common.flamegraph_enable)
-        .flamegraph_save_file(args.common.flamegraph_save_file.clone())
         // Nested invocations (jj spawning oyui as its diff tool) inherit the
         // environment but not our CLI flags, so the file log also honors
         // OYUI_LOG_ENABLE/OYUI_LOG_PATH: the same shell command then traces
